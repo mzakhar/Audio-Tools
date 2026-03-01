@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SYNTH</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="layout">
+    <nav id="sidebar">
+      <button class="tool-btn active" data-tool="synth" title="Synthesizer">
+        <span class="tool-icon">◈</span>
+        <span class="tool-label">SYNTH</span>
+      </button>
+    </nav>
+    <div id="main">
+  <div id="app">
+
+    <header id="header">
+      <div id="title-wrap">
+        <span id="app-title">◈ SYNTH</span>
+      </div>
+      <div id="palette-tabs">
+        <button class="tab active" data-palette="classic">CLASSIC</button>
+        <button class="tab" data-palette="fm">FM SYNTH</button>
+        <button class="tab" data-palette="drum">DRUM MACHINE</button>
+        <button class="tab" data-palette="pad">PAD / AMBIENT</button>
+      </div>
+      <div id="master-vol-wrap">
+        <label class="knob-label" for="master-vol">VOL</label>
+        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8">
+        <span class="knob-val" id="master-vol-display">80</span>
+      </div>
+    </header>
+
+    <div id="record-bar">
+      <button id="rec-btn" class="rec-btn">● REC</button>
+      <span id="rec-timer" class="rec-timer">00:00</span>
+      <span id="rec-status" class="rec-status"></span>
+    </div>
+
+    <section id="knob-panel">
+      <!-- Populated dynamically by app.js -->
+    </section>
+
+    <section id="keyboard-section">
+      <div id="keyboard-wrap">
+        <div id="keyboard"></div>
+      </div>
+      <div id="drum-pads"></div>
+      <div id="keyboard-hint">
+        PC Keys — White: <kbd>a</kbd><kbd>s</kbd><kbd>d</kbd><kbd>f</kbd><kbd>g</kbd><kbd>h</kbd><kbd>j</kbd> &nbsp;|&nbsp; Black: <kbd>w</kbd><kbd>e</kbd><kbd>t</kbd><kbd>y</kbd><kbd>u</kbd> &nbsp;|&nbsp; Upper: <kbd>k</kbd><kbd>l</kbd><kbd>;</kbd><kbd>'</kbd><kbd>z</kbd><kbd>x</kbd><kbd>c</kbd>
+      </div>
+      <div id="drum-hint">
+        PC Keys — <kbd>1</kbd> Kick &nbsp;|&nbsp; <kbd>2</kbd> Snare &nbsp;|&nbsp; <kbd>3</kbd> Hi-Hat &nbsp;|&nbsp; <kbd>4</kbd> Clap
+      </div>
+    </section>
+
+    <section id="sequencer-section">
+      <div id="seq-tracks"></div>
+      <div id="sequencer-controls">
+        <div class="transport">
+          <button id="play-btn" class="transport-btn play">▶ Play</button>
+          <button id="stop-btn" class="transport-btn stop">■ Stop</button>
+          <button id="clear-btn" class="transport-btn clear">✕ Clear</button>
+          <button id="add-track-btn" class="transport-btn">+ Track</button>
+        </div>
+        <div class="bpm-group">
+          <label class="knob-label" for="bpm-slider">BPM</label>
+          <input type="range" id="bpm-slider" min="40" max="220" value="120" step="1">
+          <span class="knob-val" id="bpm-display">120</span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+    </div>
+  </div>
+
+  <script src="js/audio-engine.js"></script>
+  <script src="js/palettes.js"></script>
+  <script src="js/keyboard.js"></script>
+  <script src="js/sequencer.js"></script>
+  <script src="js/recorder.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

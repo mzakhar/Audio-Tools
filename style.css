@@ -1,0 +1,598 @@
+/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d0d0d;
+  --bg2:       #141414;
+  --bg3:       #1c1c1c;
+  --bg4:       #242424;
+  --border:    #2a2a2a;
+  --accent:    #00e5ff;
+  --accent2:   #ff00aa;
+  --accent3:   #39ff14;
+  --text:      #c8c8c8;
+  --text-dim:  #555;
+  --text-bright: #eee;
+  --white-key: #e8e8e8;
+  --black-key: #111;
+  --key-active: #00e5ff;
+  --glow:      0 0 8px #00e5ff, 0 0 16px #00e5ff44;
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-x: hidden;
+}
+
+#layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+#sidebar {
+  width: 72px;
+  flex-shrink: 0;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 4px;
+}
+
+.tool-btn {
+  width: 56px;
+  padding: 10px 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  border-radius: 4px;
+}
+.tool-btn:hover { background: var(--bg3); color: var(--text); }
+.tool-btn.active { background: var(--bg3); border-color: var(--accent); color: var(--accent); }
+.tool-icon { font-size: 20px; }
+.tool-label { font-size: 9px; letter-spacing: 1px; }
+
+#main { flex: 1; overflow-x: hidden; }
+
+#app {
+  display: flex;
+  flex-direction: column;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 12px 40px;
+  gap: 8px;
+}
+
+/* ─── Record Bar ────────────────────────────────────────────────────────────── */
+#record-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rec-btn {
+  background: var(--bg4);
+  border: 1px solid #ff4444;
+  color: #ff4444;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 14px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.1s;
+}
+.rec-btn:hover { background: #ff44441a; }
+.rec-btn.recording { background: #ff4444; color: #000; }
+
+.rec-timer {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  min-width: 40px;
+}
+
+.rec-status {
+  font-size: 11px;
+  color: #ff4444;
+  letter-spacing: 1px;
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────────── */
+#header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+#app-title {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--accent);
+  letter-spacing: 4px;
+  text-shadow: var(--glow);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#palette-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.tab {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  transition: all 0.15s;
+}
+.tab:hover { border-color: var(--accent); color: var(--text); }
+.tab.active {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+  font-weight: bold;
+  box-shadow: var(--glow);
+}
+
+#master-vol-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ─── Knob Panel ───────────────────────────────────────────────────────────── */
+#knob-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  min-height: 80px;
+}
+
+.knob-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+}
+
+.knob-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.knob-val {
+  font-size: 10px;
+  color: var(--accent);
+  min-width: 36px;
+  text-align: center;
+}
+
+.knob-divider {
+  width: 1px;
+  height: 50px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.knob-select-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 80px;
+}
+
+select.knob-select {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+}
+select.knob-select:focus { border-color: var(--accent); }
+
+/* ─── Range Input (Slider) ─────────────────────────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg4);
+  outline: none;
+  cursor: pointer;
+  width: 90px;
+  border: none;
+  position: relative;
+}
+
+/* Fill effect via JS-set CSS variable */
+input[type=range].filled {
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill, 50%),
+    var(--bg4) var(--fill, 50%),
+    var(--bg4) 100%
+  );
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent);
+  border: 2px solid #000;
+  transition: box-shadow 0.1s;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 12px var(--accent), 0 0 20px var(--accent);
+}
+input[type=range]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent);
+  border: 2px solid #000;
+}
+
+/* Master vol slider (wider) */
+#master-vol { width: 70px; }
+#bpm-slider  { width: 120px; }
+
+/* ─── Keyboard Section ─────────────────────────────────────────────────────── */
+#keyboard-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+}
+
+#keyboard-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+#keyboard {
+  position: relative;
+  display: flex;
+  user-select: none;
+  touch-action: none;
+}
+
+/* White keys */
+.key-white {
+  position: relative;
+  width: 44px;
+  height: 130px;
+  background: var(--white-key);
+  border: 1px solid #888;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  transition: background 0.04s;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.key-white:hover { background: #f0f0f0; }
+.key-white.active {
+  background: var(--key-active);
+  box-shadow: 0 0 10px var(--accent), 0 0 2px var(--accent) inset;
+}
+
+/* Black keys */
+.key-black {
+  position: absolute;
+  width: 28px;
+  height: 80px;
+  background: var(--black-key);
+  border: 1px solid #000;
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+  transition: background 0.04s;
+}
+.key-black:hover { background: #222; }
+.key-black.active {
+  background: var(--key-active);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.key-label {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  pointer-events: none;
+  text-transform: uppercase;
+}
+.key-white .key-label { color: #888; }
+.key-black .key-label { color: #555; }
+.key-white.active .key-label,
+.key-black.active .key-label { color: #000; font-weight: bold; }
+
+#keyboard-hint,
+#drum-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+#drum-hint { display: none; }
+#keyboard-hint kbd {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: var(--text);
+}
+
+/* ─── Drum Pads ────────────────────────────────────────────────────────────── */
+#drum-pads {
+  display: none;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.drum-pad {
+  width: 150px;
+  height: 110px;
+  background: var(--bg3);
+  border: 2px solid var(--pad-color, var(--border));
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.06s, box-shadow 0.06s;
+}
+.drum-pad:hover {
+  background: var(--bg4);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pad-color) 40%, transparent);
+}
+.drum-pad.active {
+  background: var(--pad-color);
+  box-shadow: 0 0 18px var(--pad-color), 0 0 40px color-mix(in srgb, var(--pad-color) 50%, transparent);
+}
+
+.drum-pad-label {
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--pad-color);
+  transition: color 0.06s;
+}
+.drum-pad.active .drum-pad-label { color: #000; }
+
+.drum-pad-key {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+.drum-pad.active .drum-pad-key { background: rgba(0,0,0,0.25); border-color: transparent; color: #000a; }
+
+/* ─── Sequencer ────────────────────────────────────────────────────────────── */
+#sequencer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 12px;
+}
+
+#seq-tracks {
+  overflow-x: auto;
+}
+
+.seq-track-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.seq-track-row.header {
+  margin-bottom: 4px;
+}
+
+.seq-ctrl-spacer {
+  width: 164px;
+  flex-shrink: 0;
+}
+
+.seq-track-ctrl {
+  width: 164px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+
+.track-sel {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 2px;
+  cursor: pointer;
+  outline: none;
+}
+.track-sel:focus { border-color: var(--accent); }
+
+.track-pal-sel { width: 46px; flex-shrink: 0; }
+.track-note-sel { flex: 1; min-width: 0; }
+
+.track-remove-btn {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.track-remove-btn:hover { color: #ff4444; }
+
+.seq-steps {
+  display: flex;
+  gap: 3px;
+}
+
+.step-num {
+  width: 34px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+.step-num.beat-marker { color: var(--accent); }
+
+.seq-cell {
+  width: 34px;
+  height: 34px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.08s, border-color 0.08s;
+  border-radius: 2px;
+}
+.seq-cell:hover { border-color: var(--accent); background: #1e1e1e; }
+
+/* beat group separator (every 4 steps) */
+.seq-cell:nth-child(4n+1) { margin-left: 4px; }
+.seq-cell:first-child { margin-left: 0; }
+
+/* Playhead highlight */
+.seq-cell.playing {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+.seq-cell.active.playing {
+  background: #fff;
+  box-shadow: 0 0 10px #fff, 0 0 20px currentColor;
+}
+
+/* Per-palette active colors */
+[data-palette="classic"] .seq-cell.active { background: #00e5ff; border-color: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
+[data-palette="fm"]      .seq-cell.active { background: #aa44ff; border-color: #aa44ff; box-shadow: 0 0 6px #aa44ff; }
+[data-palette="pad"]     .seq-cell.active { background: #4488ff; border-color: #4488ff; box-shadow: 0 0 6px #4488ff; }
+[data-palette="drum"][data-drum="0"] .seq-cell.active { background: #ff4444; border-color: #ff4444; box-shadow: 0 0 6px #ff4444; }
+[data-palette="drum"][data-drum="1"] .seq-cell.active { background: #ffaa00; border-color: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
+[data-palette="drum"][data-drum="2"] .seq-cell.active { background: #39ff14; border-color: #39ff14; box-shadow: 0 0 6px #39ff14; }
+[data-palette="drum"][data-drum="3"] .seq-cell.active { background: #ff00aa; border-color: #ff00aa; box-shadow: 0 0 6px #ff00aa; }
+
+/* ─── Sequencer Controls ───────────────────────────────────────────────────── */
+#sequencer-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.transport {
+  display: flex;
+  gap: 6px;
+}
+
+.transport-btn {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.1s;
+}
+.transport-btn:hover { border-color: var(--accent); color: var(--accent); }
+.transport-btn.play:active, .transport-btn.play.active-btn {
+  background: var(--accent3);
+  color: #000;
+  border-color: var(--accent3);
+  box-shadow: 0 0 8px var(--accent3);
+}
+.transport-btn.stop:hover { border-color: #ff4444; color: #ff4444; }
+.transport-btn.clear:hover { border-color: var(--accent2); color: var(--accent2); }
+
+.bpm-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── Scrollbars ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ─── Utility ──────────────────────────────────────────────────────────────── */
+button { font-family: var(--font-mono); }
