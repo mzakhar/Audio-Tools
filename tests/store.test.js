@@ -73,11 +73,11 @@ describe('ProjectStore', () => {
       expect(ProjectStore.getState().mixer.channels.length).toBe(1)
     })
 
-    it('mixer channel id matches track id', () => {
+    it('mixer channel trackId matches track id', () => {
       ProjectStore.dispatch(AddTrack('audio', 'My Track'))
       const track = ProjectStore.getState().tracks[0]
       const channel = ProjectStore.getState().mixer.channels[0]
-      expect(channel.id).toBe(track.id)
+      expect(channel.trackId).toBe(track.id)
     })
 
     it('multiple AddTrack calls append tracks', () => {
@@ -159,7 +159,7 @@ describe('ProjectStore', () => {
       const trackId = ProjectStore.getState().tracks[0].id
       const clip = { id: 'clip1', startBeat: 0, duration: 8, path: 'audio/sample.wav' }
       ProjectStore.dispatch(AddClip(trackId, clip))
-      ProjectStore.dispatch(TrimClip(trackId, 'clip1', { duration: 4 }))
+      ProjectStore.dispatch(TrimClip(trackId, 'clip1', 0, 4))
       const trimmedClip = ProjectStore.getState().tracks[0].clips[0]
       expect(trimmedClip.duration).toBe(4)
     })
