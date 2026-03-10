@@ -19,11 +19,13 @@ export function validateProjectPath(projectRoot, relativePath) {
 // ---------------------------------------------------------------------------
 const BrowserAdapter = {
   async openProjectFolder() {
-    return await window.showDirectoryPicker({ mode: 'readwrite' })
+    try { return await window.showDirectoryPicker({ mode: 'readwrite' }) }
+    catch (e) { if (e.name === 'AbortError') return null; throw e }
   },
 
   async createProjectFolder() {
-    return await window.showDirectoryPicker({ mode: 'readwrite' })
+    try { return await window.showDirectoryPicker({ mode: 'readwrite' }) }
+    catch (e) { if (e.name === 'AbortError') return null; throw e }
   },
 
   async readProject(dirHandle) {

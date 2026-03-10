@@ -37,6 +37,23 @@ vi.mock('../src/renderer/js/utils/wav-encoder.js', () => ({
   audioBufferToWAV: vi.fn(() => new ArrayBuffer(44))
 }))
 
+// jsdom doesn't provide OfflineAudioContext — supply a minimal stub
+if (typeof globalThis.OfflineAudioContext === 'undefined') {
+  globalThis.OfflineAudioContext = class {
+    constructor(channels, length, sampleRate) {
+      this.channels = channels; this.length = length; this.sampleRate = sampleRate
+      this.destination = {}
+    }
+    createBufferSource() {
+      return { buffer: null, connect: vi.fn(), start: vi.fn() }
+    }
+    startRendering() {
+      return Promise.resolve({ numberOfChannels: 2, length: this.length, sampleRate: this.sampleRate,
+        getChannelData: () => new Float32Array(this.length) })
+    }
+  }
+}
+
 import TimelinePlayer from '../src/renderer/js/playback/timeline-player.js'
 
 function makeAudioStore(buffers = {}) {

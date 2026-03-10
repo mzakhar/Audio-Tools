@@ -320,5 +320,8 @@ function highlightStep(step) {
     .forEach(c => c.classList.add('playing'))
 }
 
-const Sequencer = { init, play, stop, clear, setBPM, addTrack }
+const Sequencer = { init, play, stop, clear, setBPM, addTrack,
+  getBPM() { return bpm },
+  isPlaying() { return isPlaying }
+}
 export default Sequencer

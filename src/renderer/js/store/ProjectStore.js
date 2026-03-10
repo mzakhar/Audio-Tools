@@ -162,7 +162,7 @@ function notify() {
 }
 
 const ProjectStore = {
-  getState() { return _state },
+  getState() { return JSON.parse(JSON.stringify(_state)) },
 
   dispatch(command) {
     const next = command.execute(_state)
@@ -191,6 +191,7 @@ const ProjectStore = {
 
   canUndo() { return _undoStack.length > 0 },
   canRedo() { return _redoStack.length > 0 },
+  getUndoStackSize() { return _undoStack.length },
   getUndoLabel() { return _undoStack.at(-1)?.command.label ?? null },
   getRedoLabel() { return _redoStack.at(-1)?.command.label ?? null },
 
