@@ -8,10 +8,22 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam } from './store/ProjectStore.js'
+import FileAdapter from './io/FileAdapter.js'
+import AudioStore from './audio-store.js'
+import { ArrangementView } from './components/arrangement-view.js'
+import { MixerStrip } from './components/mixer-strip.js'
+import MixerEngine from './audio/mixer-engine.js'
+import TimelinePlayer from './playback/timeline-player.js'
 
 let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
 const activeVoices = {} // midi note → voice object
+
+let _arrangementView = null
+let _mixerStrips = new Map()  // channelId → MixerStrip
+let _currentMode = 'synth'    // 'synth' | 'arrange'
+let _rafId = null
 
 const DRUM_DEFS = [
   { label: 'KICK',   key: '1', color: '#ff4444' },
@@ -337,6 +349,247 @@ function initRecorder() {
   })
 }
 
+// ─── Mode switching ──────────────────────────────────────────────────────────
+function switchMode(mode) {
+  _currentMode = mode
+  const appEl     = document.getElementById('app')
+  const arrangeEl = document.getElementById('arrange-view')
+  document.querySelectorAll('.tool-btn').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.tool === mode)
+  )
+  if (mode === 'arrange') {
+    appEl.style.display = 'none'
+    arrangeEl.style.display = 'flex'
+    startArrangeLoop()
+  } else {
+    appEl.style.display = ''
+    arrangeEl.style.display = 'none'
+    stopArrangeLoop()
+  }
+}
+
+function startArrangeLoop() {
+  if (_rafId) return
+  function loop() {
+    if (_arrangementView) {
+      _arrangementView.setPlayheadBeat(TimelinePlayer.getCurrentBeat(ProjectStore.getState().bpm))
+      _arrangementView.render()
+    }
+    _rafId = requestAnimationFrame(loop)
+  }
+  _rafId = requestAnimationFrame(loop)
+}
+
+function stopArrangeLoop() {
+  if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
+}
+
+// ─── Mixer strip sync ────────────────────────────────────────────────────────
+function syncMixerStrips(state) {
+  const bar = document.getElementById('mixer-bar')
+  if (!bar) return
+  const channelIds = new Set(state.mixer.channels.map(ch => ch.id))
+
+  // Remove strips for deleted channels
+  _mixerStrips.forEach((strip, id) => {
+    if (!channelIds.has(id)) { strip.destroy(); _mixerStrips.delete(id) }
+  })
+
+  // Add/update strips
+  state.mixer.channels.forEach(channel => {
+    const track = state.tracks.find(t => t.mixerChannelId === channel.id)
+    if (_mixerStrips.has(channel.id)) {
+      _mixerStrips.get(channel.id).update(channel, track)
+    } else {
+      const strip = new MixerStrip(bar, {
+        channel, track,
+        onParam: (channelId, param, value) => {
+          ProjectStore.dispatch(SetMixerParam(channelId, param, value))
+          MixerEngine.setVolume(channelId, ProjectStore.getState().mixer.channels.find(c => c.id === channelId)?.volume ?? 1)
+          if (param === 'volume') MixerEngine.setVolume(channelId, value)
+          if (param === 'pan')    MixerEngine.setPan(channelId, value)
+          if (param === 'mute')   MixerEngine.setMute(channelId, value)
+        }
+      })
+      _mixerStrips.set(channel.id, strip)
+    }
+    // Ensure mixer engine channel exists
+    try { MixerEngine.ensureChannel(channel.id) } catch(e) {}
+  })
+}
+
+// ─── Project management ──────────────────────────────────────────────────────
+function setProjectOpen(name) {
+  document.getElementById('project-name').textContent = name || 'Untitled'
+  document.getElementById('save-project-btn').disabled = false
+  document.getElementById('import-audio-btn').disabled = false
+  document.getElementById('bounce-btn').disabled = false
+}
+
+function initProjectBar() {
+  document.getElementById('new-project-btn')?.addEventListener('click', async () => {
+    await ensureAudio()
+    const handle = await FileAdapter.createProjectFolder()
+    if (!handle) return
+    ProjectStore.reset()
+    AudioStore.reset()
+    AudioStore.setProjectDir(handle)
+    await FileAdapter.writeProject(handle, ProjectStore.getState())
+    const name = typeof handle === 'string' ? handle.split(/[\\/]/).pop() : (handle.name ?? 'Project')
+    setProjectOpen(name)
+    syncMixerStrips(ProjectStore.getState())
+    if (_arrangementView) _arrangementView.render()
+  })
+
+  document.getElementById('open-project-btn')?.addEventListener('click', async () => {
+    await ensureAudio()
+    const handle = await FileAdapter.openProjectFolder()
+    if (!handle) return
+    const { state } = await FileAdapter.readProject(handle)
+    ProjectStore.load(state)
+    AudioStore.reset()
+    AudioStore.setProjectDir(handle)
+    // Load all referenced audio files
+    for (const track of state.tracks) {
+      for (const clip of track.clips) {
+        if (clip.type === 'audio' && clip.file) {
+          AudioStore.loadBuffer(clip.file).catch(e => console.warn('Could not load', clip.file, e))
+        }
+      }
+    }
+    const name = typeof handle === 'string' ? handle.split(/[\\/]/).pop() : (handle.name ?? 'Project')
+    setProjectOpen(name)
+    syncMixerStrips(state)
+    if (_arrangementView) _arrangementView.render()
+  })
+
+  document.getElementById('save-project-btn')?.addEventListener('click', async () => {
+    const handle = AudioStore.getProjectDir()
+    if (!handle) return
+    await FileAdapter.writeProject(handle, ProjectStore.getState())
+  })
+
+  document.getElementById('import-audio-btn')?.addEventListener('click', async () => {
+    if (!AudioStore.getProjectDir()) return
+    // In browser: show file picker. In Electron: show open dialog.
+    let fileHandle
+    if (window.electronFS) {
+      const result = await window.electronFS.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'flac', 'ogg', 'aiff'] }]
+      })
+      if (result.canceled || !result.filePaths.length) return
+      fileHandle = result.filePaths[0]
+    } else {
+      [fileHandle] = await window.showOpenFilePicker({
+        types: [{ description: 'Audio Files', accept: { 'audio/*': ['.wav', '.mp3', '.flac', '.ogg'] } }]
+      })
+    }
+    await ensureAudio()
+    const fileKey = await AudioStore.importFile(fileHandle)
+    // Add a new audio track + clip to the project
+    const state = ProjectStore.getState()
+    const trackName = fileKey.split('/').pop().replace(/\.[^.]+$/, '')
+    ProjectStore.dispatch(AddTrack('audio', trackName))
+    const newState = ProjectStore.getState()
+    const newTrack = newState.tracks[newState.tracks.length - 1]
+    const buf = AudioStore.getBuffer(fileKey)
+    const duration = buf ? buf.duration / (60 / state.bpm) : 4
+    ProjectStore.dispatch(AddClip(newTrack.id, {
+      id: `clip-${Date.now()}`,
+      type: 'audio',
+      file: fileKey,
+      startBeat: 0,
+      duration,
+      offset: 0,
+      fadeIn: 0,
+      fadeOut: 0
+    }))
+    syncMixerStrips(ProjectStore.getState())
+  })
+
+  document.getElementById('bounce-btn')?.addEventListener('click', async () => {
+    if (!AudioStore.getProjectDir()) return
+    await ensureAudio()
+    const state = ProjectStore.getState()
+    // Determine project length from rightmost clip end
+    let durationBeats = 16
+    state.tracks.forEach(t => t.clips.forEach(c => {
+      durationBeats = Math.max(durationBeats, c.startBeat + c.duration)
+    }))
+    const wav = await TimelinePlayer.bounce({
+      bpm: state.bpm,
+      tracks: state.tracks,
+      audioStore: AudioStore,
+      durationBeats,
+      sampleRate: state.sampleRate
+    })
+    await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
+  })
+}
+
+// ─── Sidebar mode buttons ────────────────────────────────────────────────────
+function initSidebarModes() {
+  document.querySelectorAll('.tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ensureAudio()
+      switchMode(btn.dataset.tool)
+    })
+  })
+}
+
+// ─── Arrange transport (play/stop) ──────────────────────────────────────────
+function initArrangeTransport() {
+  // Re-use existing play/stop buttons for arrange mode too
+  // The existing transport buttons already call Sequencer.play/stop
+  // When in arrange mode, they should control TimelinePlayer instead
+  const playBtn = document.getElementById('play-btn')
+  const stopBtn = document.getElementById('stop-btn')
+  if (!playBtn || !stopBtn) return
+
+  // Replace handlers to be mode-aware
+  playBtn.replaceWith(playBtn.cloneNode(true))
+  stopBtn.replaceWith(stopBtn.cloneNode(true))
+
+  document.getElementById('play-btn')?.addEventListener('click', () => {
+    ensureAudio()
+    if (_currentMode === 'arrange') {
+      const state = ProjectStore.getState()
+      TimelinePlayer.play({
+        beat: 0,
+        bpm: state.bpm,
+        tracks: state.tracks,
+        audioStore: AudioStore,
+        mixerEngine: MixerEngine
+      })
+    } else {
+      Sequencer.play()
+    }
+  })
+  document.getElementById('stop-btn')?.addEventListener('click', () => {
+    if (_currentMode === 'arrange') {
+      TimelinePlayer.stop()
+    } else {
+      Sequencer.stop()
+    }
+  })
+}
+
+// ─── Undo / Redo ──────────────────────────────────────────────────────────────
+function initUndoRedo() {
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+      e.preventDefault()
+      ProjectStore.undo()
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
+      e.preventDefault()
+      ProjectStore.redo()
+    }
+  })
+}
+
 // ─── Bootstrap ─────────────────────────────────────────────────────────────
 function boot() {
   Keyboard.render('keyboard')
@@ -353,6 +606,23 @@ function boot() {
   // Init audio on first click anywhere (required by browsers)
   document.body.addEventListener('click', ensureAudio, { once: false })
   document.body.addEventListener('keydown', ensureAudio, { once: false })
+
+  initProjectBar()
+  initSidebarModes()
+  initArrangeTransport()
+  initUndoRedo()
+
+  // Init arrangement view
+  const container = document.getElementById('arrangement-container')
+  if (container) {
+    _arrangementView = new ArrangementView(container, {
+      store: ProjectStore,
+      audioStore: AudioStore
+    })
+  }
+
+  // Subscribe store to keep mixer in sync
+  ProjectStore.subscribe(state => syncMixerStrips(state))
 }
 
 if (document.readyState === 'loading') {

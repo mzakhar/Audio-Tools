@@ -14,8 +14,24 @@
         <span class="tool-icon">◈</span>
         <span class="tool-label">SYNTH</span>
       </button>
+      <button class="tool-btn" id="arrange-btn" data-tool="arrange" title="Arrangement">
+        <span class="tool-icon">▦</span>
+        <span class="tool-label">ARRANGE</span>
+      </button>
     </nav>
     <div id="main">
+    <div id="project-bar">
+      <button id="new-project-btn">NEW</button>
+      <button id="open-project-btn">OPEN</button>
+      <button id="save-project-btn" disabled>SAVE</button>
+      <span id="project-name">No Project</span>
+      <button id="import-audio-btn" disabled>+ AUDIO</button>
+      <button id="bounce-btn" disabled>BOUNCE</button>
+    </div>
+    <div id="arrange-view">
+      <div id="arrangement-container"></div>
+      <div id="mixer-bar"></div>
+    </div>
   <div id="app">
 
     <header id="header">
