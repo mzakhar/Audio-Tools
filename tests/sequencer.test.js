@@ -104,10 +104,10 @@ describe('Sequencer', () => {
       document.body.appendChild(labels)
 
       Sequencer.init('seq-grid', 'seq-labels')
-      const initialRows = container.querySelectorAll('.seq-row').length
+      const initialRows = container.querySelectorAll('.seq-track-row').length
 
       Sequencer.addTrack()
-      const newRows = container.querySelectorAll('.seq-row').length
+      const newRows = container.querySelectorAll('.seq-track-row').length
 
       expect(newRows).toBe(initialRows + 1)
 
