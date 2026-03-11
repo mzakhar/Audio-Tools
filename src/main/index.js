@@ -89,3 +89,10 @@ ipcMain.handle('dialog:showOpen', async (_event, options) => {
 ipcMain.handle('dialog:showSave', async (_event, options) => {
   return dialog.showSaveDialog(options)
 })
+
+ipcMain.handle('fs:readAudioBytes', async (_event, dirPath, relPath) => {
+  const resolvedDir = resolve(dirPath)
+  const fullPath = assertPathWithin(resolve(resolvedDir, relPath), resolvedDir)
+  const buf = await readFile(fullPath)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+})
