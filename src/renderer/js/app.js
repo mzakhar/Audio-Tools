@@ -8,7 +8,7 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack } from './store/ProjectStore.js'
 import FileAdapter from './io/FileAdapter.js'
 import AudioStore from './audio-store.js'
 import { ArrangementView } from './components/arrangement-view.js'
@@ -18,6 +18,12 @@ import TimelinePlayer from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
 import ShortcutManager from './shortcuts.js'
+
+// ─── Per-type directory memory ────────────────────────────────────────────────
+const DIR_KEY_PROJECT = 'synth_lastProjectDir'
+const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
+function getLastDir(key)       { return localStorage.getItem(key) || undefined }
+function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 
 let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
@@ -380,6 +386,11 @@ function switchMode(mode) {
     appEl.style.display = 'none'
     arrangeEl.style.display = 'flex'
     startArrangeLoop()
+    // Canvas may still be 0×0 if ResizeObserver hasn't fired since the element was hidden.
+    // Force a size update on the next frame once the element is laid out.
+    requestAnimationFrame(() => {
+      if (_arrangementView) _arrangementView._onResize()
+    })
   } else {
     appEl.style.display = ''
     arrangeEl.style.display = 'none'
@@ -449,7 +460,8 @@ function setProjectOpen(name) {
 function initProjectBar() {
   document.getElementById('new-project-btn')?.addEventListener('click', async () => {
     await ensureAudio()
-    const handle = await FileAdapter.createProjectFolder()
+    const handle = await FileAdapter.createProjectFolder(getLastDir(DIR_KEY_PROJECT))
+    if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
     ProjectStore.reset()
     AudioStore.reset()
@@ -463,7 +475,8 @@ function initProjectBar() {
 
   document.getElementById('open-project-btn')?.addEventListener('click', async () => {
     await ensureAudio()
-    const handle = await FileAdapter.openProjectFolder()
+    const handle = await FileAdapter.openProjectFolder(getLastDir(DIR_KEY_PROJECT))
+    if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
     const { state } = await FileAdapter.readProject(handle)
     ProjectStore.load(state)
@@ -494,12 +507,18 @@ function initProjectBar() {
     // In browser: show file picker. In Electron: show open dialog.
     let fileHandle
     if (window.electronFS) {
-      const result = await window.electronFS.showOpenDialog({
+      const audioDialogOpts = {
         properties: ['openFile'],
         filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'flac', 'ogg', 'aiff'] }]
-      })
+      }
+      const lastAudioDir = getLastDir(DIR_KEY_AUDIO)
+      if (lastAudioDir) audioDialogOpts.defaultPath = lastAudioDir
+      const result = await window.electronFS.showOpenDialog(audioDialogOpts)
       if (result.canceled || !result.filePaths.length) return
       fileHandle = result.filePaths[0]
+      // Save the directory containing the selected file
+      const lastSlash = Math.max(fileHandle.lastIndexOf('/'), fileHandle.lastIndexOf('\\'))
+      if (lastSlash > 0) setLastDir(DIR_KEY_AUDIO, fileHandle.substring(0, lastSlash))
     } else {
       [fileHandle] = await window.showOpenFilePicker({
         types: [{ description: 'Audio Files', accept: { 'audio/*': ['.wav', '.mp3', '.flac', '.ogg'] } }]
@@ -526,6 +545,8 @@ function initProjectBar() {
       fadeOut: 0
     }))
     syncMixerStrips(ProjectStore.getState())
+    // Switch to arrange view so the user can immediately see the new track
+    switchMode('arrange')
   })
 
   document.getElementById('bounce-btn')?.addEventListener('click', async () => {
@@ -560,17 +581,38 @@ function initSidebarModes() {
 
 // ─── Arrange transport (play/stop) ──────────────────────────────────────────
 function initArrangeTransport() {
-  // Re-use existing play/stop buttons for arrange mode too
-  // The existing transport buttons already call Sequencer.play/stop
-  // When in arrange mode, they should control TimelinePlayer instead
-  const playBtn = document.getElementById('play-btn')
-  const stopBtn = document.getElementById('stop-btn')
-  if (!playBtn || !stopBtn) return
+  // Dedicated arrange toolbar buttons
+  document.getElementById('arr-play-btn')?.addEventListener('click', () => {
+    ensureAudio()
+    const state = ProjectStore.getState()
+    TimelinePlayer.play({
+      beat: 0,
+      bpm: state.bpm,
+      tracks: state.tracks,
+      audioStore: AudioStore,
+      mixerEngine: MixerEngine,
+      palettes: Palettes
+    })
+    document.getElementById('arr-play-btn').setAttribute('aria-pressed', 'true')
+  })
 
-  // Replace handlers to be mode-aware
-  playBtn.replaceWith(playBtn.cloneNode(true))
-  stopBtn.replaceWith(stopBtn.cloneNode(true))
+  document.getElementById('arr-stop-btn')?.addEventListener('click', () => {
+    TimelinePlayer.stop()
+    document.getElementById('arr-play-btn')?.setAttribute('aria-pressed', 'false')
+  })
 
+  document.getElementById('arr-bpm')?.addEventListener('change', (e) => {
+    const bpm = parseInt(e.target.value) || 120
+    ProjectStore.dispatch(SetBpm(bpm))
+  })
+
+  // Keep BPM input in sync with store (e.g. after project open)
+  ProjectStore.subscribe(() => {
+    const bpmEl = document.getElementById('arr-bpm')
+    if (bpmEl) bpmEl.value = ProjectStore.getState().bpm
+  })
+
+  // Synth mode transport
   document.getElementById('play-btn')?.addEventListener('click', () => {
     ensureAudio()
     if (_currentMode === 'arrange') {
@@ -700,9 +742,8 @@ function initMidi() {
 
   addMidiBtn?.addEventListener('click', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
-    addMidiBtn.disabled = false
-    setProjectOpen(document.getElementById('project-name').textContent)
     syncMixerStrips(ProjectStore.getState())
+    switchMode('arrange')
   })
 
   // Route live MIDI note events → synth voices (same as keyboard)

@@ -69,8 +69,8 @@ const AudioStore = {
       // Use the project dir handle directly.
       let arrayBuffer
       if (typeof _projectDirHandle === 'string') {
-        // Electron: read via IPC
-        arrayBuffer = await window.electronFS.readAudioFile(fileKey, _projectDirHandle)
+        // Electron: read via IPC  (dirPath, relPath)
+        arrayBuffer = await window.electronFS.readAudioBytes(_projectDirHandle, fileKey)
       } else {
         // Browser: traverse FileSystemDirectoryHandle
         const parts = fileKey.split('/')
@@ -127,6 +127,11 @@ const AudioStore = {
       }
       _lodCallbacks.add(check)
     })
+  },
+
+  onLodReady(cb) {
+    _lodCallbacks.add(cb)
+    return () => _lodCallbacks.delete(cb)
   },
 
   unloadBuffer(fileKey) {

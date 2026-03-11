@@ -69,18 +69,18 @@ const BrowserAdapter = {
 // Electron implementation (uses window.electronFS IPC bridge)
 // ---------------------------------------------------------------------------
 const ElectronAdapter = {
-  async openProjectFolder() {
-    const result = await window.electronFS.showOpenDialog({
-      properties: ['openDirectory']
-    })
+  async openProjectFolder(defaultPath) {
+    const opts = { properties: ['openDirectory'] }
+    if (defaultPath) opts.defaultPath = defaultPath
+    const result = await window.electronFS.showOpenDialog(opts)
     if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]
   },
 
-  async createProjectFolder() {
-    const result = await window.electronFS.showOpenDialog({
-      properties: ['openDirectory', 'createDirectory']
-    })
+  async createProjectFolder(defaultPath) {
+    const opts = { properties: ['openDirectory', 'createDirectory'] }
+    if (defaultPath) opts.defaultPath = defaultPath
+    const result = await window.electronFS.showOpenDialog(opts)
     if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]
   },
