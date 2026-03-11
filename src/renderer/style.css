@@ -65,7 +65,13 @@ html, body {
 .tool-icon { font-size: 20px; }
 .tool-label { font-size: 9px; letter-spacing: 1px; }
 
-#main { flex: 1; overflow-x: hidden; }
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
 
 #app {
   display: flex;
@@ -74,6 +80,9 @@ html, body {
   margin: 0 auto;
   padding: 0 12px 40px;
   gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ─── Record Bar ────────────────────────────────────────────────────────────── */
@@ -641,6 +650,30 @@ button { font-family: var(--font-mono); }
   overflow: hidden;
   min-height: 0;
 }
+#arrange-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#arrange-toolbar .transport-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+}
+#arr-bpm {
+  width: 52px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+  border-radius: 3px;
+}
 #arrangement-container {
   flex: 1;
   position: relative;
@@ -705,6 +738,39 @@ button { font-family: var(--font-mono); }
 .track-header-item .solo-btn.active {
   border-color: var(--accent);
   color: var(--accent);
+}
+/* ── Arrangement context menu ─────────────────────────────────────────────── */
+.arr-ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.arr-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.arr-ctx-item:hover {
+  background: var(--bg4);
+}
+.arr-ctx-item.danger {
+  color: #ff5555;
+}
+.arr-ctx-item.danger:hover {
+  background: rgba(255,85,85,0.15);
 }
 
 /* ─── Phase 1: Mixer Bar ─────────────────────────────────────────────────── */
