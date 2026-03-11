@@ -612,13 +612,29 @@ function initArrangeTransport() {
     if (bpmEl) bpmEl.value = ProjectStore.getState().bpm
   })
 
-  // Synth mode transport (unchanged)
+  // Synth mode transport
   document.getElementById('play-btn')?.addEventListener('click', () => {
     ensureAudio()
-    Sequencer.play()
+    if (_currentMode === 'arrange') {
+      const state = ProjectStore.getState()
+      TimelinePlayer.play({
+        beat: 0,
+        bpm: state.bpm,
+        tracks: state.tracks,
+        audioStore: AudioStore,
+        mixerEngine: MixerEngine,
+        palettes: Palettes
+      })
+    } else {
+      Sequencer.play()
+    }
   })
   document.getElementById('stop-btn')?.addEventListener('click', () => {
-    Sequencer.stop()
+    if (_currentMode === 'arrange') {
+      TimelinePlayer.stop()
+    } else {
+      Sequencer.stop()
+    }
   })
 }
 
