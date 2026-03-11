@@ -40,7 +40,8 @@ export function AddTrack(type = 'audio', name = 'Track') {
         name,
         type,
         mixerChannelId: channelId,
-        clips: []
+        clips: [],
+        effects: []
       })
       next.mixer.channels.push({
         id: channelId,
@@ -139,6 +140,62 @@ export function SetMixerParam(channelId, param, value) {
       const channel = next.mixer.channels.find(ch => ch.id === channelId)
       if (!channel) return next
       channel[param] = value
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Effect command factories
+// ---------------------------------------------------------------------------
+
+export function AddEffect(trackId, type, params = {}) {
+  return {
+    label: `Add ${type} effect`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      if (!track.effects) track.effects = []
+      const effectId = genId('effect')
+      track.effects.push({ id: effectId, type, params: { ...params } })
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function RemoveEffect(trackId, effectId) {
+  return {
+    label: `Remove effect`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track || !track.effects) return next
+      track.effects = track.effects.filter(e => e.id !== effectId)
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function SetEffectParam(trackId, effectId, param, value) {
+  return {
+    label: `Set effect param ${param}`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track || !track.effects) return next
+      const effect = track.effects.find(e => e.id === effectId)
+      if (!effect) return next
+      effect.params[param] = value
       return next
     },
     undo(state) {
