@@ -1,0 +1,18 @@
+{
+  "name": "synth-daw",
+  "version": "0.1.0",
+  "description": "Browser-based DAW built on Electron + Web Audio API",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-vite": "^2.3.0",
+    "jsdom": "^28.1.0",
+    "vitest": "^2.1.0"
+  }
+}
