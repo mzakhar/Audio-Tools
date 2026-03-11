@@ -1,14 +1,17 @@
 /**
  * mixer-strip.js
  * Per-track mixer channel strip: label, volume fader, pan, mute/solo,
- * and a row of up to 4 effect insert slots.
+<<<<<<< HEAD
+ * a row of up to 4 effect insert slots, and a sends section.
  */
 export class MixerStrip {
-  constructor(container, { channel, track, onParam, onAddEffect, onRemoveEffect }) {
+  constructor(container, { channel, track, onParam, onAddEffect, onRemoveEffect, onSendLevel, buses }) {
     this._channelId = channel.id
     this._onParam = onParam
     this._onAddEffect = onAddEffect || null
     this._onRemoveEffect = onRemoveEffect || null
+    this._onSendLevel = onSendLevel ?? null
+    this._buses = buses ?? []
     this._el = document.createElement('div')
     this._el.className = 'mixer-strip'
     this._render(channel, track)
@@ -86,7 +89,35 @@ export class MixerStrip {
       effectSlots.appendChild(btn)
     }
 
-    this._el.append(label, volFader, panKnob, muteBtn, soloBtn, effectSlots)
+    // Sends section — one send knob per bus
+    const sendsSection = document.createElement('div')
+    sendsSection.className = 'mixer-sends'
+    const sends = channel.sends ?? {}
+    this._buses.forEach(bus => {
+      const wrapper = document.createElement('div')
+      wrapper.className = 'mixer-send'
+
+      const sendLabel = document.createElement('label')
+      sendLabel.className = 'mixer-send-label'
+      sendLabel.textContent = bus.name
+
+      const sendKnob = document.createElement('input')
+      sendKnob.type = 'range'
+      sendKnob.className = 'mixer-send-knob filled'
+      sendKnob.min = 0; sendKnob.max = 1; sendKnob.step = 0.01
+      sendKnob.value = sends[bus.id] ?? 0
+      sendKnob.style.setProperty('--fill', (sendKnob.value * 100) + '%')
+      sendKnob.addEventListener('input', () => {
+        const v = parseFloat(sendKnob.value)
+        sendKnob.style.setProperty('--fill', v * 100 + '%')
+        if (this._onSendLevel) this._onSendLevel(this._channelId, bus.id, v)
+      })
+
+      wrapper.append(sendLabel, sendKnob)
+      sendsSection.appendChild(wrapper)
+    })
+
+    this._el.append(label, volFader, panKnob, muteBtn, soloBtn, effectSlots, sendsSection)
 
     // Store refs for update()
     this._volFader = volFader
@@ -94,6 +125,7 @@ export class MixerStrip {
     this._muteBtn = muteBtn
     this._soloBtn = soloBtn
     this._effectSlots = effectSlots
+    this._sendsSection = sendsSection
   }
 
   update(channel, track) {

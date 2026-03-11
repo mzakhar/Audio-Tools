@@ -21,6 +21,10 @@ export const DEFAULT_STATE = {
     master: { volume: 0.85 }
   },
   patterns: {},     // id → PatternClip data
+  buses: [
+    { id: 'reverb', name: 'Reverb', returnLevel: 0.8,  params: { decay: 1.5 } },
+    { id: 'delay',  name: 'Delay',  returnLevel: 0.6,  params: { time: 0.375, feedback: 0.4 } },
+  ],
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +53,8 @@ export function AddTrack(type = 'audio', name = 'Track') {
         volume: 1.0,
         pan: 0.0,
         mute: false,
-        solo: false
+        solo: false,
+        sends: {},  // busId → level (0..1)
       })
       return next
     },
@@ -140,6 +145,43 @@ export function SetMixerParam(channelId, param, value) {
       const channel = next.mixer.channels.find(ch => ch.id === channelId)
       if (!channel) return next
       channel[param] = value
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FX bus command factories
+// ---------------------------------------------------------------------------
+
+export function SetSendLevel(channelId, busId, level) {
+  return {
+    label: `Set send level for bus "${busId}"`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const channel = next.mixer.channels.find(ch => ch.id === channelId)
+      if (!channel) return next
+      if (!channel.sends) channel.sends = {}
+      channel.sends[busId] = Math.max(0, Math.min(1, level))
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function SetBusReturn(busId, level) {
+  return {
+    label: `Set return level for bus "${busId}"`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const bus = next.buses ? next.buses.find(b => b.id === busId) : null
+      if (!bus) return next
+      bus.returnLevel = Math.max(0, Math.min(1, level))
       return next
     },
     undo(state) {
