@@ -9,28 +9,58 @@
 </head>
 <body>
   <div id="layout">
-    <nav id="sidebar">
-      <button class="tool-btn active" data-tool="synth" title="Synthesizer">
-        <span class="tool-icon">◈</span>
+    <nav id="sidebar" aria-label="Sidebar navigation">
+      <button class="tool-btn active" data-tool="synth" title="Synthesizer (F1)" aria-pressed="true">
+        <span class="tool-icon" aria-hidden="true">◈</span>
         <span class="tool-label">SYNTH</span>
       </button>
-      <button class="tool-btn" id="arrange-btn" data-tool="arrange" title="Arrangement">
-        <span class="tool-icon">▦</span>
+      <button class="tool-btn" id="arrange-btn" data-tool="arrange" title="Arrangement (F2)" aria-pressed="false">
+        <span class="tool-icon" aria-hidden="true">▦</span>
         <span class="tool-label">ARRANGE</span>
       </button>
     </nav>
     <div id="main">
-    <div id="project-bar">
-      <button id="new-project-btn">NEW</button>
-      <button id="open-project-btn">OPEN</button>
-      <button id="save-project-btn" disabled>SAVE</button>
+    <div id="project-bar" role="toolbar" aria-label="Project controls">
+      <button id="new-project-btn" title="New project (Ctrl+N)">NEW</button>
+      <button id="open-project-btn" title="Open project (Ctrl+O)">OPEN</button>
+      <button id="save-project-btn" disabled title="Save project (Ctrl+S)">SAVE</button>
       <span id="project-name">No Project</span>
       <button id="import-audio-btn" disabled>+ AUDIO</button>
+      <button id="add-midi-track-btn" disabled>+ MIDI</button>
       <button id="bounce-btn" disabled>BOUNCE</button>
+      <span class="project-bar-sep" aria-hidden="true"></span>
+      <span id="midi-status" class="midi-status" aria-live="polite" aria-atomic="true">MIDI OFF</span>
+      <button id="midi-enable-btn" class="midi-btn">ENABLE MIDI</button>
+      <select id="midi-device-select" class="midi-select" aria-label="MIDI input device" style="display:none">
+        <option value="">— no device —</option>
+      </select>
+      <button id="midi-record-btn" class="midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ REC</button>
     </div>
     <div id="arrange-view">
-      <div id="arrangement-container"></div>
-      <div id="mixer-bar"></div>
+      <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
+      <div id="piano-roll-drawer" class="pr-drawer" role="dialog" aria-modal="true" aria-labelledby="pr-drawer-title" style="display:none">
+        <div class="pr-drawer-header">
+          <span id="pr-drawer-title" class="pr-title">PIANO ROLL — <span id="pr-clip-name"></span></span>
+          <div class="pr-tools" role="radiogroup" aria-label="Piano roll tool">
+            <button class="pr-tool-btn active" data-pr-tool="draw" role="radio" aria-checked="true" title="Draw notes (D)">✎ DRAW</button>
+            <button class="pr-tool-btn" data-pr-tool="select" role="radio" aria-checked="false" title="Select notes (S)">⊹ SELECT</button>
+            <button class="pr-tool-btn" data-pr-tool="erase" role="radio" aria-checked="false" title="Erase notes (E)">✕ ERASE</button>
+            <span class="pr-sep" aria-hidden="true">|</span>
+            <label for="pr-quantize" class="pr-label">SNAP</label>
+            <select id="pr-quantize" aria-label="Quantize snap">
+              <option value="0.03125">1/32</option>
+              <option value="0.0625">1/16</option>
+              <option value="0.125">1/8</option>
+              <option value="0.25" selected>1/4</option>
+              <option value="0.5">1/2</option>
+              <option value="1">1 bar</option>
+            </select>
+          </div>
+          <button id="close-piano-roll-btn" class="pr-close-btn" aria-label="Close piano roll (Escape)">✕ CLOSE</button>
+        </div>
+        <div id="piano-roll-container"></div>
+      </div>
+      <div id="mixer-bar" role="region" aria-label="Mixer"></div>
     </div>
   <div id="app">
 
@@ -38,55 +68,55 @@
       <div id="title-wrap">
         <span id="app-title">◈ SYNTH</span>
       </div>
-      <div id="palette-tabs">
-        <button class="tab active" data-palette="classic">CLASSIC</button>
-        <button class="tab" data-palette="fm">FM SYNTH</button>
-        <button class="tab" data-palette="drum">DRUM MACHINE</button>
-        <button class="tab" data-palette="pad">PAD / AMBIENT</button>
+      <div id="palette-tabs" role="tablist" aria-label="Palette">
+        <button class="tab active" data-palette="classic" role="tab" aria-selected="true">CLASSIC</button>
+        <button class="tab" data-palette="fm" role="tab" aria-selected="false">FM SYNTH</button>
+        <button class="tab" data-palette="drum" role="tab" aria-selected="false">DRUM MACHINE</button>
+        <button class="tab" data-palette="pad" role="tab" aria-selected="false">PAD / AMBIENT</button>
       </div>
       <div id="master-vol-wrap">
         <label class="knob-label" for="master-vol">VOL</label>
-        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8">
-        <span class="knob-val" id="master-vol-display">80</span>
+        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume">
+        <span class="knob-val" id="master-vol-display" aria-hidden="true">80</span>
       </div>
     </header>
 
-    <div id="record-bar">
-      <button id="rec-btn" class="rec-btn">● REC</button>
-      <span id="rec-timer" class="rec-timer">00:00</span>
-      <span id="rec-status" class="rec-status"></span>
+    <div id="record-bar" role="toolbar" aria-label="Recorder">
+      <button id="rec-btn" class="rec-btn" aria-label="Record audio" aria-pressed="false">● REC</button>
+      <span id="rec-timer" class="rec-timer" aria-live="off">00:00</span>
+      <span id="rec-status" class="rec-status" aria-live="polite"></span>
     </div>
 
-    <section id="knob-panel">
+    <section id="knob-panel" aria-label="Palette parameters" role="tabpanel">
       <!-- Populated dynamically by app.js -->
     </section>
 
-    <section id="keyboard-section">
+    <section id="keyboard-section" aria-label="On-screen keyboard">
       <div id="keyboard-wrap">
-        <div id="keyboard"></div>
+        <div id="keyboard" role="group" aria-label="Piano keys"></div>
       </div>
-      <div id="drum-pads"></div>
-      <div id="keyboard-hint">
+      <div id="drum-pads" role="group" aria-label="Drum pads"></div>
+      <div id="keyboard-hint" aria-hidden="true">
         PC Keys — White: <kbd>a</kbd><kbd>s</kbd><kbd>d</kbd><kbd>f</kbd><kbd>g</kbd><kbd>h</kbd><kbd>j</kbd> &nbsp;|&nbsp; Black: <kbd>w</kbd><kbd>e</kbd><kbd>t</kbd><kbd>y</kbd><kbd>u</kbd> &nbsp;|&nbsp; Upper: <kbd>k</kbd><kbd>l</kbd><kbd>;</kbd><kbd>'</kbd><kbd>z</kbd><kbd>x</kbd><kbd>c</kbd>
       </div>
-      <div id="drum-hint">
+      <div id="drum-hint" aria-hidden="true">
         PC Keys — <kbd>1</kbd> Kick &nbsp;|&nbsp; <kbd>2</kbd> Snare &nbsp;|&nbsp; <kbd>3</kbd> Hi-Hat &nbsp;|&nbsp; <kbd>4</kbd> Clap
       </div>
     </section>
 
-    <section id="sequencer-section">
+    <section id="sequencer-section" aria-label="Step sequencer">
       <div id="seq-tracks"></div>
       <div id="sequencer-controls">
-        <div class="transport">
-          <button id="play-btn" class="transport-btn play">▶ Play</button>
+        <div class="transport" role="toolbar" aria-label="Transport">
+          <button id="play-btn" class="transport-btn play" aria-pressed="false">▶ Play</button>
           <button id="stop-btn" class="transport-btn stop">■ Stop</button>
           <button id="clear-btn" class="transport-btn clear">✕ Clear</button>
           <button id="add-track-btn" class="transport-btn">+ Track</button>
         </div>
         <div class="bpm-group">
           <label class="knob-label" for="bpm-slider">BPM</label>
-          <input type="range" id="bpm-slider" min="40" max="220" value="120" step="1">
-          <span class="knob-val" id="bpm-display">120</span>
+          <input type="range" id="bpm-slider" min="40" max="220" value="120" step="1" aria-label="Beats per minute">
+          <span class="knob-val" id="bpm-display" aria-hidden="true">120</span>
         </div>
       </div>
     </section>

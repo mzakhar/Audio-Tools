@@ -4,6 +4,22 @@ import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const isDev = !!process.env.ELECTRON_RENDERER_URL
+
+// Auto-updater — only active in packaged builds (not dev)
+function getAutoUpdater() {
+  if (isDev) return null
+  try {
+    // electron-updater is an optional runtime dependency
+    // eslint-disable-next-line
+    const { autoUpdater } = require('electron-updater')
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+    return autoUpdater
+  } catch (e) {
+    return null
+  }
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -17,11 +33,20 @@ function createWindow() {
     },
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
+  if (isDev) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  win.once('ready-to-show', () => {
+    const updater = getAutoUpdater()
+    if (updater) {
+      updater.checkForUpdatesAndNotify().catch(() => {
+        // Silent failure — update server may not be reachable
+      })
+    }
+  })
 }
 
 app.whenReady().then(() => {

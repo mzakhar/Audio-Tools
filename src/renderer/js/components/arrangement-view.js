@@ -62,6 +62,9 @@ export class ArrangementView {
 
     // Main canvas
     this._canvas = document.createElement('canvas')
+    this._canvas.setAttribute('role', 'application')
+    this._canvas.setAttribute('aria-label', 'Arrangement timeline. Double-click MIDI clips to open piano roll.')
+    this._canvas.setAttribute('tabindex', '0')
     this._wrapper.appendChild(this._canvas)
     this._ctx = this._canvas.getContext('2d')
 
@@ -70,13 +73,17 @@ export class ArrangementView {
     this._headerList.className = 'track-header-list'
     this._wrapper.appendChild(this._headerList)
 
+    this._selectedTrackId = null
+
     // Attach mouse events
     this._onMouseDown = this._onMouseDown.bind(this)
     this._onMouseMove = this._onMouseMove.bind(this)
     this._onMouseUp   = this._onMouseUp.bind(this)
+    this._onDblClick  = this._onDblClick.bind(this)
     this._canvas.addEventListener('mousedown', this._onMouseDown)
     this._canvas.addEventListener('mousemove', this._onMouseMove)
     this._canvas.addEventListener('mouseup',   this._onMouseUp)
+    this._canvas.addEventListener('dblclick',  this._onDblClick)
 
     // ResizeObserver
     this._resizeObserver = new ResizeObserver(() => this._onResize())
@@ -126,6 +133,7 @@ export class ArrangementView {
     this._canvas.removeEventListener('mousedown', this._onMouseDown)
     this._canvas.removeEventListener('mousemove', this._onMouseMove)
     this._canvas.removeEventListener('mouseup',   this._onMouseUp)
+    this._canvas.removeEventListener('dblclick',  this._onDblClick)
     this._resizeObserver.disconnect()
     this._wrapper.remove()
   }
@@ -213,6 +221,8 @@ export class ArrangementView {
       for (const clip of clips) {
         if (clip.type === 'audio') {
           this._drawClip(ctx, clip, trackY, state)
+        } else if (clip.type === 'midi') {
+          this._drawMidiClip(ctx, clip, trackY)
         }
       }
     }
@@ -327,6 +337,54 @@ export class ArrangementView {
     }
   }
 
+  _drawMidiClip(ctx, clip, trackY) {
+    const w = this._canvas.width
+    const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
+    const clipW = beatsToPx(clip.duration || 4, this._ppb)
+    if (clipX + clipW < TRACK_HEADER_W || clipX > w) return
+
+    const pad = 2
+    const clipH = TRACK_H - pad * 2
+    const clipDrawY = trackY + pad
+
+    // Body
+    ctx.fillStyle = '#1a2620'
+    ctx.strokeStyle = '#39ff1455'
+    ctx.lineWidth = 1
+    ctx.fillRect(clipX, clipDrawY, clipW, clipH)
+    ctx.strokeRect(clipX + 0.5, clipDrawY + 0.5, clipW - 1, clipH - 1)
+
+    // Label
+    ctx.fillStyle = '#aaa'
+    ctx.font = '9px monospace'
+    ctx.save()
+    ctx.rect(clipX, clipDrawY, clipW, clipH)
+    ctx.clip()
+    ctx.fillText(clip.name || 'MIDI', clipX + 4, clipDrawY + 12)
+
+    // Mini note bars
+    const notes = clip.notes || []
+    if (notes.length) {
+      const pitches = notes.map(n => n.pitch)
+      const minP = Math.min(...pitches)
+      const maxP = Math.max(...pitches)
+      const pitchRange = Math.max(1, maxP - minP)
+      const noteAreaH = clipH - 14
+
+      for (const note of notes) {
+        const nx = clipX + beatsToPx(note.startBeat, this._ppb)
+        const nw = Math.max(1, beatsToPx(note.duration, this._ppb) - 1)
+        const ny = clipDrawY + 14 + (1 - (note.pitch - minP) / pitchRange) * (noteAreaH - 2)
+        if (nx > clipX && nx < clipX + clipW) {
+          ctx.fillStyle = '#39ff14bb'
+          ctx.fillRect(nx, ny, nw, 2)
+        }
+      }
+    }
+
+    ctx.restore()
+  }
+
   _drawPlayhead(ctx, state) {
     const x = beatsToPx(this._playheadBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
     if (x < TRACK_HEADER_W || x > this._canvas.width) return
@@ -408,6 +466,8 @@ export class ArrangementView {
       const trackY = RULER_H + i * TRACK_H - this._scrollTop
 
       if (my < trackY || my > trackY + TRACK_H) continue
+      this._selectedTrackId = track.id
+      document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
 
       const clips = track.clips || []
       for (const clip of clips) {
@@ -425,6 +485,32 @@ export class ArrangementView {
             origDuration: clip.duration
           }
           return
+        }
+      }
+    }
+  }
+
+  _onDblClick(e) {
+    const state = this._store.getState()
+    const tracks = state.tracks || []
+    const mx = e.offsetX
+    const my = e.offsetY
+
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i]
+      const trackY = RULER_H + i * TRACK_H - this._scrollTop
+      if (my < trackY || my > trackY + TRACK_H) continue
+
+      for (const clip of track.clips || []) {
+        if (clip.type === 'midi') {
+          const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
+          const clipW = beatsToPx(clip.duration || 4, this._ppb)
+          if (mx >= clipX && mx <= clipX + clipW) {
+            document.dispatchEvent(new CustomEvent('open-piano-roll', {
+              detail: { trackId: track.id, clipId: clip.id, clipName: clip.name || 'MIDI' }
+            }))
+            return
+          }
         }
       }
     }
