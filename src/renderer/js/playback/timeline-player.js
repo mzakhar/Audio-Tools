@@ -8,11 +8,12 @@ import { audioBufferToWAV } from '../utils/wav-encoder.js'
 
 const TimelinePlayer = {
   _sources: [],           // active AudioBufferSourceNode[]
+  _midiTimeouts: [],      // setTimeout handles for MIDI note scheduling
   _startAudioTime: 0,     // AudioContext.currentTime when play() was called
   _startBeat: 0,          // beat at which playback started
   _isPlaying: false,
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine }) {
+  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -22,8 +23,43 @@ const TimelinePlayer = {
     this._startBeat = beat
     this._isPlaying = true
     this._sources = []
+    this._midiTimeouts = []
 
     tracks.forEach(track => {
+      // ── MIDI track scheduling ──────────────────────────────────────────────
+      if (track.type === 'midi' && palettes) {
+        const palette = palettes[track.paletteKey || 'classic']
+        if (!palette) return
+        const channelId = track.mixerChannelId
+        const output = mixerEngine ? mixerEngine.getOutput(channelId) : AudioEngine.getMasterInput()
+
+        track.clips.forEach(clip => {
+          if (clip.type !== 'midi') return
+          const notes = clip.notes || []
+          notes.forEach(note => {
+            const noteBeat = clip.startBeat + note.startBeat
+            if (noteBeat + note.duration <= beat) return   // already past
+
+            const noteAudioTime = this._startAudioTime + beatsToSeconds(noteBeat - beat, bpm)
+            const stopAudioTime = noteAudioTime + beatsToSeconds(note.duration, bpm)
+            const msUntilNote   = Math.max(0, (noteAudioTime - ctx.currentTime) * 1000)
+
+            const handle = setTimeout(() => {
+              if (!this._isPlaying) return
+              const freq  = 440 * Math.pow(2, (note.pitch - 69) / 12)
+              const vel   = note.velocity ?? 0.8
+              try {
+                const voice = palette.createVoice(ctx, output, freq, vel, noteAudioTime)
+                voice.stop(stopAudioTime)
+              } catch (err) { /* voice creation errors are non-fatal */ }
+            }, msUntilNote)
+
+            this._midiTimeouts.push(handle)
+          })
+        })
+        return
+      }
+
       if (track.type !== 'audio') return
       const mixerChannelId = track.mixerChannelId
       const output = mixerEngine ? mixerEngine.getOutput(mixerChannelId) : AudioEngine.getMasterInput()
@@ -68,10 +104,10 @@ const TimelinePlayer = {
 
   stop() {
     this._isPlaying = false
-    this._sources.forEach(src => {
-      try { src.stop() } catch (e) {}
-    })
+    this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []
+    this._midiTimeouts.forEach(id => clearTimeout(id))
+    this._midiTimeouts = []
   },
 
   getCurrentBeat(bpm) {

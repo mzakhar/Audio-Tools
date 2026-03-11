@@ -84,6 +84,15 @@ export function RemoveTrack(trackId) {
   }
 }
 
+export function SetBpm(bpm) {
+  const clamped = Math.max(40, Math.min(240, bpm))
+  return {
+    label: `Set BPM to ${clamped}`,
+    execute(state) { return { ...state, bpm: clamped } },
+    undo(state)    { return state }
+  }
+}
+
 export function AddClip(trackId, clip) {
   return {
     label: `Add clip to track`,
@@ -134,6 +143,62 @@ export function TrimClip(trackId, clipId, offset, duration) {
     undo(state) {
       return state
     }
+  }
+}
+
+export function DuplicateClip(trackId, clipId) {
+  return {
+    label: `Duplicate clip`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip) return next
+      const copy = JSON.parse(JSON.stringify(clip))
+      copy.id = `clip-${++_idCounter}-${Date.now()}`
+      copy.startBeat = clip.startBeat + clip.duration
+      track.clips.push(copy)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function RemoveClip(trackId, clipId) {
+  return {
+    label: 'Remove clip',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      track.clips = track.clips.filter(c => c.id !== clipId)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function TileClip(trackId, clipId, endBeat = 64) {
+  return {
+    label: 'Tile clip across track',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip || clip.duration <= 0) return next
+      let pos = clip.startBeat + clip.duration
+      while (pos + clip.duration <= endBeat) {
+        const copy = JSON.parse(JSON.stringify(clip))
+        copy.id = `clip-${++_idCounter}-${Date.now()}`
+        copy.startBeat = pos
+        track.clips.push(copy)
+        pos += clip.duration
+      }
+      return next
+    },
+    undo(state) { return state }
   }
 }
 
@@ -225,6 +290,114 @@ export function RemoveEffect(trackId, effectId) {
     undo(state) {
       return state
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MIDI note command factories
+// ---------------------------------------------------------------------------
+
+export function AddMidiNote(trackId, clipId, note) {
+  return {
+    label: 'Add MIDI note',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip) return next
+      if (!clip.notes) clip.notes = []
+      clip.notes.push(note)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function RemoveMidiNote(trackId, clipId, noteId) {
+  return {
+    label: 'Remove MIDI note',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip || !clip.notes) return next
+      clip.notes = clip.notes.filter(n => n.id !== noteId)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function MoveMidiNote(trackId, clipId, noteId, startBeat, pitch) {
+  return {
+    label: 'Move MIDI note',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip || !clip.notes) return next
+      const note = clip.notes.find(n => n.id === noteId)
+      if (!note) return next
+      note.startBeat = startBeat
+      note.pitch = pitch
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function ResizeMidiNote(trackId, clipId, noteId, duration) {
+  return {
+    label: 'Resize MIDI note',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip || !clip.notes) return next
+      const note = clip.notes.find(n => n.id === noteId)
+      if (!note) return next
+      note.duration = Math.max(0.0625, duration)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function SetMidiNoteVelocity(trackId, clipId, noteId, velocity) {
+  return {
+    label: 'Set MIDI note velocity',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip || !clip.notes) return next
+      const note = clip.notes.find(n => n.id === noteId)
+      if (!note) return next
+      note.velocity = Math.max(0.01, Math.min(1, velocity))
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function SetMidiClipNotes(trackId, clipId, notes) {
+  return {
+    label: 'Set MIDI clip notes',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      const clip = track.clips.find(c => c.id === clipId)
+      if (!clip) return next
+      clip.notes = notes
+      return next
+    },
+    undo(state) { return state }
   }
 }
 
