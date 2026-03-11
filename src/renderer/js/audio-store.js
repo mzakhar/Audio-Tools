@@ -4,6 +4,7 @@
  */
 import AudioEngine from './audio-engine.js'
 import FileAdapter from './io/FileAdapter.js'
+import { validateAudioFile } from './utils/audio-file-validator.js'
 
 let _projectDirHandle = null
 const _buffers = new Map()  // fileKey → AudioBuffer
@@ -81,6 +82,12 @@ const AudioStore = {
         const file = await fh.getFile()
         arrayBuffer = await file.arrayBuffer()
       }
+
+      // Validate magic bytes before handing to the decoder
+      const filename = fileKey.split('/').pop()
+      const header = new Uint8Array(arrayBuffer, 0, Math.min(12, arrayBuffer.byteLength))
+      const validation = validateAudioFile(filename, arrayBuffer.byteLength, header)
+      if (!validation.ok) throw new Error(validation.error)
 
       const ctx = AudioEngine.getContext()
       if (!ctx) throw new Error('AudioContext not initialized')

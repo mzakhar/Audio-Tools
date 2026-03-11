@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('electronFS', {
   exportWav: (buffer, defaultName) => ipcRenderer.invoke('fs:exportWav', buffer, defaultName),
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:showOpen', options),
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:showSave', options),
+  readAudioBytes: (dirPath, relPath) => ipcRenderer.invoke('fs:readAudioBytes', dirPath, relPath),
 })
