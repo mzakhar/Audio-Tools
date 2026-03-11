@@ -12,7 +12,7 @@ import {
   visibleBeatRange
 } from '../utils/timeline-math.js'
 
-import ProjectStore, { MoveClip, TrimClip } from '../store/ProjectStore.js'
+import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
 
 // Layout constants
@@ -20,6 +20,54 @@ const TRACK_HEADER_W = 160  // px — left sidebar with track names
 const RULER_H        = 32   // px — top ruler bar
 const TRACK_H        = 72   // px — height per track row
 const DEFAULT_PPB    = 40   // pixels per beat at default zoom
+
+// ── Context menu (singleton) ─────────────────────────────────────────────────
+
+let _ctxMenu = null
+
+function _getCtxMenu() {
+  if (_ctxMenu) return _ctxMenu
+  _ctxMenu = document.createElement('div')
+  _ctxMenu.className = 'arr-ctx-menu'
+  _ctxMenu.style.display = 'none'
+  document.body.appendChild(_ctxMenu)
+  document.addEventListener('mousedown', (e) => {
+    if (!_ctxMenu.contains(e.target)) _hideCtxMenu()
+  })
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') _hideCtxMenu()
+  })
+  return _ctxMenu
+}
+
+function _showCtxMenu(x, y, items) {
+  const menu = _getCtxMenu()
+  menu.innerHTML = ''
+  items.forEach(({ label, action, danger }) => {
+    const btn = document.createElement('button')
+    btn.className = 'arr-ctx-item' + (danger ? ' danger' : '')
+    btn.textContent = label
+    btn.addEventListener('mousedown', (e) => {
+      e.stopPropagation()
+      _hideCtxMenu()
+      action()
+    })
+    menu.appendChild(btn)
+  })
+  menu.style.display = 'block'
+  // Position — keep inside viewport
+  menu.style.left = x + 'px'
+  menu.style.top  = y + 'px'
+  requestAnimationFrame(() => {
+    const r = menu.getBoundingClientRect()
+    if (r.right  > window.innerWidth)  menu.style.left = (x - r.width)  + 'px'
+    if (r.bottom > window.innerHeight) menu.style.top  = (y - r.height) + 'px'
+  })
+}
+
+function _hideCtxMenu() {
+  if (_ctxMenu) _ctxMenu.style.display = 'none'
+}
 
 /**
  * Hit-test a clip against a mouse position.
@@ -62,6 +110,9 @@ export class ArrangementView {
 
     // Main canvas
     this._canvas = document.createElement('canvas')
+    this._canvas.setAttribute('role', 'application')
+    this._canvas.setAttribute('aria-label', 'Arrangement timeline. Double-click MIDI clips to open piano roll.')
+    this._canvas.setAttribute('tabindex', '0')
     this._wrapper.appendChild(this._canvas)
     this._ctx = this._canvas.getContext('2d')
 
@@ -70,13 +121,22 @@ export class ArrangementView {
     this._headerList.className = 'track-header-list'
     this._wrapper.appendChild(this._headerList)
 
+    this._selectedTrackId = null
+
     // Attach mouse events
-    this._onMouseDown = this._onMouseDown.bind(this)
-    this._onMouseMove = this._onMouseMove.bind(this)
-    this._onMouseUp   = this._onMouseUp.bind(this)
-    this._canvas.addEventListener('mousedown', this._onMouseDown)
-    this._canvas.addEventListener('mousemove', this._onMouseMove)
-    this._canvas.addEventListener('mouseup',   this._onMouseUp)
+    this._onMouseDown   = this._onMouseDown.bind(this)
+    this._onMouseMove   = this._onMouseMove.bind(this)
+    this._onMouseUp     = this._onMouseUp.bind(this)
+    this._onDblClick    = this._onDblClick.bind(this)
+    this._onContextMenu = this._onContextMenu.bind(this)
+    this._onWheel       = this._onWheel.bind(this)
+    this._canvas.addEventListener('mousedown',   this._onMouseDown)
+    this._canvas.addEventListener('mousemove',   this._onMouseMove)
+    this._canvas.addEventListener('mouseup',     this._onMouseUp)
+    this._canvas.addEventListener('dblclick',    this._onDblClick)
+    this._canvas.addEventListener('contextmenu', this._onContextMenu)
+    this._canvas.addEventListener('wheel',       this._onWheel, { passive: false })
+    this._headerList.addEventListener('contextmenu', this._onHeaderContextMenu.bind(this))
 
     // ResizeObserver
     this._resizeObserver = new ResizeObserver(() => this._onResize())
@@ -85,6 +145,9 @@ export class ArrangementView {
 
     // Subscribe to store
     this._unsub = this._store.subscribe(() => this.render())
+
+    // Re-render when waveform LOD becomes ready
+    this._lodUnsub = this._audioStore.onLodReady(() => this.render())
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -123,9 +186,13 @@ export class ArrangementView {
 
   destroy() {
     this._unsub()
-    this._canvas.removeEventListener('mousedown', this._onMouseDown)
-    this._canvas.removeEventListener('mousemove', this._onMouseMove)
-    this._canvas.removeEventListener('mouseup',   this._onMouseUp)
+    this._lodUnsub()
+    this._canvas.removeEventListener('mousedown',   this._onMouseDown)
+    this._canvas.removeEventListener('mousemove',   this._onMouseMove)
+    this._canvas.removeEventListener('mouseup',     this._onMouseUp)
+    this._canvas.removeEventListener('dblclick',    this._onDblClick)
+    this._canvas.removeEventListener('contextmenu', this._onContextMenu)
+    this._canvas.removeEventListener('wheel',       this._onWheel)
     this._resizeObserver.disconnect()
     this._wrapper.remove()
   }
@@ -213,6 +280,8 @@ export class ArrangementView {
       for (const clip of clips) {
         if (clip.type === 'audio') {
           this._drawClip(ctx, clip, trackY, state)
+        } else if (clip.type === 'midi') {
+          this._drawMidiClip(ctx, clip, trackY)
         }
       }
     }
@@ -327,6 +396,54 @@ export class ArrangementView {
     }
   }
 
+  _drawMidiClip(ctx, clip, trackY) {
+    const w = this._canvas.width
+    const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
+    const clipW = beatsToPx(clip.duration || 4, this._ppb)
+    if (clipX + clipW < TRACK_HEADER_W || clipX > w) return
+
+    const pad = 2
+    const clipH = TRACK_H - pad * 2
+    const clipDrawY = trackY + pad
+
+    // Body
+    ctx.fillStyle = '#1a2620'
+    ctx.strokeStyle = '#39ff1455'
+    ctx.lineWidth = 1
+    ctx.fillRect(clipX, clipDrawY, clipW, clipH)
+    ctx.strokeRect(clipX + 0.5, clipDrawY + 0.5, clipW - 1, clipH - 1)
+
+    // Label
+    ctx.fillStyle = '#aaa'
+    ctx.font = '9px monospace'
+    ctx.save()
+    ctx.rect(clipX, clipDrawY, clipW, clipH)
+    ctx.clip()
+    ctx.fillText(clip.name || 'MIDI', clipX + 4, clipDrawY + 12)
+
+    // Mini note bars
+    const notes = clip.notes || []
+    if (notes.length) {
+      const pitches = notes.map(n => n.pitch)
+      const minP = Math.min(...pitches)
+      const maxP = Math.max(...pitches)
+      const pitchRange = Math.max(1, maxP - minP)
+      const noteAreaH = clipH - 14
+
+      for (const note of notes) {
+        const nx = clipX + beatsToPx(note.startBeat, this._ppb)
+        const nw = Math.max(1, beatsToPx(note.duration, this._ppb) - 1)
+        const ny = clipDrawY + 14 + (1 - (note.pitch - minP) / pitchRange) * (noteAreaH - 2)
+        if (nx > clipX && nx < clipX + clipW) {
+          ctx.fillStyle = '#39ff14bb'
+          ctx.fillRect(nx, ny, nw, 2)
+        }
+      }
+    }
+
+    ctx.restore()
+  }
+
   _drawPlayhead(ctx, state) {
     const x = beatsToPx(this._playheadBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
     if (x < TRACK_HEADER_W || x > this._canvas.width) return
@@ -392,7 +509,73 @@ export class ArrangementView {
         muteBtn.className = 'mute-btn' + (channel.mute ? ' active' : '')
         soloBtn.className = 'solo-btn' + (channel.solo ? ' active' : '')
       }
+
     })
+  }
+
+  // ── Context menus ────────────────────────────────────────────────────────────
+
+  _onWheel(e) {
+    e.preventDefault()
+    const state = this._store.getState()
+    const tracks = state.tracks || []
+    const totalH = tracks.length * TRACK_H
+    const visibleH = this._canvas.height - RULER_H
+    const maxScroll = Math.max(0, totalH - visibleH)
+    this._scrollTop = Math.max(0, Math.min(maxScroll, this._scrollTop + e.deltaY * 0.5))
+    this.render()
+  }
+
+  _onContextMenu(e) {
+    e.preventDefault()
+    const state = this._store.getState()
+    const tracks = state.tracks || []
+    const mx = e.offsetX
+    const my = e.offsetY
+
+
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i]
+      const trackY = RULER_H + i * TRACK_H - this._scrollTop
+      if (my < trackY || my > trackY + TRACK_H) continue
+
+      // Check if clicking on a clip
+      for (const clip of track.clips || []) {
+        const hit = hitTestClip(clip, mx, trackY, this._ppb, this._scrollLeft, TRACK_HEADER_W, TRACK_H)
+        if (hit) {
+          const items = [
+            { label: '⧉ Duplicate', action: () => this._store.dispatch(DuplicateClip(track.id, clip.id)) },
+            { label: '⟺ Tile Across Track', action: () => this._store.dispatch(TileClip(track.id, clip.id)) },
+            { label: '— Remove Clip', action: () => this._store.dispatch(RemoveClip(track.id, clip.id)) },
+            { label: '✕ Remove Track', danger: true, action: () => this._store.dispatch(RemoveTrack(track.id)) },
+          ]
+          _showCtxMenu(e.clientX, e.clientY, items)
+          return
+        }
+      }
+
+      // Clicking on empty track area
+      _showCtxMenu(e.clientX, e.clientY, [
+        { label: '✕ Remove Track', danger: true, action: () => this._store.dispatch(RemoveTrack(track.id)) },
+      ])
+      return
+    }
+  }
+
+  _onHeaderContextMenu(e) {
+    e.preventDefault()
+    // Find which track header was right-clicked
+    const item = e.target.closest('.track-header-item')
+    if (!item) return
+    const state = this._store.getState()
+    const tracks = state.tracks || []
+    const headers = Array.from(this._headerList.querySelectorAll('.track-header-item'))
+    const idx = headers.indexOf(item)
+    if (idx < 0 || idx >= tracks.length) return
+    const track = tracks[idx]
+    _showCtxMenu(e.clientX, e.clientY, [
+      { label: '✕ Remove Track', danger: true, action: () => this._store.dispatch(RemoveTrack(track.id)) },
+    ])
   }
 
   // ── Mouse interaction ────────────────────────────────────────────────────────
@@ -408,6 +591,8 @@ export class ArrangementView {
       const trackY = RULER_H + i * TRACK_H - this._scrollTop
 
       if (my < trackY || my > trackY + TRACK_H) continue
+      this._selectedTrackId = track.id
+      document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
 
       const clips = track.clips || []
       for (const clip of clips) {
@@ -425,6 +610,32 @@ export class ArrangementView {
             origDuration: clip.duration
           }
           return
+        }
+      }
+    }
+  }
+
+  _onDblClick(e) {
+    const state = this._store.getState()
+    const tracks = state.tracks || []
+    const mx = e.offsetX
+    const my = e.offsetY
+
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i]
+      const trackY = RULER_H + i * TRACK_H - this._scrollTop
+      if (my < trackY || my > trackY + TRACK_H) continue
+
+      for (const clip of track.clips || []) {
+        if (clip.type === 'midi') {
+          const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
+          const clipW = beatsToPx(clip.duration || 4, this._ppb)
+          if (mx >= clipX && mx <= clipX + clipW) {
+            document.dispatchEvent(new CustomEvent('open-piano-roll', {
+              detail: { trackId: track.id, clipId: clip.id, clipName: clip.name || 'MIDI' }
+            }))
+            return
+          }
         }
       }
     }
