@@ -9,6 +9,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
+    base: './',
     root: 'src/renderer',
     build: {
       rollupOptions: {
