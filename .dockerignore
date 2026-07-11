@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+node_modules
+dist
+out
+coverage
+npm-debug.log*
+Dockerfile
+specs

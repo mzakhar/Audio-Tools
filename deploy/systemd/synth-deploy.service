@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull and deploy Synth to local k3s
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=APP_DIR=%h/apps/synth
+Environment=REPO_URL=https://github.com/mzakhar/Audio-Tools.git
+Environment=BRANCH=main
+ExecStart=%h/apps/synth/scripts/deploy-k3s.sh
