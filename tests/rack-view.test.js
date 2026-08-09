@@ -59,7 +59,7 @@ describe('rack panel', () => {
 
     // Invisible to rail packing: TIDY must not pull it onto a rail, and a rail
     // module must still be free to take hp 0.
-    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 20 })
+    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 28 })
     expect(tidyRack(view.rack(), MODULES).modules.find(m => m.id === keys.id).hp).toBe(keys.hp)
 
     // A second docked module stacks beside it, not on top of it.

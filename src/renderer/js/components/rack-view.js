@@ -28,11 +28,17 @@ const starter = {
     modules: [
       { id: 'starter-vco', type: 'vco', rail: 0, hp: 0, params: {}, atten: {} },
       { id: 'starter-vca', type: 'vca', rail: 0, hp: 12, params: {}, atten: {} },
-      { id: 'starter-out', type: 'out', rail: 0, hp: 20, params: {}, atten: {} }
+      { id: 'starter-out', type: 'out', rail: 0, hp: 20, params: {}, atten: {} },
+      { id: 'starter-adsr', type: 'adsr', rail: 0, hp: 26, params: {}, atten: {} }
     ],
+    // The ADSR is here to keep the rack quiet, not just to be useful: an
+    // unpatched VCA normals its CV to unity, so VCO → VCA → OUT alone is a
+    // drone the moment the view mounts. An envelope resting at 0 with nothing
+    // gating it closes the VCA until the user patches a gate into it.
     cables: [
       { id: 'starter-vco-vca', from: { moduleId: 'starter-vco', port: 'out' }, to: { moduleId: 'starter-vca', port: 'in' } },
-      { id: 'starter-vca-out', from: { moduleId: 'starter-vca', port: 'out' }, to: { moduleId: 'starter-out', port: 'l' } }
+      { id: 'starter-vca-out', from: { moduleId: 'starter-vca', port: 'out' }, to: { moduleId: 'starter-out', port: 'l' } },
+      { id: 'starter-adsr-vca', from: { moduleId: 'starter-adsr', port: 'env' }, to: { moduleId: 'starter-vca', port: 'cv' } }
     ]
   }
 }
