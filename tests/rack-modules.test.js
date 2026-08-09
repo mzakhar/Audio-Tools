@@ -3,6 +3,7 @@ import MODULES, { validateRegistry, paramDefaults } from '../src/renderer/js/rac
 import RackEngine from '../src/renderer/js/rack/rack-engine.js'
 import clock from '../src/renderer/js/rack/modules/clock.js'
 import keys from '../src/renderer/js/rack/modules/keys.js'
+import drum from '../src/renderer/js/rack/modules/drum.js'
 
 // ---------------------------------------------------------------------------
 // Fuller BaseAudioContext fake — every node type the P0 module set builds.
@@ -179,6 +180,19 @@ describe('shipped module registry', () => {
     inst.dispose()
     const leaked = ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)
     expect(leaked).toEqual([])
+  })
+
+  it('DRUM builds a voice with real kit params, not NaN', () => {
+    const inst = drum.create(ctx, { params: paramDefaults('drum') })
+    // createTr909Voice indexes the kit itself; handing it an already-indexed
+    // entry made every param undefined and every AudioParam call non-finite.
+    expect(() => inst.onEvent('trig', { type: 'trig', time: 1 })).not.toThrow()
+    const nonFinite = ctx.created.flatMap(n =>
+      [n.frequency, n.gain, n.offset, n.detune].filter(Boolean)
+        .flatMap(p => (p.setValueAtTime?.mock?.calls || []).map(([value]) => value))
+    ).filter(v => !Number.isFinite(v))
+    expect(nonFinite).toEqual([])
+    inst.dispose()
   })
 
   it('CLOCK turns transport PPQN into quarter-note gates', () => {
