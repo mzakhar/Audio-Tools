@@ -176,6 +176,22 @@ html, body {
 .rack-keys { flex: 0 0 auto; position: relative; user-select: none; touch-action: none; margin-top: 4px; }
 .rack-keys:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
 
+.rack-params-compact { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 6px; overflow: visible; }
+.rack-params-compact label { flex: 1 1 64px; margin: 0; }
+
+/* One row of 8 steps for the lane the selector points at — eight stacked rows
+   was unreadable at 20 HP, and only one lane is ever being edited. */
+.algo-seq { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+.algo-lanes, .algo-steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.algo-lane {
+  height: 15px; padding: 0; font: inherit; font-size: 8px; line-height: 1; cursor: pointer;
+  color: var(--text-dim); background: #1b1e22; border: 1px solid #3d444c; border-radius: 2px;
+}
+.algo-lane.sel { color: #0d1114; background: var(--accent); border-color: var(--accent); }
+.algo-cell { height: 26px; padding: 0; background: #1b1e22; border: 1px solid #59616c; border-radius: 2px; cursor: pointer; }
+.algo-cell.beat { background: #262b31; }
+.algo-cell.on { background: var(--accent); border-color: var(--accent); }
+
 .rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
 .rack-jack-slot em {
   font-style: normal; font-size: 7px; line-height: 1; letter-spacing: 0;

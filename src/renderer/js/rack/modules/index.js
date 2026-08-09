@@ -18,8 +18,10 @@ import clock from './clock.js'
 import seq8 from './seq8.js'
 import clkdiv from './clkdiv.js'
 import ad from './ad.js'
+import perc4 from './perc4.js'
 import rnd from './rnd.js'
 import euclid from './euclid.js'
+import algo from './algo.js'
 // NOTE: file is quantizer.js, not quant.js — ad-block filter lists block `quant.js`
 // (Quantcast rule), which aborts the whole module graph and blanks the app.
 import quant from './quantizer.js'
@@ -47,7 +49,7 @@ import ringmod from './ringmod.js'
 import split from './split.js'
 import merge from './merge.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
