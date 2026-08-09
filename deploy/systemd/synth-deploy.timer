@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll GitHub and deploy Synth to local k3s
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=synth-deploy.service
+
+[Install]
+WantedBy=timers.target

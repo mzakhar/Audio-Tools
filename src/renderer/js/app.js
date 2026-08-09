@@ -548,6 +548,7 @@ function initProjectBar() {
       const result = await window.electronFS.showOpenDialog(audioDialogOpts)
       if (result.canceled || !result.filePaths.length) return
       fileHandle = result.filePaths[0]
+      // Save the directory containing the selected file
       const lastSlash = Math.max(fileHandle.lastIndexOf('/'), fileHandle.lastIndexOf('\\'))
       if (lastSlash > 0) setLastDir(DIR_KEY_AUDIO, fileHandle.substring(0, lastSlash))
     } else {
@@ -587,6 +588,7 @@ function initProjectBar() {
       fadeIn: 0,
       fadeOut: 0
     }))
+    // Switch to arrange view so the user can immediately see the new track
     switchMode('arrange')
   }
 
@@ -714,7 +716,7 @@ function initArrangeTransport() {
     if (bpmEl) bpmEl.value = ProjectStore.getState().bpm
   })
 
-  // Synth mode transport (unchanged)
+  // Synth mode transport
   document.getElementById('play-btn')?.addEventListener('click', () => {
     ensureAudio()
     Sequencer.play()
