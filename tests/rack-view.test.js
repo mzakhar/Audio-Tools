@@ -22,6 +22,24 @@ describe('rack panel', () => {
     expect(root.textContent).not.toContain('FOLD')
   })
 
+  it('orders a patch by port direction, whichever jack it started from', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.show()
+
+    view.patch({ moduleId: 'starter-vca', port: 'cv', dir: 'in' }, { moduleId: 'starter-vco', port: 'sub', dir: 'out' })
+
+    const cable = view.rack().cables.at(-1)
+    expect(cable.from).toEqual({ moduleId: 'starter-vco', port: 'sub' })
+    expect(cable.to).toEqual({ moduleId: 'starter-vca', port: 'cv' })
+
+    // Two inputs (or two outputs) are not a patch.
+    const before = view.rack().cables.length
+    view.patch({ moduleId: 'starter-vca', port: 'in', dir: 'in' }, { moduleId: 'starter-vco', port: 'fm', dir: 'in' })
+    expect(view.rack().cables).toHaveLength(before)
+    view.destroy()
+  })
+
   it('mounts once, updates, and unmounts the audio rack', () => {
     ProjectStore.reset(); engine.mount.mockClear(); engine.update.mockClear(); engine.unmount.mockClear()
     const ctx = {}, output = {}, root = document.createElement('div')

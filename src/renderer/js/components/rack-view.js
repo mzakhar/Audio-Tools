@@ -44,12 +44,17 @@ export class RackView {
     // tidyRack returns a bare rack, not a patch — importPatch would reject it.
     container.querySelector('[data-action="tidy"]').onclick = () => ProjectStore.dispatch(LoadRackPatch(this.rackId, tidyRack(this.rack(), MODULES)))
     container.querySelector('[data-action="cables"]').onclick = e => { this.canvas.hidden = !this.canvas.hidden; e.currentTarget.classList.toggle('active', !this.canvas.hidden) }
-    container.querySelector('[data-action="new"]').onclick = () => this.load(starter)
-    container.querySelector('[data-action="preset"]').onchange = e => { if (e.target.value) this.load(presets[e.target.value]); e.target.value = '' }
+    container.querySelector('[data-action="new"]').onclick = () => this.load(starter, { tidy: true })
+    container.querySelector('[data-action="preset"]').onchange = e => { if (e.target.value) this.load(presets[e.target.value], { tidy: true }); e.target.value = '' }
     container.querySelector('[data-action="import"]').onclick = async () => { try { const json = await FileAdapter.importRackPatch(); if (json) this.load(json) } catch (e) { if (e.name !== 'AbortError') console.warn('Rack import failed', e) } }
     container.querySelector('[data-action="export"]').onclick = () => this.save()
     container.querySelector('[data-action="save-preset"]').onclick = () => this.save(`${this.rack()?.name || 'preset'}.synthrack`)
     container.querySelector('[data-action="zoom"]').oninput = e => { this.rails.style.setProperty('--rack-zoom', e.target.value); this.sizeRails(); this.canvas.draw() }
+    // Delegated so it survives the panel rebuilds; the rails element itself is stable.
+    this.rails.addEventListener('pointerdown', e => {
+      const jack = e.target.closest('.rack-jack')
+      if (jack) this.beginPatchDrag(e, jack)
+    })
     // offsetX/Y is relative to whatever was hit — and panels now cover the full rail
     // height, so a cable is almost always over a panel. Measure against the rails.
     this.rails.addEventListener('dblclick', e => {
@@ -59,13 +64,19 @@ export class RackView {
     })
     this.unsubscribe = ProjectStore.subscribe(() => this.render())
   }
-  show() { this.container.style.display = 'grid'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter) } this.render() }
+  show() { this.container.style.display = 'grid'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter, { tidy: true }) } this.render() }
   hide() { this.container.style.display = 'none'; this.poll.stop() }
   destroy() { this.unsubscribe?.(); this.poll.stop(); this.poll.clear(); this.unmountEngine() }
   getEngineHandle() { return this.engineHandle }
   rack() { return ProjectStore.getState().racks[this.rackId] }
   add(type) { const rack = this.rack(), slot = firstFreeSlot(rack, MODULES, MODULES[type].hp); if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot)) }
-  load(json) { const { rack, warnings } = importPatch(json, MODULES); ProjectStore.dispatch(LoadRackPatch(this.rackId, rack)); warnings.forEach(warning => console.warn(warning)) }
+  // `tidy` packs the rails flush on load. On for the canned patches (presets, NEW);
+  // off for IMPORT, where the file carries a layout the user arranged themselves.
+  load(json, { tidy = false } = {}) {
+    const { rack, warnings } = importPatch(json, MODULES)
+    ProjectStore.dispatch(LoadRackPatch(this.rackId, tidy ? tidyRack(rack, MODULES) : rack))
+    warnings.forEach(warning => console.warn(warning))
+  }
   async save(name) { try { await FileAdapter.exportRackPatch(exportPatch(this.rack()), name || `${this.rack()?.name || 'patch'}.synthrack`) } catch (e) { if (e.name !== 'AbortError') console.warn('Rack export failed', e) } }
   render() {
     if (!this.rackId) return
@@ -137,11 +148,56 @@ export class RackView {
     this.engineHandle = null
   }
   jack(moduleId, port, dir, jack) {
-    const end = { moduleId, port }
-    if (!this.pending) { if (dir === 'out') { this.pending = end; jack.classList.add('patching') } return }
-    const result = canConnect(this.rack(), this.pending, end)
-    if (result.ok) ProjectStore.dispatch(Connect(this.rackId, this.pending, end))
-    this.pending = null; this.rails.querySelectorAll('.patching').forEach(x => x.classList.remove('patching'))
+    const end = { moduleId, port, dir }
+    if (!this.pending) { this.pending = end; jack.classList.add('patching'); return }
+    this.patch(this.pending, end)
+    this.clearPending()
+  }
+  clearPending() {
+    this.pending = null
+    this.rails.querySelectorAll('.patching').forEach(x => x.classList.remove('patching'))
+  }
+  endpointOf(jack) {
+    const moduleId = jack.closest('[data-module-id]')?.dataset.moduleId
+    return moduleId ? { moduleId, port: jack.dataset.port, dir: jack.dataset.dir } : null
+  }
+  // A patch has no inherent direction on a real rack — you can start at either end.
+  // canConnect does care, so order the pair before handing it over.
+  patch(a, b) {
+    if (!a || !b || a.dir === b.dir) return
+    const [out, into] = a.dir === 'out' ? [a, b] : [b, a]
+    const from = { moduleId: out.moduleId, port: out.port }, to = { moduleId: into.moduleId, port: into.port }
+    const result = canConnect(this.rack(), from, to)
+    if (result.ok) ProjectStore.dispatch(Connect(this.rackId, from, to))
+    else console.warn(`Cannot patch ${from.moduleId}.${from.port} into ${to.moduleId}.${to.port}: ${result.reason}`)
+  }
+  // Drag a cable from one jack to another. A press that never moves stays a plain
+  // click, so the click-then-click way of patching keeps working.
+  beginPatchDrag(e, jackEl) {
+    const from = this.endpointOf(jackEl)
+    if (!from) return
+    e.preventDefault()
+    const anchor = this.canvas.point(from.moduleId, from.port)
+    const layout = ev => {
+      const rect = this.rails.getBoundingClientRect(), zoom = this.canvas.zoom()
+      return { x: (ev.clientX - rect.left) / zoom, y: (ev.clientY - rect.top) / zoom }
+    }
+    let dragging = false
+    const move = ev => {
+      if (!dragging && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return
+      dragging = true
+      this.canvas.setPreview(anchor, layout(ev))
+    }
+    const up = ev => {
+      window.removeEventListener('pointermove', move)
+      this.canvas.setPreview(null, null)
+      if (!dragging) return
+      const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.rack-jack')
+      this.patch(from, target && this.endpointOf(target))
+      this.clearPending()
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up, { once: true })
   }
   drag(e, module, panel) {
     if (e.target.closest('input,select,button')) return
