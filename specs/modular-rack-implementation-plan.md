@@ -17,7 +17,7 @@ Ground rules for every phase:
 |---|---|---|
 | 0 — Foundations | **done** | `cc1c7d3` |
 | 1 — Engine + P0 modules | **done** | `dc0446a` |
-| 2 — Rack view, panels, cables | **done** | |
+| 2 — Rack view, panels, cables | **done** | `7faf785` |
 | 3 — Clock, sequencing, transport | not started | |
 | 4 — Full DAW citizen | not started | |
 | 5 — Persistence and presets | not started | |
