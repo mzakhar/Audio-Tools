@@ -9,8 +9,11 @@ export default {
   type: 'keys',
   name: 'KEYS',
   group: 'io',
-  hp: 28,
+  hp: 40,
   tier: 'native',
+  // Lives in the strip below the rails, not on one. Nothing about patching
+  // changes — it is still an ordinary module with ordinary jacks.
+  dock: 'bottom',
   poly: true,
   polySource: mod => mod.params?.voices ?? 4,
   ports: [
@@ -31,7 +34,7 @@ export default {
   create: midiIn.create,
 
   panel(module, { sendEvent, params }) {
-    const L = keyLayout({ whiteW: 28, whiteH: 72, blackW: 18, blackH: 44 })
+    const L = keyLayout({ whiteW: 34, whiteH: 88, blackW: 22, blackH: 54 })
     const wrapper = document.createElement('div')
     wrapper.className = 'rack-keys'
     wrapper.tabIndex = 0

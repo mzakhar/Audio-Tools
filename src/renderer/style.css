@@ -115,6 +115,8 @@ html, body {
   background-image: linear-gradient(#ffffff0d, #0000001a);
 }
 .rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }
+/* The dock strip below the rails — same panel, bolted to the case instead of a rail. */
+.rack-panel.docked { border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default; }
 .rack-panel header {
   flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
   padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;

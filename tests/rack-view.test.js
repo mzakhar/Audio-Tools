@@ -6,6 +6,8 @@ import { renderPanel } from '../src/renderer/js/components/rack-panel.js'
 import { ModuleBrowser } from '../src/renderer/js/components/module-browser.js'
 import { RackView } from '../src/renderer/js/components/rack-view.js'
 import ProjectStore from '../src/renderer/js/store/ProjectStore.js'
+import MODULES from '../src/renderer/js/rack/modules/index.js'
+import { firstFreeSlot, tidyRack } from '../src/renderer/js/rack/rack-layout.js'
 
 describe('rack panel', () => {
   it('renders registry controls and labelled jacks', () => {
@@ -42,6 +44,27 @@ describe('rack panel', () => {
     const before = view.rack().cables.length
     view.patch({ moduleId: 'starter-vca', port: 'in', dir: 'in' }, { moduleId: 'starter-vco', port: 'fm', dir: 'in' })
     expect(view.rack().cables).toHaveLength(before)
+    view.destroy()
+  })
+
+  it('docks a dock:bottom module below the rails, clear of rail layout', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.show()
+
+    view.add('keys')
+    const keys = view.rack().modules.at(-1)
+    expect(keys.rail).toBe(-1)
+    expect(view.railTop(view.rack(), keys.rail)).toBe(view.rack().rails * 220)
+
+    // Invisible to rail packing: TIDY must not pull it onto a rail, and a rail
+    // module must still be free to take hp 0.
+    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 20 })
+    expect(tidyRack(view.rack(), MODULES).modules.find(m => m.id === keys.id).hp).toBe(keys.hp)
+
+    // A second docked module stacks beside it, not on top of it.
+    view.add('keys')
+    expect(view.rack().modules.at(-1)).toMatchObject({ rail: -1, hp: MODULES.keys.hp })
     view.destroy()
   })
 

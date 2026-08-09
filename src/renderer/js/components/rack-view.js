@@ -1,6 +1,6 @@
 import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModuleParam, Connect, Disconnect, LoadRackPatch, SetRackRails } from '../store/ProjectStore.js'
 import MODULES, { canConnect } from '../rack/modules/index.js'
-import { canPlace, firstFreeSlot, pxToHp, tidyRack, minRails } from '../rack/rack-layout.js'
+import { canPlace, firstFreeSlot, pxToHp, tidyRack, minRails, moduleWidthHp } from '../rack/rack-layout.js'
 import { renderPanel } from './rack-panel.js'
 import { ModuleBrowser } from './module-browser.js'
 import { RackCables } from './rack-cables.js'
@@ -75,7 +75,18 @@ export class RackView {
   destroy() { this.unsubscribe?.(); this.poll.stop(); this.poll.clear(); this.unmountEngine() }
   getEngineHandle() { return this.engineHandle }
   rack() { return ProjectStore.getState().racks[this.rackId] }
-  add(type) { const rack = this.rack(), slot = firstFreeSlot(rack, MODULES, MODULES[type].hp); if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot)) }
+  // rail -1 is the dock: the strip under the rails. canPlace already rejects a
+  // negative rail and firstFreeSlot/packRail only walk 0..rails, so a docked
+  // module is invisible to rail layout and never collides with one.
+  add(type) {
+    const rack = this.rack(), def = MODULES[type]
+    if (!def) return
+    const slot = def.dock
+      ? { rail: -1, hp: rack.modules.filter(m => m.rail < 0).reduce((x, m) => x + moduleWidthHp(m, MODULES), 0) }
+      : firstFreeSlot(rack, MODULES, def.hp)
+    if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot))
+  }
+  railTop(rack, rail) { return (rail < 0 ? rack.rails : rail) * 220 }
   // `tidy` packs the rails flush on load. On for the canned patches (presets, NEW);
   // off for IMPORT, where the file carries a layout the user arranged themselves.
   load(json, { tidy = false } = {}) {
@@ -94,6 +105,7 @@ export class RackView {
     try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
     this.railHp = rack.railHp; this.railCount = rack.rails
+    this.dockRows = rack.modules.some(m => m.rail < 0) ? 1 : 0
     this.sizeRails()
     // Rebuilding the panels on every store change destroys whatever control the user
     // is holding — an open <select> closes, a slider drag drops. Only rebuild when the
@@ -104,7 +116,7 @@ export class RackView {
     this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
       const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event) })
-      panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; panel.classList.toggle('selected', this.selected === module.id)
+      panel.style.left = `${module.hp * 16}px`; panel.style.top = `${this.railTop(rack, module.rail)}px`; panel.classList.toggle('selected', this.selected === module.id); panel.classList.toggle('docked', module.rail < 0)
       panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)
       this.rails.append(panel)
@@ -133,7 +145,7 @@ export class RackView {
   // `transform: scale()` does not grow the layout box, so the scroll container would
   // clip a zoomed-in rack. Reserve the extra with margins.
   sizeRails() {
-    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220
+    const width = (this.railHp ?? 104) * 16, height = ((this.railCount ?? 2) + (this.dockRows ?? 0)) * 220
     const zoom = Number(getComputedStyle(this.rails).getPropertyValue('--rack-zoom')) || 1
     Object.assign(this.rails.style, {
       width: `${width}px`,
@@ -208,6 +220,7 @@ export class RackView {
     window.addEventListener('pointerup', up, { once: true })
   }
   drag(e, module, panel) {
+    if (module.rail < 0) return // docked: the strip is its only home
     if (e.target.closest('input,select,button,.rack-keys')) return
     // Pointer deltas arrive in screen px; the rails are scaled, so convert to layout px.
     const zoom = this.canvas.zoom()
