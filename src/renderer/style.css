@@ -133,7 +133,10 @@ html, body {
    keeps its own width (flex-basis:100% would stretch it and strand the keys
    against the left edge) and can still centre itself. */
 .rack-panel.docked::after { content: ''; flex: 0 0 100%; height: 0; }
-.rack-panel.docked .rack-keys { order: 1; flex: 0 0 auto; margin: auto auto 0; }
+/* Explicit top margin, not `auto`: align-content:flex-start sizes each wrap line
+   to its content, so there is no free cross space for an auto margin to absorb
+   and the keys end up flush against the knobs. */
+.rack-panel.docked .rack-keys { order: 1; flex: 0 0 auto; margin: 18px auto 0; }
 
 /* Rotary knob: a dial the pointer drags, wrapped around a hidden range input. */
 .rack-panel .knob { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 40px; margin: 0; }
