@@ -196,6 +196,10 @@ Commands that must be defined before MVP: `AddTrack`, `RemoveTrack`, `AddClip`, 
 
 Development is sequential. Each phase fully merges to `main` before the next begins.
 
+### TR-909-style rhythm composer
+
+A dedicated implementation spec now lives at [`specs/tr-909-virtual-rhythm-composer.md`](specs/tr-909-virtual-rhythm-composer.md). It defines the researched TR-909-style layout, instrument controls, pattern data model, sound engine approach, arrangement integration, and acceptance criteria. Treat it as the source of truth for adding a virtual 909-inspired drum machine to Synth.
+
 ### Phase 0 — Foundation (current sprint)
 - [ ] Migrate build system to `electron-vite`; convert all IIFEs to ES modules
 - [ ] Set up Vitest; write smoke tests for existing Sequencer and palette round-trips

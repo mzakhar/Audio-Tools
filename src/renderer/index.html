@@ -42,6 +42,8 @@
         <button id="arr-stop-btn" class="transport-btn stop">■ Stop</button>
         <label class="knob-label" for="arr-bpm">BPM</label>
         <input type="number" id="arr-bpm" min="40" max="240" value="120" aria-label="Tempo in BPM">
+        <span class="project-bar-sep" aria-hidden="true"></span>
+        <button id="arr-add-track-btn" class="transport-btn">+ TRACK</button>
       </div>
       <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
       <div id="piano-roll-drawer" class="pr-drawer" role="dialog" aria-modal="true" aria-labelledby="pr-drawer-title" style="display:none">
@@ -78,6 +80,7 @@
         <button class="tab active" data-palette="classic" role="tab" aria-selected="true">CLASSIC</button>
         <button class="tab" data-palette="fm" role="tab" aria-selected="false">FM SYNTH</button>
         <button class="tab" data-palette="drum" role="tab" aria-selected="false">DRUM MACHINE</button>
+        <button class="tab" data-palette="tr909" role="tab" aria-selected="false">909</button>
         <button class="tab" data-palette="pad" role="tab" aria-selected="false">PAD / AMBIENT</button>
       </div>
       <div id="master-vol-wrap">
@@ -96,6 +99,8 @@
     <section id="knob-panel" aria-label="Palette parameters" role="tabpanel">
       <!-- Populated dynamically by app.js -->
     </section>
+
+    <section id="tr909-view" aria-label="909 rhythm composer" role="tabpanel" style="display:none"></section>
 
     <section id="keyboard-section" aria-label="On-screen keyboard">
       <div id="keyboard-wrap">
