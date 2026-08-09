@@ -1,4 +1,5 @@
 import { getModule, paramDefaults } from '../rack/modules/index.js'
+import { renderKnob } from './knob.js'
 
 export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
   const def = getModule(module.type)
@@ -29,6 +30,8 @@ export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
     }
     input.dataset.param = param.key
     input.addEventListener('input', () => onParam?.(module.id, param.key, input.type === 'checkbox' ? input.checked : (param.options ? input.value : Number(input.value))))
+    // A docked panel has width but little height: knobs in a row, not stacked sliders.
+    if (def.dock && input.type === 'range') { body.append(renderKnob(param, input)); continue }
     label.append(input); body.append(label)
   }
   const custom = def.panel?.(module, {

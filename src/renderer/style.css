@@ -116,13 +116,41 @@ html, body {
 }
 .rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }
 /* The dock strip below the rails — same panel, bolted to the case instead of a rail. */
-/* Deeper than a rail panel — keep in step with DOCK_H in rack-view.js. */
-.rack-panel.docked { height: 256px; border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default; }
-/* Cables into the dock come down from the rails above, so its jacks sit at the
-   top of the panel rather than the bottom. Flex order, not a second DOM path. */
-.rack-panel.docked header { order: -2; }
-.rack-panel.docked .rack-jacks { order: -1; padding: 0 0 4px; }
+/* Deeper than a rail panel — keep in step with DOCK_H in rack-view.js.
+   Row-wrap, so knobs and jacks share one band and the keyboard takes its own
+   line below. Same DOM as any other panel; only the flow differs. */
+.rack-panel.docked {
+  height: 232px; flex-flow: row wrap; align-content: flex-start; gap: 0;
+  border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default;
+}
+/* KEYS needs no nameplate — a piano keyboard is self-evident, and the row is
+   worth more as key height. */
+.rack-panel.docked header { display: none; }
+.rack-panel.docked .rack-params { flex: 0 1 auto; display: flex; gap: 14px; overflow: visible; }
+.rack-panel.docked .rack-jacks { margin-left: auto; align-items: flex-start; padding: 0; }
 .rack-panel.docked .rack-jacks-in { border-top: none; }
+/* Zero-height full-width item that ends the knob/jack line, so the keyboard
+   keeps its own width (flex-basis:100% would stretch it and strand the keys
+   against the left edge) and can still centre itself. */
+.rack-panel.docked::after { content: ''; flex: 0 0 100%; height: 0; }
+.rack-panel.docked .rack-keys { order: 1; flex: 0 0 auto; margin: auto auto 0; }
+
+/* Rotary knob: a dial the pointer drags, wrapped around a hidden range input. */
+.rack-panel .knob { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 40px; margin: 0; }
+.knob-cap { font-size: 8px; letter-spacing: .4px; color: #b9c4d0; white-space: nowrap; }
+.knob-dial {
+  --angle: 0deg;
+  position: relative; width: 30px; height: 30px; border-radius: 50%; cursor: ns-resize;
+  background: radial-gradient(circle at 50% 35%, #4c545e, #23272c 70%);
+  border: 1px solid #6d7681; box-shadow: 0 1px 2px #0006;
+}
+.knob-dial::after {
+  content: ''; position: absolute; left: 50%; top: 3px; width: 2px; height: 11px; margin-left: -1px;
+  background: var(--accent); border-radius: 1px; transform-origin: 50% 12px; transform: rotate(var(--angle));
+}
+/* Focusable and keyboard-operable, just not painted. */
+#rack-view .rack-panel .knob input[type=range] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.knob:focus-within .knob-dial { border-color: var(--accent); }
 .rack-panel header {
   flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
   padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;

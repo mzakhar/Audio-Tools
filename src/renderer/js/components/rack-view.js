@@ -2,6 +2,7 @@ import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModulePa
 import MODULES, { canConnect } from '../rack/modules/index.js'
 import { canPlace, firstFreeSlot, pxToHp, tidyRack, minRails, moduleWidthHp } from '../rack/rack-layout.js'
 import { renderPanel } from './rack-panel.js'
+import { paintKnob } from './knob.js'
 import { ModuleBrowser } from './module-browser.js'
 import { RackCables } from './rack-cables.js'
 import RackEngine from '../rack/rack-engine.js'
@@ -16,7 +17,7 @@ const DEFAULT_ZOOM = 1.6
 
 // The dock is deeper than a 3U rail: a keyboard plus its jacks and knobs does not
 // fit in 220px. Keep in step with `.rack-panel.docked` height in style.css.
-const DOCK_H = 260
+const DOCK_H = 236
 
 // Kept in patch form so NEW and the empty-rack bootstrap both go through importPatch.
 const starter = {
@@ -142,7 +143,7 @@ export class RackView {
         const input = panel.querySelector(`[data-param="${key}"]`)
         if (!input || input === document.activeElement) continue
         if (input.type === 'checkbox') input.checked = !!value
-        else if (String(input.value) !== String(value)) input.value = value
+        else if (String(input.value) !== String(value)) { input.value = value; paintKnob(input) }
       }
     }
   }

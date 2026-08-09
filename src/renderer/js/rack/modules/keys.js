@@ -9,7 +9,7 @@ export default {
   type: 'keys',
   name: 'KEYS',
   group: 'io',
-  hp: 40,
+  hp: 48,
   tier: 'native',
   // Lives in the strip below the rails, not on one. Nothing about patching
   // changes — it is still an ordinary module with ordinary jacks.
@@ -34,7 +34,7 @@ export default {
   create: midiIn.create,
 
   panel(module, { sendEvent, params }) {
-    const L = keyLayout({ whiteW: 34, whiteH: 88, blackW: 22, blackH: 54 })
+    const L = keyLayout({ whiteW: 44, whiteH: 150, blackW: 28, blackH: 92 })
     const wrapper = document.createElement('div')
     wrapper.className = 'rack-keys'
     wrapper.tabIndex = 0
