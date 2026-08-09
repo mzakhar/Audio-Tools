@@ -67,7 +67,7 @@ function makeRegistry() {
       const g = ctx.createGain()
       return {
         inputs: { in: [g], cv: [g.gain] }, outputs: {}, output: g,
-        setParam: vi.fn(), dispose: vi.fn(() => g.disconnect())
+        setParam: vi.fn(), setInputPatched: vi.fn(), dispose: vi.fn(() => g.disconnect())
       }
     })
   }
@@ -323,6 +323,28 @@ describe('RackEngine', () => {
       inst.onEvent = vi.fn()
       RackEngine.emitEvent(handle, 'm-1', 'out', { type: 'trig', time: 0 })
       expect(inst.onEvent).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('normalled inputs', () => {
+    it('tells a module which of its inputs a cable landed on', () => {
+      const handle = mount(rack(
+        [mod('m-1', 'src'), mod('m-2', 'dst')],
+        [cable('c-1', 'm-1', 'out', 'm-2', 'cv')]
+      ))
+      const calls = RackEngine.getInstance(handle, 'm-2').setInputPatched.mock.calls
+      expect(calls).toContainEqual(['cv', true])
+      expect(calls).toContainEqual(['in', false])
+    })
+
+    it('restores the normal when the cable is pulled', () => {
+      const patched = rack([mod('m-1', 'src'), mod('m-2', 'dst')], [cable('c-1', 'm-1', 'out', 'm-2', 'cv')])
+      const handle = mount(patched)
+      const inst = RackEngine.getInstance(handle, 'm-2')
+      inst.setInputPatched.mockClear()
+
+      RackEngine.update(handle, rack([mod('m-1', 'src'), mod('m-2', 'dst')], []))
+      expect(inst.setInputPatched.mock.calls).toContainEqual(['cv', false])
     })
   })
 

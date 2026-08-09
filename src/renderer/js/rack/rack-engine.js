@@ -131,6 +131,20 @@ function disconnectCable(handle, cableId) {
   handle.cables.delete(cableId)
 }
 
+// A normalled input — VCA's CV resting at unity so an unpatched VCA still
+// passes audio — has to drop its normal the moment a cable lands on it, or the
+// patched signal adds to unity instead of replacing it. Only the engine knows
+// the cables, so the engine tells the module; the module just owns the switch.
+function syncNormals(handle) {
+  for (const [id, entry] of handle.mods) {
+    if (!entry.inst.setInputPatched) continue
+    for (const port of entry.def?.ports || []) {
+      if (port.dir !== 'in') continue
+      entry.inst.setInputPatched(port.id, handle.rack.cables.some(c => c.to.moduleId === id && c.to.port === port.id))
+    }
+  }
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 const RackEngine = {
@@ -153,6 +167,7 @@ const RackEngine = {
     }
     const cycleCables = findCycleCables(handle.rack)
     for (const cable of handle.rack.cables) connectCable(handle, cable, cycleCables)
+    syncNormals(handle)
     return handle
   },
 
@@ -228,6 +243,7 @@ const RackEngine = {
     for (const cable of next.cables) {
       if (!handle.cables.has(cable.id)) connectCable(handle, cable, cycleCables)
     }
+    syncNormals(handle)
     return handle
   },
 

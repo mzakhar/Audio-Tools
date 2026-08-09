@@ -8,10 +8,11 @@
 // (sign-preserving x^2) curve; curve = null for lin is an identity
 // pass-through, so response switches without rewiring.
 //
-// ponytail: the CV input is normalled to unity via a ConstantSourceNode(1)
-// so an unpatched VCA passes audio at the GAIN knob. The engine doesn't yet
-// tell modules which inputs are patched, so setNormalled(on) is exposed for
-// the engine to call once it does; normal defaults ON.
+// The CV input is normalled to unity via a ConstantSourceNode(1) so an
+// unpatched VCA passes audio at the GAIN knob. The engine calls
+// setInputPatched() to drop that normal when a cable lands on CV — otherwise
+// the patched envelope would add to unity instead of replacing it, and the VCA
+// would sit wide open.
 
 export default {
   type: 'vca',
@@ -72,7 +73,9 @@ export default {
         out: voices.map(v => v.vca)
       },
 
-      setNormalled(on) {
+      setInputPatched(portId, patched) {
+        if (portId !== 'cv') return
+        const on = !patched
         for (const v of voices) {
           if (on === v.normalled) continue
           if (on) v.normalSource.connect(v.vca.gain)
