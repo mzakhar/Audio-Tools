@@ -123,6 +123,26 @@ export class ArrangementView {
 
     this._selectedTrackId = null
 
+    // Scrollbars
+    const SB = 8 // scrollbar thickness px
+    this._vScrollTrack = document.createElement('div')
+    this._vScrollTrack.className = 'arr-scrollbar arr-scrollbar-v'
+    this._vScrollThumb = document.createElement('div')
+    this._vScrollThumb.className = 'arr-scroll-thumb'
+    this._vScrollTrack.appendChild(this._vScrollThumb)
+    this._wrapper.appendChild(this._vScrollTrack)
+
+    this._hScrollTrack = document.createElement('div')
+    this._hScrollTrack.className = 'arr-scrollbar arr-scrollbar-h'
+    this._hScrollThumb = document.createElement('div')
+    this._hScrollThumb.className = 'arr-scroll-thumb'
+    this._hScrollTrack.appendChild(this._hScrollThumb)
+    this._wrapper.appendChild(this._hScrollTrack)
+
+    this._SB = SB
+    this._setupScrollbarDrag(this._vScrollThumb, 'v')
+    this._setupScrollbarDrag(this._hScrollThumb, 'h')
+
     // Attach mouse events
     this._onMouseDown   = this._onMouseDown.bind(this)
     this._onMouseMove   = this._onMouseMove.bind(this)
@@ -182,6 +202,7 @@ export class ArrangementView {
     this._drawTracks(ctx, state)
     this._drawPlayhead(ctx, state)
     this._updateTrackHeaders(state)
+    this._updateScrollbars(state)
   }
 
   destroy() {
@@ -508,6 +529,12 @@ export class ArrangementView {
       if (channel) {
         muteBtn.className = 'mute-btn' + (channel.mute ? ' active' : '')
         soloBtn.className = 'solo-btn' + (channel.solo ? ' active' : '')
+        muteBtn.onclick = () => document.dispatchEvent(new CustomEvent('mixer-param', {
+          detail: { channelId: channel.id, param: 'mute', value: !channel.mute }
+        }))
+        soloBtn.onclick = () => document.dispatchEvent(new CustomEvent('mixer-param', {
+          detail: { channelId: channel.id, param: 'solo', value: !channel.solo }
+        }))
       }
 
     })
@@ -519,11 +546,105 @@ export class ArrangementView {
     e.preventDefault()
     const state = this._store.getState()
     const tracks = state.tracks || []
+
+    // Vertical
     const totalH = tracks.length * TRACK_H
-    const visibleH = this._canvas.height - RULER_H
-    const maxScroll = Math.max(0, totalH - visibleH)
-    this._scrollTop = Math.max(0, Math.min(maxScroll, this._scrollTop + e.deltaY * 0.5))
+    const visibleH = this._canvas.height - RULER_H - this._SB
+    const maxScrollTop = Math.max(0, totalH - visibleH)
+    this._scrollTop = Math.max(0, Math.min(maxScrollTop, this._scrollTop + e.deltaY * 0.5))
+
+    // Horizontal (Shift+wheel or trackpad horizontal swipe)
+    const totalW = this._getTotalBeats(state) * this._ppb
+    const visibleW = this._canvas.width - TRACK_HEADER_W - this._SB
+    const maxScrollLeft = Math.max(0, totalW - visibleW)
+    this._scrollLeft = Math.max(0, Math.min(maxScrollLeft, this._scrollLeft + e.deltaX * 0.5))
+
     this.render()
+  }
+
+  _getTotalBeats(state) {
+    let maxBeat = 64
+    for (const track of state.tracks || []) {
+      for (const clip of track.clips || []) {
+        maxBeat = Math.max(maxBeat, clip.startBeat + (clip.duration || 0))
+      }
+    }
+    return maxBeat + 16
+  }
+
+  _updateScrollbars(state) {
+    const tracks = state.tracks || []
+    const SB = this._SB
+    const w = this._canvas.width
+    const h = this._canvas.height
+
+    // ── Vertical ──
+    const totalH = tracks.length * TRACK_H
+    const viewH  = h - RULER_H - SB
+    if (totalH > viewH) {
+      const trackH  = viewH
+      const thumbH  = Math.max(24, (viewH / totalH) * trackH)
+      const thumbTop = (this._scrollTop / (totalH - viewH)) * (trackH - thumbH)
+      this._vScrollTrack.style.display = ''
+      this._vScrollThumb.style.height = thumbH + 'px'
+      this._vScrollThumb.style.top    = thumbTop + 'px'
+    } else {
+      this._vScrollTrack.style.display = 'none'
+      this._scrollTop = 0
+    }
+
+    // ── Horizontal ──
+    const totalW = this._getTotalBeats(state) * this._ppb
+    const viewW  = w - TRACK_HEADER_W - SB
+    if (totalW > viewW) {
+      const trackW  = viewW
+      const thumbW  = Math.max(24, (viewW / totalW) * trackW)
+      const thumbLeft = (this._scrollLeft / (totalW - viewW)) * (trackW - thumbW)
+      this._hScrollTrack.style.display = ''
+      this._hScrollThumb.style.width = thumbW + 'px'
+      this._hScrollThumb.style.left  = thumbLeft + 'px'
+    } else {
+      this._hScrollTrack.style.display = 'none'
+      this._scrollLeft = 0
+    }
+  }
+
+  _setupScrollbarDrag(thumb, axis) {
+    thumb.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const startMouse = axis === 'v' ? e.clientY : e.clientX
+      const startScroll = axis === 'v' ? this._scrollTop : this._scrollLeft
+
+      const onMove = (me) => {
+        const delta = (axis === 'v' ? me.clientY : me.clientX) - startMouse
+        const state = this._store.getState()
+        const tracks = state.tracks || []
+        const SB = this._SB
+
+        if (axis === 'v') {
+          const totalH = tracks.length * TRACK_H
+          const viewH  = this._canvas.height - RULER_H - SB
+          const thumbH = Math.max(24, (viewH / totalH) * viewH)
+          const ratio  = delta / (viewH - thumbH)
+          this._scrollTop = Math.max(0, Math.min(totalH - viewH, startScroll + ratio * (totalH - viewH)))
+        } else {
+          const totalW = this._getTotalBeats(state) * this._ppb
+          const viewW  = this._canvas.width - TRACK_HEADER_W - SB
+          const thumbW = Math.max(24, (viewW / totalW) * viewW)
+          const ratio  = delta / (viewW - thumbW)
+          this._scrollLeft = Math.max(0, Math.min(totalW - viewW, startScroll + ratio * (totalW - viewW)))
+        }
+        this.render()
+      }
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup',   onUp)
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup',   onUp)
+    })
   }
 
   _onContextMenu(e) {
@@ -556,10 +677,17 @@ export class ArrangementView {
 
       // Clicking on empty track area
       _showCtxMenu(e.clientX, e.clientY, [
+        { label: '+ Add Sample', action: () => document.dispatchEvent(new CustomEvent('add-sample-to-track', { detail: { trackId: track.id } })) },
         { label: '✕ Remove Track', danger: true, action: () => this._store.dispatch(RemoveTrack(track.id)) },
       ])
       return
     }
+
+    // Right-click on empty canvas space (below all tracks)
+    _showCtxMenu(e.clientX, e.clientY, [
+      { label: '+ Add Audio Track', action: () => document.dispatchEvent(new CustomEvent('add-audio-track')) },
+      { label: '+ Add MIDI Track',  action: () => document.dispatchEvent(new CustomEvent('add-midi-track')) },
+    ])
   }
 
   _onHeaderContextMenu(e) {
