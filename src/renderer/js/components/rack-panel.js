@@ -1,7 +1,7 @@
 import { getModule, paramDefaults } from '../rack/modules/index.js'
 import { renderKnob } from './knob.js'
 
-export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
+export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}) {
   const def = getModule(module.type)
   const el = document.createElement('article')
   el.className = 'rack-panel'
@@ -10,6 +10,9 @@ export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
   if (!def) { el.textContent = `UNKNOWN\n${module.type}`; return el }
   el.innerHTML = `<header>${def.name}</header>`
   const body = document.createElement('div'); body.className = 'rack-params'
+  // A module that draws its own panel needs the height for it — stack its knobs
+  // and selects across the width instead of down the panel.
+  if (def.panel) body.classList.add('rack-params-compact')
   el.append(body)
   const params = { ...paramDefaults(module.type), ...module.params }
   for (const param of def.params) {
@@ -36,9 +39,18 @@ export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
   }
   const custom = def.panel?.(module, {
     sendEvent: (port, event) => onEvent?.(module.id, port, event),
-    params: () => ({ ...paramDefaults(module.type), ...module.params })
+    // Must read live state: a param change does not rebuild the panel, so the
+    // `module` captured here goes stale the moment a knob moves.
+    params: () => getParams?.(module.id) ?? { ...paramDefaults(module.type), ...module.params },
+    setParam: (key, value) => onParam?.(module.id, key, value)
   })
-  if (custom) el.append(custom)
+  // A panel that draws from params has to redraw when they change. `input` covers
+  // the user turning a control; RackView calls __refresh for undo/preset changes,
+  // which set values silently.
+  if (custom) {
+    el.append(custom)
+    if (custom.refresh) { el.__refresh = custom.refresh; el.addEventListener('input', custom.refresh) }
+  }
   // Inputs and outputs get their own labelled block, the way a real panel is silk-screened.
   for (const dir of ['in', 'out']) {
     const ports = def.ports.filter(port => port.dir === dir)

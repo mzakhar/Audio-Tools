@@ -1,5 +1,5 @@
 import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModuleParam, Connect, Disconnect, LoadRackPatch, SetRackRails } from '../store/ProjectStore.js'
-import MODULES, { canConnect } from '../rack/modules/index.js'
+import MODULES, { canConnect, paramDefaults } from '../rack/modules/index.js'
 import { canPlace, firstFreeSlot, pxToHp, tidyRack, minRails, moduleWidthHp } from '../rack/rack-layout.js'
 import { renderPanel } from './rack-panel.js'
 import { paintKnob } from './knob.js'
@@ -98,6 +98,12 @@ export class RackView {
     if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot))
   }
   railTop(rack, rail) { return (rail < 0 ? rack.rails : rail) * 220 }
+  // Live params for a module, read from the store at call time. Panels that draw
+  // from params (KEYS, ALGO) outlive the snapshot they were built with.
+  moduleParams(moduleId) {
+    const mod = this.rack()?.modules.find(m => m.id === moduleId)
+    return mod ? { ...paramDefaults(mod.type), ...mod.params } : {}
+  }
   // `tidy` packs the rails flush on load. On for the canned patches (presets, NEW);
   // off for IMPORT, where the file carries a layout the user arranged themselves.
   load(json, { tidy = false } = {}) {
@@ -126,7 +132,7 @@ export class RackView {
     this.shape = shape
     this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
-      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event) })
+      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event), getParams: id => this.moduleParams(id) })
       panel.style.left = `${module.hp * 16}px`; panel.style.top = `${this.railTop(rack, module.rail)}px`; panel.classList.toggle('selected', this.selected === module.id); panel.classList.toggle('docked', module.rail < 0)
       panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)
@@ -151,6 +157,7 @@ export class RackView {
         if (input.type === 'checkbox') input.checked = !!value
         else if (String(input.value) !== String(value)) { input.value = value; paintKnob(input) }
       }
+      panel.__refresh?.()
     }
   }
   // `transform: scale()` does not grow the layout box, so the scroll container would
