@@ -86,6 +86,18 @@ html, body {
   min-height: 0;
 }
 
+#rack-view { flex: 1; min-height: 0; position: relative; background: var(--bg); overflow: hidden; }
+.rack-toolbar { height: 42px; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.rack-toolbar button, .module-browser button { font: inherit; color: var(--text); background: var(--bg3); border: 1px solid var(--border); padding: 5px 8px; cursor: pointer; }
+.rack-toolbar input { vertical-align: middle; }
+.module-browser { display: none; width: 190px; flex: 0 0 190px; padding: 8px; overflow: auto; border-right: 1px solid var(--border); }
+.browser-open .module-browser { display: block; }
+.module-browser input { width: 100%; margin-bottom: 8px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 5px; }
+.module-browser h3 { color: var(--text-dim); font-size: 10px; margin: 10px 0 4px; }.module-browser button { display: block; width: 100%; text-align: left; margin: 2px 0; }
+.rack-scroll { flex: 1; overflow: auto; padding: 24px; }.rack-rails { --rack-zoom: 1; position: relative; transform-origin: top left; transform: scale(var(--rack-zoom)); background: repeating-linear-gradient(to bottom, #191919 0 216px, #080808 216px 220px); }
+.rack-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.rack-panel { position: absolute; z-index: 3; min-height: 176px; padding: 7px; color: var(--text); background: #30343a; border: 1px solid #59616c; user-select: none; }.rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }.rack-panel header { color: var(--text-bright); font-weight: bold; margin-bottom: 7px; }.rack-panel label { display: block; font-size: 9px; margin: 4px 0; }.rack-panel input,.rack-panel select { width: 100%; }.rack-jacks { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }.rack-jack { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 2px solid #aaa; background: #111; cursor: crosshair; }.rack-jack.audio { border-color: #00e5ff; }.rack-jack.cv { border-color: #ff00aa; }.rack-jack.gate { border-color: #39ff14; }.rack-jack.patching { background: #eee; }
+
 /* ─── Record Bar ────────────────────────────────────────────────────────────── */
 #record-bar {
   display: flex;

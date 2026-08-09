@@ -18,6 +18,7 @@ import TimelinePlayer from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
+import { RackView } from './components/rack-view.js'
 import ShortcutManager from './shortcuts.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
@@ -33,8 +34,9 @@ const activeVoices = {} // midi note → voice object
 let _arrangementView = null
 let _pianoRoll = null
 let _tr909View = null
+let _rackView = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
-let _currentMode = 'synth'    // 'synth' | 'arrange'
+let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack'
 let _selectedArrangeTrackId = null
 let _rafId = null
 let _midiRecording = false
@@ -403,6 +405,7 @@ function switchMode(mode) {
   _currentMode = mode
   const appEl     = document.getElementById('app')
   const arrangeEl = document.getElementById('arrange-view')
+  const rackEl = document.getElementById('rack-view')
   document.querySelectorAll('.tool-btn').forEach(btn => {
     const isActive = btn.dataset.tool === mode
     btn.classList.toggle('active', isActive)
@@ -418,9 +421,17 @@ function switchMode(mode) {
     requestAnimationFrame(() => {
       if (_arrangementView) _arrangementView._onResize()
     })
+  } else if (mode === 'rack') {
+    _tr909View?.stop()
+    appEl.style.display = 'none'
+    arrangeEl.style.display = 'none'
+    stopArrangeLoop()
+    _rackView?.show()
   } else {
     appEl.style.display = ''
     arrangeEl.style.display = 'none'
+    rackEl.style.display = 'none'
+    _rackView?.hide()
     stopArrangeLoop()
   }
 }
@@ -971,6 +982,7 @@ function initShortcuts() {
   // Mode switching
   ShortcutManager.register({ key: 'f1' }, () => switchMode('synth'))
   ShortcutManager.register({ key: 'f2' }, () => switchMode('arrange'))
+  ShortcutManager.register({ key: 'f3' }, () => switchMode('rack'))
 
   // Transport — Space = play/stop toggle (mode-aware)
   ShortcutManager.register({ key: ' ' }, () => {
@@ -1033,6 +1045,8 @@ function boot() {
       audioStore: AudioStore
     })
   }
+  const rackContainer = document.getElementById('rack-view')
+  if (rackContainer) _rackView = new RackView(rackContainer, { hasWorklet: () => AudioEngine.hasWorklet() })
 
   // Subscribe store to keep mixer in sync
   ProjectStore.subscribe(state => syncMixerStrips(state))
