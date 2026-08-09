@@ -27,6 +27,7 @@ export function renderPanel(module, { onParam, onJack } = {}) {
       if (param.toggle) input.checked = !!params[param.key]
       else Object.assign(input, { min: param.min, max: param.max, step: param.step, value: params[param.key] })
     }
+    input.dataset.param = param.key
     input.addEventListener('input', () => onParam?.(module.id, param.key, input.type === 'checkbox' ? input.checked : (param.options ? input.value : Number(input.value))))
     label.append(input); body.append(label)
   }

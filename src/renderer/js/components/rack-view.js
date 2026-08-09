@@ -74,17 +74,42 @@ export class RackView {
     // An engine failure must not take the panels down with it.
     try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
-    this.rails.replaceChildren(this.canvas.canvas)
     this.railHp = rack.railHp; this.railCount = rack.rails
     this.sizeRails()
+    // Rebuilding the panels on every store change destroys whatever control the user
+    // is holding — an open <select> closes, a slider drag drops. Only rebuild when the
+    // rack's shape actually changed; otherwise push values into the existing controls.
+    const shape = JSON.stringify([rack.rails, rack.railHp, rack.modules.map(m => [m.id, m.type, m.rail, m.hp]), rack.cables.map(c => c.id)])
+    if (shape === this.shape) { this.syncValues(rack); this.canvas.setCables(rack.cables); return }
+    this.shape = shape
+    this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
       const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args) })
       panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; panel.classList.toggle('selected', this.selected === module.id)
-      panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) { this.selected = module.id; this.render() } }
+      panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)
       this.rails.append(panel)
     }
     this.canvas.setCables(rack.cables)
+  }
+  // Selection is a CSS class, not a reason to rebuild the DOM.
+  select(moduleId) {
+    this.selected = moduleId
+    for (const panel of this.rails.querySelectorAll('.rack-panel')) panel.classList.toggle('selected', panel.dataset.moduleId === moduleId)
+  }
+  // Params changed underneath us (undo, preset param edit, automation). Update the
+  // controls, but never the one the user is currently interacting with.
+  syncValues(rack) {
+    for (const module of rack.modules) {
+      const panel = this.rails.querySelector(`[data-module-id="${module.id}"]`)
+      if (!panel) continue
+      for (const [key, value] of Object.entries(module.params || {})) {
+        const input = panel.querySelector(`[data-param="${key}"]`)
+        if (!input || input === document.activeElement) continue
+        if (input.type === 'checkbox') input.checked = !!value
+        else if (String(input.value) !== String(value)) input.value = value
+      }
+    }
   }
   // `transform: scale()` does not grow the layout box, so the scroll container would
   // clip a zoomed-in rack. Reserve the extra with margins.
@@ -126,7 +151,7 @@ export class RackView {
     const left = ev => start.hp * 16 + (ev.clientX - start.x) / zoom
     const top = ev => start.rail * 220 + (ev.clientY - start.y) / zoom
     const move = ev => { panel.style.left = `${left(ev)}px`; panel.style.top = `${top(ev)}px`; this.canvas.draw() }
-    const up = ev => { window.removeEventListener('pointermove', move); const rack = this.rack(), rail = Math.max(0, Math.min(rack.rails - 1, Math.round(top(ev) / 220))), hp = Math.max(0, pxToHp(left(ev))); if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp)); else this.render() }
+    const up = ev => { window.removeEventListener('pointermove', move); const rack = this.rack(), rail = Math.max(0, Math.min(rack.rails - 1, Math.round(top(ev) / 220))), hp = Math.max(0, pxToHp(left(ev))); if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp)); else { panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; this.canvas.draw() } }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true })
   }
 }
