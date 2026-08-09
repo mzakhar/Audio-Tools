@@ -11,11 +11,23 @@ import { RackPoll } from '../rack/rack-poll.js'
 
 const presets = import.meta.glob('../../presets/racks/*.json', { eager: true, import: 'default' })
 
-const starter = { name: 'Starter rack', rails: 3, railHp: 104, modules: [
-  { id: 'starter-vco', type: 'vco', rail: 0, hp: 0, params: {}, atten: {} },
-  { id: 'starter-vca', type: 'vca', rail: 0, hp: 12, params: {}, atten: {} },
-  { id: 'starter-out', type: 'out', rail: 0, hp: 20, params: {}, atten: {} }
-], cables: [] }
+// Kept in patch form so NEW and the empty-rack bootstrap both go through importPatch.
+const starter = {
+  format: 'synthrack',
+  version: 1,
+  rack: {
+    name: 'Starter rack', rails: 2, railHp: 104,
+    modules: [
+      { id: 'starter-vco', type: 'vco', rail: 0, hp: 0, params: {}, atten: {} },
+      { id: 'starter-vca', type: 'vca', rail: 0, hp: 12, params: {}, atten: {} },
+      { id: 'starter-out', type: 'out', rail: 0, hp: 20, params: {}, atten: {} }
+    ],
+    cables: [
+      { id: 'starter-vco-vca', from: { moduleId: 'starter-vco', port: 'out' }, to: { moduleId: 'starter-vca', port: 'in' } },
+      { id: 'starter-vca-out', from: { moduleId: 'starter-vca', port: 'out' }, to: { moduleId: 'starter-out', port: 'l' } }
+    ]
+  }
+}
 
 export class RackView {
   constructor(container, { hasWorklet, getAudioContext, getMasterInput } = {}) {
@@ -37,7 +49,7 @@ export class RackView {
     this.rails.addEventListener('dblclick', e => { const hit = this.canvas.hitTest(e.offsetX, e.offsetY); if (hit) ProjectStore.dispatch(Disconnect(this.rackId, hit.id)) })
     this.unsubscribe = ProjectStore.subscribe(() => this.render())
   }
-  show() { this.container.style.display = 'flex'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) { for (const mod of starter.modules) ProjectStore.dispatch(AddModule(this.rackId, mod.type, mod)) } } this.render() }
+  show() { this.container.style.display = 'grid'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter) } this.render() }
   hide() { this.container.style.display = 'none'; this.poll.stop() }
   destroy() { this.unsubscribe?.(); this.poll.stop(); this.poll.clear(); this.unmountEngine() }
   getEngineHandle() { return this.engineHandle }
@@ -49,7 +61,8 @@ export class RackView {
     if (!this.rackId) return
     const rack = this.rack(); if (!rack) { this.unmountEngine(); return }
     const count = this.container.querySelector('.rack-count'); if (count) { const warning = rack.modules.length > 96 || rack.cables.length > 128; count.textContent = `${rack.modules.length}M ${rack.cables.length}C`; count.classList.toggle('warning', warning) }
-    this.syncEngine(rack)
+    // An engine failure must not take the panels down with it.
+    try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
     this.rails.replaceChildren(this.canvas.canvas)
     this.rails.style.width = `${rack.railHp * 16}px`; this.rails.style.height = `${rack.rails * 220}px`

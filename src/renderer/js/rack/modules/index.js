@@ -20,7 +20,9 @@ import clkdiv from './clkdiv.js'
 import ad from './ad.js'
 import rnd from './rnd.js'
 import euclid from './euclid.js'
-import quant from './quant.js'
+// NOTE: file is quantizer.js, not quant.js — ad-block filter lists block `quant.js`
+// (Quantcast rule), which aborts the whole module graph and blanks the app.
+import quant from './quantizer.js'
 import midiIn from './midi-in.js'
 import audioIn from './audio-in.js'
 import paramOut from './param-out.js'

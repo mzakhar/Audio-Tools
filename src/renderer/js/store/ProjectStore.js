@@ -450,7 +450,7 @@ export function SetEffectParam(trackId, effectId, param, value) {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_RACK = {
-  rails: 3,
+  rails: 2,
   railHp: 104,
   cableColorMode: 'kind',
   polyLimit: 8,

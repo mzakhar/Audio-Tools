@@ -86,7 +86,9 @@ html, body {
   min-height: 0;
 }
 
-#rack-view { flex: 1; min-height: 0; position: relative; background: var(--bg); overflow: hidden; }
+/* toolbar spans the top row; browser + scroll share the row below it */
+#rack-view { flex: 1; min-height: 0; position: relative; background: var(--bg); overflow: hidden; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; }
+.rack-toolbar { grid-column: 1 / -1; }
 .rack-toolbar { height: 42px; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .rack-toolbar button, .module-browser button { font: inherit; color: var(--text); background: var(--bg3); border: 1px solid var(--border); padding: 5px 8px; cursor: pointer; }
 .rack-toolbar input { vertical-align: middle; }
@@ -95,8 +97,52 @@ html, body {
 .module-browser input { width: 100%; margin-bottom: 8px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 5px; }
 .module-browser h3 { color: var(--text-dim); font-size: 10px; margin: 10px 0 4px; }.module-browser button { display: block; width: 100%; text-align: left; margin: 2px 0; }
 .rack-scroll { flex: 1; overflow: auto; padding: 24px; }.rack-rails { --rack-zoom: 1; position: relative; transform-origin: top left; transform: scale(var(--rack-zoom)); background: repeating-linear-gradient(to bottom, #191919 0 216px, #080808 216px 220px); }
-.rack-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-.rack-panel { position: absolute; z-index: 3; min-height: 176px; padding: 7px; color: var(--text); background: #30343a; border: 1px solid #59616c; user-select: none; }.rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }.rack-panel header { color: var(--text-bright); font-weight: bold; margin-bottom: 7px; }.rack-panel label { display: block; font-size: 9px; margin: 4px 0; }.rack-panel input,.rack-panel select { width: 100%; }.rack-jacks { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }.rack-jack { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 2px solid #aaa; background: #111; cursor: crosshair; }.rack-jack.audio { border-color: #00e5ff; }.rack-jack.cv { border-color: #ff00aa; }.rack-jack.gate { border-color: #39ff14; }.rack-jack.patching { background: #eee; }
+/* Above .rack-panel (z-index 3) — patch cables run over the front panels, not behind them. */
+.rack-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+/* Beats the global `input[type=range] { width: 90px }`, which overflows narrow HP panels. */
+#rack-view .rack-panel input, #rack-view .rack-panel select { width: 100%; box-sizing: border-box; }
+/* A panel fills the full 3U rail height (216px of the 220px pitch), like real hardware. */
+.rack-panel {
+  position: absolute; z-index: 3; box-sizing: border-box; height: 216px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 6px; color: var(--text); background: #30343a;
+  border: 1px solid #59616c; border-radius: 2px; user-select: none;
+  background-image: linear-gradient(#ffffff0d, #0000001a);
+}
+.rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }
+.rack-panel header {
+  flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
+  padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;
+}
+/* Controls take the slack; jack blocks stay pinned to the bottom of the panel. */
+.rack-params { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.rack-panel label { display: block; font-size: 8px; line-height: 1.1; letter-spacing: .4px; margin: 0 0 4px; color: #b9c4d0; }
+#rack-view .rack-panel input[type=range] { height: 3px; margin: 1px 0 0; }
+#rack-view .rack-panel input[type=range]::-webkit-slider-thumb { width: 9px; height: 9px; }
+#rack-view .rack-panel select { font-size: 9px; padding: 0 2px; height: 15px; background: #1b1e22; color: var(--text-bright); border: 1px solid #59616c; }
+#rack-view .rack-panel input[type=checkbox] { width: 12px; height: 12px; }
+
+.rack-jacks { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 5px; padding-top: 4px; }
+.rack-jacks-in { border-top: 1px dashed #ffffff1a; }
+.rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 20px; gap: 1px; }
+.rack-jack-slot em {
+  font-style: normal; font-size: 7px; line-height: 1; letter-spacing: .2px;
+  color: #97a3b0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rack-jack {
+  width: 14px; height: 14px; padding: 0; border-radius: 50%;
+  border: 2px solid #aaa; background: #111; cursor: crosshair;
+  box-shadow: inset 0 0 0 1px #0008;
+}
+/* Colour = signal kind; filled centre = output, hollow = input. */
+.rack-jack.audio { border-color: #00e5ff; }
+.rack-jack.cv    { border-color: #ff00aa; }
+.rack-jack.gate  { border-color: #39ff14; }
+.rack-jack.out.audio { background: #00e5ff40; }
+.rack-jack.out.cv    { background: #ff00aa40; }
+.rack-jack.out.gate  { background: #39ff1440; }
+.rack-jack:hover { filter: brightness(1.6); }
+.rack-jack.patching { background: #eee; }
 
 /* ─── Record Bar ────────────────────────────────────────────────────────────── */
 #record-bar {
@@ -1035,6 +1081,7 @@ button { font-family: var(--font-mono); }
   position: absolute;
   left: 0;
   top: 32px; /* below ruler */
+  bottom: 0;  /* without this the absolutely-positioned list is 0px tall and clips every header */
   width: 160px;
   overflow: hidden;
   background: var(--bg2);
@@ -1178,10 +1225,12 @@ button { font-family: var(--font-mono); }
   max-width: 72px;
   text-align: center;
 }
-.mixer-fader {
+/* Attribute selector needed: plain `.mixer-fader` loses to `input[type=range] { width: 90px }`,
+   which is wider than the 80px strip and spills over the neighbouring channel. */
+input[type=range].mixer-fader {
   width: 64px;
 }
-.mixer-pan {
+input[type=range].mixer-pan {
   width: 48px;
 }
 .mixer-strip .mute-btn,

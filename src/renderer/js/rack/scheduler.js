@@ -10,8 +10,10 @@ export class LookaheadScheduler {
     steps = Infinity,
     lookahead = LOOK_AHEAD_SEC,
     interval = SCHEDULE_INTERVAL,
-    setTimer = setTimeout,
-    clearTimer = clearTimeout
+    // Wrapped, not passed by reference: `this.setTimer(...)` would call the raw
+    // timer function with `this` = the scheduler, which browsers reject.
+    setTimer = (fn, ms) => setTimeout(fn, ms),
+    clearTimer = (id) => clearTimeout(id)
   }) {
     this.getCurrentTime = getCurrentTime
     this.schedule = schedule

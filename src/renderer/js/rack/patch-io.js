@@ -27,6 +27,20 @@ export function importPatch(json, registry) {
       atten: module.atten || {},
     }
   }) : []
-  rack.cables = Array.isArray(rack.cables) ? rack.cables : []
+  // A cable naming a port no module has is dead weight: drop it and say so,
+  // rather than leaving a patch that looks wired but makes no sound.
+  const typeOf = Object.fromEntries(rack.modules.map(m => [m.id, m.type]))
+  rack.cables = (Array.isArray(rack.cables) ? rack.cables : []).filter(cable => {
+    for (const [side, end] of [['from', cable.from], ['to', cable.to]]) {
+      const known = registry[typeOf[end?.moduleId]]
+      const port = known?.ports.find(p => p.id === end.port)
+      const wantsOut = side === 'from'
+      if (!port || wantsOut !== (port.dir === 'out')) {
+        warnings.push(`Dropped cable ${cable.id ?? ''}: ${typeOf[end?.moduleId] ?? '?'}.${end?.port} is not an ${wantsOut ? 'output' : 'input'}`)
+        return false
+      }
+    }
+    return true
+  })
   return { rack, warnings }
 }

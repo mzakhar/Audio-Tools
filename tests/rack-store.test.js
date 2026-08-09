@@ -38,7 +38,7 @@ describe('rack store', () => {
       ProjectStore.dispatch(AddRack('Lead Rack'))
       const rack = firstRack()
       expect(rack.name).toBe('Lead Rack')
-      expect(rack.rails).toBe(3)
+      expect(rack.rails).toBe(2)
       expect(rack.railHp).toBe(104)
       expect(rack.polyLimit).toBe(8)
       expect(rack.modules).toEqual([])
