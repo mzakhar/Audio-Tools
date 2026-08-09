@@ -14,6 +14,10 @@ const presets = import.meta.glob('../../presets/racks/*.json', { eager: true, im
 // Panels are small at 1:1; the rack is more usable zoomed in with less rail visible.
 const DEFAULT_ZOOM = 1.6
 
+// The dock is deeper than a 3U rail: a keyboard plus its jacks and knobs does not
+// fit in 220px. Keep in step with `.rack-panel.docked` height in style.css.
+const DOCK_H = 260
+
 // Kept in patch form so NEW and the empty-rack bootstrap both go through importPatch.
 const starter = {
   format: 'synthrack',
@@ -145,7 +149,7 @@ export class RackView {
   // `transform: scale()` does not grow the layout box, so the scroll container would
   // clip a zoomed-in rack. Reserve the extra with margins.
   sizeRails() {
-    const width = (this.railHp ?? 104) * 16, height = ((this.railCount ?? 2) + (this.dockRows ?? 0)) * 220
+    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220 + (this.dockRows ?? 0) * DOCK_H
     const zoom = Number(getComputedStyle(this.rails).getPropertyValue('--rack-zoom')) || 1
     Object.assign(this.rails.style, {
       width: `${width}px`,

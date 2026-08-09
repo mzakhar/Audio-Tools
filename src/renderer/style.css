@@ -116,7 +116,13 @@ html, body {
 }
 .rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }
 /* The dock strip below the rails — same panel, bolted to the case instead of a rail. */
-.rack-panel.docked { border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default; }
+/* Deeper than a rail panel — keep in step with DOCK_H in rack-view.js. */
+.rack-panel.docked { height: 256px; border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default; }
+/* Cables into the dock come down from the rails above, so its jacks sit at the
+   top of the panel rather than the bottom. Flex order, not a second DOM path. */
+.rack-panel.docked header { order: -2; }
+.rack-panel.docked .rack-jacks { order: -1; padding: 0 0 4px; }
+.rack-panel.docked .rack-jacks-in { border-top: none; }
 .rack-panel header {
   flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
   padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;
