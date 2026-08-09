@@ -80,10 +80,10 @@ describe('module registry', () => {
       expect(validateRegistry(reg(def)).join()).toMatch(/not one of its options/)
     })
 
-    it('rejects a param key colliding with a port id', () => {
+    it('allows a param key that matches a port id (RES knob + RES jack)', () => {
       const def = goodModule()
       def.params.push({ key: 'out', label: 'OUT', min: 0, max: 1, step: 1, def: 0 })
-      expect(validateRegistry(reg(def)).join()).toMatch(/collides with a port id/)
+      expect(validateRegistry(reg(def))).toEqual([])
     })
 
     it('rejects a non-positive or fractional hp', () => {

@@ -83,6 +83,9 @@ const AudioEngine = {
 
   getContext() { return this._ctx },
   hasRecorder() { return this._workletReady },
+  // Capability, not readiness: worklet-tier rack modules need `addModule`,
+  // which does not exist outside a secure context (the plain-http LAN deploy).
+  hasWorklet() { return typeof this._ctx?.audioWorklet?.addModule === 'function' },
   getMasterInput() { return this._masterGain },
   getCompressor() { return this._compressor },
 

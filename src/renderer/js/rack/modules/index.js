@@ -5,9 +5,17 @@
 // explicitly and reads no globals — that is what makes offline bounce and
 // unit testing possible.
 
-const MODULE_LIST = [
-  // Phase 1 module definitions are registered here.
-]
+import vco from './vco.js'
+import noise from './noise.js'
+import vcf from './vcf.js'
+import adsr from './adsr.js'
+import lfo from './lfo.js'
+import vca from './vca.js'
+import mix from './mix.js'
+import att from './att.js'
+import out from './out.js'
+
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
@@ -91,7 +99,8 @@ export function validateRegistry(registry = MODULES) {
           at(`param "${param.key}" default ${param.def} is outside [${param.min}, ${param.max}]`)
         }
       }
-      if (portIds.has(param.key)) at(`param "${param.key}" collides with a port id`)
+      // A param key may match a port id on purpose — a RES knob next to a RES
+      // CV jack is standard hardware. Params and ports are separate namespaces.
     }
   }
 
