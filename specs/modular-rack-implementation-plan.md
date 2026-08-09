@@ -20,10 +20,12 @@ Ground rules for every phase:
 | 2 — Rack view, panels, cables | **done** | `7faf785` |
 | 3 — Clock, sequencing, transport | **done** | `4a8e50f` |
 | 4 — Full DAW citizen | **done** | `b68fb08` |
-| 5 — Persistence and presets | not started | |
+| 5 — Persistence and presets | **done** | pending |
 | 6 — Remaining modules, polish | not started | |
 
 Landed on `feature/arrange-ux`. Phase 4 adds rack MIDI instruments, audio-in rack inserts, PARAM OUT polling, and offline rack mounts. Suite at 527 tests / 32 files green.
+
+Phase 5 adds lossless `.synthrack` import/export in browser and Electron, patch toolbar actions, and nine native-only shipped presets. Unknown modules are kept intact with a warning; known modules fill missing parameter defaults. Suite at 532 tests / 33 files green.
 
 **Deferred out of phases 0–1** (each marked with a `ponytail:` comment at the site):
 

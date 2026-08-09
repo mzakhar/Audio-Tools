@@ -118,6 +118,18 @@ ipcMain.handle('fs:exportWav', async (_event, buffer, defaultName) => {
   return filePath
 })
 
+ipcMain.handle('fs:importRackPatch', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog({ filters: [{ name: 'Synth Rack Patch', extensions: ['synthrack'] }], properties: ['openFile'] })
+  return canceled || !filePaths[0] ? null : readFile(filePaths[0], 'utf-8')
+})
+
+ipcMain.handle('fs:exportRackPatch', async (_event, json, defaultName) => {
+  const { filePath, canceled } = await dialog.showSaveDialog({ defaultPath: defaultName, filters: [{ name: 'Synth Rack Patch', extensions: ['synthrack'] }] })
+  if (canceled || !filePath) return null
+  await writeFile(filePath, json, 'utf-8')
+  return filePath
+})
+
 ipcMain.handle('dialog:showOpen', async (_event, options) => {
   return dialog.showOpenDialog(options)
 })

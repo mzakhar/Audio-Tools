@@ -62,6 +62,24 @@ const BrowserAdapter = {
     const writable = await handle.createWritable()
     await writable.write(arrayBuffer)
     await writable.close()
+  },
+
+  async importRackPatch() {
+    const [handle] = await window.showOpenFilePicker({
+      multiple: false,
+      types: [{ description: 'Synth Rack Patch', accept: { 'application/json': ['.synthrack'] } }]
+    })
+    return (await handle.getFile()).text()
+  },
+
+  async exportRackPatch(json, defaultName = 'patch.synthrack') {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: defaultName,
+      types: [{ description: 'Synth Rack Patch', accept: { 'application/json': ['.synthrack'] } }]
+    })
+    const writable = await handle.createWritable()
+    await writable.write(json)
+    await writable.close()
   }
 }
 
@@ -100,6 +118,14 @@ const ElectronAdapter = {
 
   async exportWav(arrayBuffer, defaultName) {
     await window.electronFS.exportWav(arrayBuffer, defaultName || 'export.wav')
+  },
+
+  async importRackPatch() {
+    return await window.electronFS.importRackPatch()
+  },
+
+  async exportRackPatch(json, defaultName = 'patch.synthrack') {
+    return await window.electronFS.exportRackPatch(json, defaultName)
   }
 }
 
