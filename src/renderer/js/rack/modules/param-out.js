@@ -9,7 +9,7 @@ export default {
     { key: 'max', label: 'MAX', min: -1, max: 1, step: 0.01, def: 1, fmt: '' },
     { key: 'smoothing', label: 'SMOOTH', min: 0, max: 500, step: 1, def: 50, fmt: 'ms' }
   ],
-  create(ctx, { params = {}, onParam = null } = {}) {
+  create(ctx, { params = {}, onParam = null, poll: rackPoll = null } = {}) {
     const input = ctx.createGain()
     const analyser = ctx.createAnalyser()
     input.connect(analyser)
@@ -20,11 +20,11 @@ export default {
       const cv = values.reduce((sum, value) => sum + value, 0) / values.length
       onParam(params.target, params.min + (cv + 1) / 2 * (params.max - params.min), params.smoothing)
     }
-    const timer = setInterval(poll, 1000 / 60)
+    const removePoll = rackPoll?.add(poll)
     return {
       inputs: { in: [input] }, outputs: {}, analyser,
       setParam(key, value) { params[key] = value },
-      dispose() { clearInterval(timer); input.disconnect(); analyser.disconnect() }
+      dispose() { removePoll?.(); input.disconnect(); analyser.disconnect() }
     }
   }
 }

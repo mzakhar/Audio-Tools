@@ -1,12 +1,13 @@
 import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModuleParam, Connect, Disconnect, LoadRackPatch } from '../store/ProjectStore.js'
 import MODULES, { canConnect } from '../rack/modules/index.js'
-import { canPlace, firstFreeSlot, pxToHp } from '../rack/rack-layout.js'
+import { canPlace, firstFreeSlot, pxToHp, tidyRack } from '../rack/rack-layout.js'
 import { renderPanel } from './rack-panel.js'
 import { ModuleBrowser } from './module-browser.js'
 import { RackCables } from './rack-cables.js'
 import RackEngine from '../rack/rack-engine.js'
 import FileAdapter from '../io/FileAdapter.js'
 import { exportPatch, importPatch } from '../rack/patch-io.js'
+import { RackPoll } from '../rack/rack-poll.js'
 
 const presets = import.meta.glob('../../presets/racks/*.json', { eager: true, import: 'default' })
 
@@ -18,13 +19,15 @@ const starter = { name: 'Starter rack', rails: 3, railHp: 104, modules: [
 
 export class RackView {
   constructor(container, { hasWorklet, getAudioContext, getMasterInput } = {}) {
-    this.container = container; this.hasWorklet = hasWorklet || (() => false); this.getAudioContext = getAudioContext || (() => null); this.getMasterInput = getMasterInput || (() => null); this.rackId = null; this.selected = null; this.pending = null; this.engineHandle = null
+    this.container = container; this.hasWorklet = hasWorklet || (() => false); this.getAudioContext = getAudioContext || (() => null); this.getMasterInput = getMasterInput || (() => null); this.rackId = null; this.selected = null; this.pending = null; this.engineHandle = null; this.poll = new RackPoll()
     const presetOptions = Object.entries(presets).map(([path]) => `<option value="${path}">${path.split('/').pop().replace('.json', '')}</option>`).join('')
-    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".5" max="1.5" step=".1" value="1"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
+    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".5" max="1.5" step=".1" value="1"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
     this.rails = container.querySelector('.rack-rails'); this.canvas = new RackCables(container.querySelector('.rack-canvas'), this.rails)
     this.browser = new ModuleBrowser(container.querySelector('.module-browser'), { hasWorklet: this.hasWorklet, onPick: type => this.add(type) })
     container.querySelector('[data-action="add"]').onclick = () => container.classList.toggle('browser-open')
     container.querySelector('[data-action="delete"]').onclick = () => this.selected && ProjectStore.dispatch(RemoveModule(this.rackId, this.selected))
+    container.querySelector('[data-action="tidy"]').onclick = () => this.load(tidyRack(this.rack(), MODULES))
+    container.querySelector('[data-action="cables"]').onclick = e => { this.canvas.hidden = !this.canvas.hidden; e.currentTarget.classList.toggle('active', !this.canvas.hidden) }
     container.querySelector('[data-action="new"]').onclick = () => this.load(starter)
     container.querySelector('[data-action="preset"]').onchange = e => { if (e.target.value) this.load(presets[e.target.value]); e.target.value = '' }
     container.querySelector('[data-action="import"]').onclick = async () => { try { const json = await FileAdapter.importRackPatch(); if (json) this.load(json) } catch (e) { if (e.name !== 'AbortError') console.warn('Rack import failed', e) } }
@@ -34,9 +37,9 @@ export class RackView {
     this.rails.addEventListener('dblclick', e => { const hit = this.canvas.hitTest(e.offsetX, e.offsetY); if (hit) ProjectStore.dispatch(Disconnect(this.rackId, hit.id)) })
     this.unsubscribe = ProjectStore.subscribe(() => this.render())
   }
-  show() { this.container.style.display = 'flex'; if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) { for (const mod of starter.modules) ProjectStore.dispatch(AddModule(this.rackId, mod.type, mod)) } } this.render() }
-  hide() { this.container.style.display = 'none' }
-  destroy() { this.unsubscribe?.(); this.unmountEngine() }
+  show() { this.container.style.display = 'flex'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) { for (const mod of starter.modules) ProjectStore.dispatch(AddModule(this.rackId, mod.type, mod)) } } this.render() }
+  hide() { this.container.style.display = 'none'; this.poll.stop() }
+  destroy() { this.unsubscribe?.(); this.poll.stop(); this.poll.clear(); this.unmountEngine() }
   getEngineHandle() { return this.engineHandle }
   rack() { return ProjectStore.getState().racks[this.rackId] }
   add(type) { const rack = this.rack(), slot = firstFreeSlot(rack, MODULES, MODULES[type].hp); if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot)) }
@@ -45,6 +48,7 @@ export class RackView {
   render() {
     if (!this.rackId) return
     const rack = this.rack(); if (!rack) { this.unmountEngine(); return }
+    const count = this.container.querySelector('.rack-count'); if (count) { const warning = rack.modules.length > 96 || rack.cables.length > 128; count.textContent = `${rack.modules.length}M ${rack.cables.length}C`; count.classList.toggle('warning', warning) }
     this.syncEngine(rack)
     if (this.container.style.display === 'none') return
     this.rails.replaceChildren(this.canvas.canvas)
@@ -64,7 +68,7 @@ export class RackView {
     if (this.engineHandle?.ctx === ctx) RackEngine.update(this.engineHandle, rack)
     else {
       this.unmountEngine()
-      this.engineHandle = RackEngine.mount(ctx, rack, { output: this.getMasterInput(), hasWorklet: this.hasWorklet() })
+      this.engineHandle = RackEngine.mount(ctx, rack, { output: this.getMasterInput(), hasWorklet: this.hasWorklet(), poll: this.poll })
     }
   }
   unmountEngine() {

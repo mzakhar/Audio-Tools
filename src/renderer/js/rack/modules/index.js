@@ -24,8 +24,27 @@ import quant from './quant.js'
 import midiIn from './midi-in.js'
 import audioIn from './audio-in.js'
 import paramOut from './param-out.js'
+import fmop from './fmop.js'
+import drum from './drum.js'
+import fold from './fold.js'
+import slew from './slew.js'
+import sh from './sh.js'
+import comp from './comp.js'
+import scope from './scope.js'
+import cvMon from './cv-mon.js'
+import tuner from './tuner.js'
+import delay from './delay.js'
+import drive from './drive.js'
+import math from './math.js'
+import mult from './mult.js'
+import sum from './sum.js'
+import reverb from './reverb.js'
+import chorus from './chorus.js'
+import ringmod from './ringmod.js'
+import split from './split.js'
+import merge from './merge.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, audioIn, paramOut]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 

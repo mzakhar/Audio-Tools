@@ -170,6 +170,10 @@ No UI, no audio. Pure functions and store schema only.
 
 ---
 
+## Phase 6 completion
+
+Phase 6 is complete: native P1 factories, explicit worklet placeholders where the synchronous factory contract cannot load processors, shared visible-only 30 fps polling, tidy/cable/count controls, and a 100-update lifecycle regression test. Commit: pending.
+
 ## Sequencing notes
 
 - Phases 0–2 are the vertical slice that proves the whole design; if the cable-drag frame budget or the reconciler diff fails there, the rest of the plan is re-scoped before more modules get written.

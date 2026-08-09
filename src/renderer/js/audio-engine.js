@@ -3,6 +3,7 @@
  * Single shared AudioContext, master chain, reverb send.
  */
 import recorderProcessorUrl from './worklets/recorder-processor.js?url'
+import { buildImpulseResponse } from './utils/impulse.js'
 
 const AudioEngine = {
   _ctx: null,
@@ -13,19 +14,6 @@ const AudioEngine = {
   _premaster: null,
   _compressor: null,
   _workletReady: false,
-
-  _buildImpulseResponse(ctx, duration = 2.5, decay = 2.0) {
-    const rate = ctx.sampleRate
-    const length = Math.floor(rate * duration)
-    const buf = ctx.createBuffer(2, length, rate)
-    for (let ch = 0; ch < 2; ch++) {
-      const d = buf.getChannelData(ch)
-      for (let i = 0; i < length; i++) {
-        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay)
-      }
-    }
-    return buf
-  },
 
   async init() {
     if (this._ctx) {
@@ -48,7 +36,7 @@ const AudioEngine = {
     this._reverbSend.gain.value = 0.25
 
     this._convolver = ctx.createConvolver()
-    this._convolver.buffer = this._buildImpulseResponse(ctx, 2.5, 2)
+    this._convolver.buffer = buildImpulseResponse(ctx, 2.5, 2)
 
     this._premaster = ctx.createGain()
     this._premaster.gain.value = 0.8

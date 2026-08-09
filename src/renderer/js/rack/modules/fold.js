@@ -1,0 +1,2 @@
+import { workletModule } from './worklet-placeholder.js'
+export default workletModule({ type: 'fold', name: 'FOLD', group: 'fx', hp: 6, poly: true, ports: [{ id: 'in', dir: 'in', kind: 'audio', label: 'IN' }, { id: 'amt', dir: 'in', kind: 'cv', label: 'AMT', atten: true }, { id: 'out', dir: 'out', kind: 'audio', label: 'OUT' }], params: [{ key: 'fold', label: 'FOLD', min: 1, max: 8, step: .1, def: 2, fmt: '' }, { key: 'symmetry', label: 'SYM', min: -1, max: 1, step: .01, def: 0, fmt: '' }, { key: 'gain', label: 'GAIN', min: 0, max: 2, step: .01, def: 1, fmt: '' }] })

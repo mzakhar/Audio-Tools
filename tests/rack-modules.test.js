@@ -108,6 +108,11 @@ describe('shipped module registry', () => {
     }
   })
 
+  it('ships every Phase 6 module, with worklet-only DSP explicitly marked', () => {
+    for (const type of ['fmop', 'drum', 'drive', 'fold', 'slew', 's&h', 'math', 'mult', 'sum', 'comp', 'reverb', 'chorus', 'ringmod', 'scope', 'cv-mon', 'tuner', 'delay', 'split', 'merge']) expect(MODULES[type], `missing module: ${type}`).toBeTruthy()
+    for (const type of ['fold', 'slew', 's&h', 'comp']) expect(MODULES[type].tier).toBe('worklet')
+  })
+
   it('every module builds, exposes each declared port, and disposes clean', () => {
     for (const [type, def] of Object.entries(MODULES)) {
       const inst = def.create(ctx, { channels: 2, params: paramDefaults(type) })
@@ -143,6 +148,13 @@ describe('shipped module registry', () => {
     RackEngine.unmount(handle)
     const leaked = ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)
     expect(leaked.map(n => n.kind)).toEqual([])
+  })
+
+  it('survives 100 graph updates without leaking running sources', () => {
+    const output = ctx.createGain(), state = starterRack(), handle = RackEngine.mount(ctx, state, { output })
+    for (let i = 0; i < 100; i++) { const next = structuredClone(state); next.modules[0].hp = i % 40; RackEngine.update(handle, next) }
+    RackEngine.unmount(handle)
+    expect(ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)).toEqual([])
   })
 
   it('an ADSR gate event schedules a ramp at the event time', () => {

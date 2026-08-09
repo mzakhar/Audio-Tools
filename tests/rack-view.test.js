@@ -29,7 +29,7 @@ describe('rack panel', () => {
     const view = new RackView(root, { getAudioContext: () => ctx, getMasterInput: () => output })
     view.show(); view.render()
     expect(engine.mount).toHaveBeenCalledTimes(1)
-    expect(engine.mount).toHaveBeenCalledWith(ctx, expect.anything(), { output, hasWorklet: false })
+    expect(engine.mount).toHaveBeenCalledWith(ctx, expect.anything(), { output, hasWorklet: false, poll: expect.anything() })
     expect(engine.update).toHaveBeenCalled()
     expect(view.getEngineHandle()).toEqual({ ctx })
     view.destroy()

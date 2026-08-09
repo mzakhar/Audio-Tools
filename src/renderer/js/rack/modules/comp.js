@@ -1,0 +1,2 @@
+import { workletModule } from './worklet-placeholder.js'
+export default workletModule({ type: 'comp', name: 'COMP', group: 'util', hp: 6, poly: false, ports: [{ id: 'in', dir: 'in', kind: 'cv', label: 'IN' }, { id: 'thr', dir: 'in', kind: 'cv', label: 'THR', atten: true }, { id: 'gate', dir: 'out', kind: 'gate', label: 'GATE' }, { id: 'inv', dir: 'out', kind: 'gate', label: 'INV' }], params: [{ key: 'threshold', label: 'THRESHOLD', min: -1, max: 1, step: .01, def: 0, fmt: '' }, { key: 'hysteresis', label: 'HYST', min: 0, max: .2, step: .01, def: .05, fmt: '' }] })
