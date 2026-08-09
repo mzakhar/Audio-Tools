@@ -11,7 +11,39 @@ Ground rules for every phase:
 
 ---
 
-## Phase 0 — Foundations (state, layout math, CV math)
+## Status
+
+| Phase | State | Commit |
+|---|---|---|
+| 0 — Foundations | **done** | `cc1c7d3` |
+| 1 — Engine + P0 modules | **done** | `dc0446a` |
+| 2 — Rack view, panels, cables | not started | |
+| 3 — Clock, sequencing, transport | not started | |
+| 4 — Full DAW citizen | not started | |
+| 5 — Persistence and presets | not started | |
+| 6 — Remaining modules, polish | not started | |
+
+Landed on `feature/arrange-ux`. Suite at 511 tests / 27 files green.
+
+**Deferred out of phases 0–1** (each marked with a `ponytail:` comment at the site):
+
+| Item | Where | Add when |
+|---|---|---|
+| VCO `PW` (two-saw phase-difference trick) and `SYNC` (oscillator recreation at a scheduled time) | `modules/vco.js` | the panel UI exists to show them |
+| Stereo `OUT` (currently a mono sum of L/R) | `modules/out.js` | the engine can tell a module which of its inputs are patched |
+| VCA normalling driven by patch state (`setNormalled` exists, engine never calls it) | `modules/vca.js` | same engine capability as above |
+| `utils/impulse.js` extraction out of `audio-engine.js` | phase 1 plan row | `REVERB` lands in phase 6 and becomes the second caller |
+| Module `bypassed` flag honoured by the engine | `rack-engine.js` | phase 2, when the right-click menu can set it |
+
+**Deviations from the spec as written:**
+
+- Registry validation does **not** reject a param key that matches a port id — a `RES` knob beside a `RES` CV jack is correct eurorack, and params/ports are separate namespaces.
+- `VCA` is two serial gain stages (knob → CV) rather than knob and CV summed into one `gain` param: summing makes them add instead of scale and leaves an unpatched VCA above unity.
+- `LFO` retires a replaced oscillator until its scheduled stop instead of disconnecting it immediately, because a `RESET` event arrives ~100 ms ahead of its time.
+
+---
+
+## Phase 0 — Foundations (state, layout math, CV math) ✅
 
 No UI, no audio. Pure functions and store schema only.
 
@@ -33,7 +65,7 @@ No UI, no audio. Pure functions and store schema only.
 
 ---
 
-## Phase 1 — Engine and the P0 module set
+## Phase 1 — Engine and the P0 module set ✅
 
 **New files**
 
