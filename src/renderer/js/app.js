@@ -690,7 +690,8 @@ function initArrangeTransport() {
       tracks: state.tracks,
       audioStore: AudioStore,
       mixerEngine: MixerEngine,
-      palettes: Palettes
+      palettes: Palettes,
+      rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
     })
     document.getElementById('arr-play-btn').setAttribute('aria-pressed', 'true')
   })
@@ -738,7 +739,8 @@ function initArrangeTransport() {
         tracks: state.tracks,
         audioStore: AudioStore,
         mixerEngine: MixerEngine,
-        palettes: Palettes
+        palettes: Palettes,
+        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
       })
     } else {
       Sequencer.play()
@@ -1046,7 +1048,11 @@ function boot() {
     })
   }
   const rackContainer = document.getElementById('rack-view')
-  if (rackContainer) _rackView = new RackView(rackContainer, { hasWorklet: () => AudioEngine.hasWorklet() })
+  if (rackContainer) _rackView = new RackView(rackContainer, {
+    hasWorklet: () => AudioEngine.hasWorklet(),
+    getAudioContext: () => AudioEngine.getContext(),
+    getMasterInput: () => AudioEngine.getMasterInput()
+  })
 
   // Subscribe store to keep mixer in sync
   ProjectStore.subscribe(state => syncMixerStrips(state))

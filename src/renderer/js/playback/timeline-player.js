@@ -3,6 +3,8 @@
  * AudioClip playback scheduler + OfflineAudioContext bounce.
  */
 import AudioEngine from '../audio-engine.js'
+import RackEngine from '../rack/rack-engine.js'
+import { RackClock } from '../rack/rack-clock.js'
 import { beatsToSeconds } from '../utils/timeline-math.js'
 import { audioBufferToWAV } from '../utils/wav-encoder.js'
 
@@ -12,8 +14,10 @@ const TimelinePlayer = {
   _startAudioTime: 0,     // AudioContext.currentTime when play() was called
   _startBeat: 0,          // beat at which playback started
   _isPlaying: false,
+  _rackClock: null,
+  _rackClockTimer: null,
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes }) {
+  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [] }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -24,6 +28,19 @@ const TimelinePlayer = {
     this._isPlaying = true
     this._sources = []
     this._midiTimeouts = []
+
+    const clocks = rackHandles.flatMap(handle => [...handle.mods].filter(([, entry]) =>
+      entry.def?.type === 'clock' && entry.params?.source === 'transport'
+    ).map(([moduleId]) => [handle, moduleId]))
+    if (clocks.length) {
+      const send = (portId, event) => clocks.forEach(([handle, moduleId]) => RackEngine.sendEvent(handle, moduleId, portId, event))
+      send('run', { type: 'gate-on', time: this._startAudioTime })
+      this._rackClock = new RackClock({ bpm, emit: event => send('ext', event) })
+      this._rackClock.start(this._startAudioTime, bpm)
+      const schedule = () => this._rackClock.scheduleThrough(ctx.currentTime + 0.1)
+      schedule()
+      this._rackClockTimer = setInterval(schedule, 25)
+    }
 
     tracks.forEach(track => {
       // ── MIDI track scheduling ──────────────────────────────────────────────
@@ -107,6 +124,10 @@ const TimelinePlayer = {
 
   stop() {
     this._isPlaying = false
+    if (this._rackClockTimer !== null) clearInterval(this._rackClockTimer)
+    this._rackClockTimer = null
+    this._rackClock?.stop()
+    this._rackClock = null
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []
     this._midiTimeouts.forEach(id => clearTimeout(id))

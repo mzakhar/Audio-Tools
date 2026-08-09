@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import MODULES, { validateRegistry, paramDefaults } from '../src/renderer/js/rack/modules/index.js'
 import RackEngine from '../src/renderer/js/rack/rack-engine.js'
+import clock from '../src/renderer/js/rack/modules/clock.js'
 
 // ---------------------------------------------------------------------------
 // Fuller BaseAudioContext fake — every node type the P0 module set builds.
@@ -100,6 +101,13 @@ describe('shipped module registry', () => {
     }
   })
 
+  it('ships Phase 3 native event modules', () => {
+    for (const type of ['clock', 'seq8', 'clkdiv', 'ad', 'rnd', 'euclid', 'quant']) {
+      expect(MODULES[type], `missing module: ${type}`).toBeTruthy()
+      expect(MODULES[type].tier).toBe('native')
+    }
+  })
+
   it('every module builds, exposes each declared port, and disposes clean', () => {
     for (const [type, def] of Object.entries(MODULES)) {
       const inst = def.create(ctx, { channels: 2, params: paramDefaults(type) })
@@ -147,5 +155,16 @@ describe('shipped module registry', () => {
     expect(envSource).toBeTruthy()
     expect(ramped).toBe(true)
     RackEngine.unmount(handle)
+  })
+
+  it('CLOCK turns transport PPQN into quarter-note gates', () => {
+    const emitEvent = vi.fn()
+    const inst = clock.create(ctx, { params: { source: 'transport' }, emitEvent })
+
+    for (let tick = 0; tick < 48; tick++) inst.onEvent('ext', { type: 'ppqn', tick, time: tick / 48 })
+
+    expect(emitEvent.mock.calls.filter(([port, event]) => port === 'out' && event.type === 'gate-on')).toHaveLength(2)
+    expect(emitEvent.mock.calls.filter(([port, event]) => port === 'div2' && event.type === 'gate-on')).toHaveLength(1)
+    inst.dispose()
   })
 })

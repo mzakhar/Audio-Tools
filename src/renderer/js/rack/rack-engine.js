@@ -50,7 +50,12 @@ function createModule(handle, mod, channels) {
   if (!def || (def.tier === 'worklet' && !handle.hasWorklet)) {
     return { def: def || null, inst: placeholderInstance(), channels, params }
   }
-  const inst = def.create(handle.ctx, { channels, params, ctxTime: handle.ctx.currentTime })
+  const inst = def.create(handle.ctx, {
+    channels,
+    params,
+    ctxTime: handle.ctx.currentTime,
+    emitEvent: (port, event) => RackEngine.emitEvent(handle, mod.id, port, event)
+  })
   if (def.terminal && inst.output && handle.output) inst.output.connect(handle.output)
   return { def, inst, channels, params }
 }

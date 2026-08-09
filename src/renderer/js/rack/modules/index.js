@@ -14,8 +14,15 @@ import vca from './vca.js'
 import mix from './mix.js'
 import att from './att.js'
 import out from './out.js'
+import clock from './clock.js'
+import seq8 from './seq8.js'
+import clkdiv from './clkdiv.js'
+import ad from './ad.js'
+import rnd from './rnd.js'
+import euclid from './euclid.js'
+import quant from './quant.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
