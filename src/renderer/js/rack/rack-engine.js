@@ -54,6 +54,7 @@ function createModule(handle, mod, channels) {
     channels,
     params,
     ctxTime: handle.ctx.currentTime,
+    onParam: handle.onParam,
     emitEvent: (port, event) => RackEngine.emitEvent(handle, mod.id, port, event)
   })
   if (def.terminal && inst.output && handle.output) inst.output.connect(handle.output)
@@ -132,12 +133,13 @@ function disconnectCable(handle, cableId) {
 // ─── Public API ────────────────────────────────────────────────────────────
 
 const RackEngine = {
-  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true } = {}) {
+  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true, onParam = null } = {}) {
     const handle = {
       ctx,
       output,
       registry,
       hasWorklet,
+      onParam,
       rack: JSON.parse(JSON.stringify(rackState)),
       mods: new Map(),
       cables: new Map(),

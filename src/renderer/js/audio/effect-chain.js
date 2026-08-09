@@ -7,6 +7,8 @@
  * When empty, input connects directly to output.
  */
 
+import RackEngine from '../rack/rack-engine.js'
+
 let _chainIdCounter = 0
 let _effectIdCounter = 0
 
@@ -92,11 +94,29 @@ function _createGainNodes(ctx, params) {
   }
 }
 
+function _createRackNodes(ctx, params) {
+  const rack = params?.rack
+  const input = ctx.createGain()
+  const output = ctx.createGain()
+  const audioIn = rack?.modules?.find(module => module.type === 'audio-in')
+  if (!audioIn) {
+    input.connect(output)
+    return { inputNode: input, outputNode: output, internalNodes: [input, output], params: { ...params }, warning: 'Rack has no AUDIO IN; bypassed' }
+  }
+  const handle = RackEngine.mount(ctx, rack, { output })
+  const inst = RackEngine.getInstance(handle, audioIn.id)
+  const target = inst?.input || inst?.inputs?.in?.[0]
+  if (target) input.connect(target)
+  else input.connect(output)
+  return { inputNode: input, outputNode: output, internalNodes: [input, output], params: { ...params }, handle, warning: target ? null : 'Rack AUDIO IN unavailable; bypassed' }
+}
+
 function _createEffectNodes(ctx, type, params) {
   switch (type) {
     case 'eq3':        return _createEq3Nodes(ctx, params || {})
     case 'compressor': return _createCompressorNodes(ctx, params || {})
     case 'gain':       return _createGainNodes(ctx, params || {})
+    case 'rack':       return _createRackNodes(ctx, params || {})
     default:           throw new Error(`Unknown effect type: ${type}`)
   }
 }
@@ -176,6 +196,7 @@ function _setNodeParam(type, nodes, param, value) {
     case 'eq3':        _setEq3Param(nodes, param, value);        break
     case 'compressor': _setCompressorParam(nodes, param, value); break
     case 'gain':       _setGainParam(nodes, param, value);       break
+    case 'rack':       break
     default: throw new Error(`Unknown effect type: ${type}`)
   }
 }
@@ -239,6 +260,7 @@ const EffectChain = {
     for (const node of removed.nodes.internalNodes) {
       try { node.disconnect() } catch (_) { /* safe */ }
     }
+    if (removed.nodes.handle) RackEngine.unmount(removed.nodes.handle)
 
     _rewire(chain)
   },
@@ -293,6 +315,7 @@ const EffectChain = {
       for (const node of effect.nodes.internalNodes) {
         try { node.disconnect() } catch (_) { /* safe */ }
       }
+      if (effect.nodes.handle) RackEngine.unmount(effect.nodes.handle)
     }
 
     _chains.delete(chainHandle)

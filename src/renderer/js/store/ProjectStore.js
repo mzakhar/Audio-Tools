@@ -39,6 +39,11 @@ export function migrate(projectJson) {
     if (!next.racks) next.racks = {}
     next.version = 2
   }
+  for (const track of next.tracks || []) {
+    if (track.type === 'midi' && !track.instrument) {
+      track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+    }
+  }
   return next
 }
 
@@ -62,6 +67,7 @@ export function AddTrack(type = 'audio', name = 'Track') {
         clips: [],
         effects: []
       })
+      if (type === 'midi') next.tracks.at(-1).instrument = { type: 'palette', paletteKey: 'classic' }
       next.mixer.channels.push({
         id: channelId,
         trackId,
@@ -283,7 +289,7 @@ export function AddEffect(trackId, type, params = {}) {
       if (!track) return next
       if (!track.effects) track.effects = []
       const effectId = genId('effect')
-      track.effects.push({ id: effectId, type, params: { ...params } })
+      track.effects.push({ id: effectId, type, params: { ...params } }) // rack params carry { rack }
       return next
     },
     undo(state) {

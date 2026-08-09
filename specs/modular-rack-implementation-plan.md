@@ -19,11 +19,11 @@ Ground rules for every phase:
 | 1 — Engine + P0 modules | **done** | `dc0446a` |
 | 2 — Rack view, panels, cables | **done** | `7faf785` |
 | 3 — Clock, sequencing, transport | **done** | `4a8e50f` |
-| 4 — Full DAW citizen | not started | |
+| 4 — Full DAW citizen | **done** | pending |
 | 5 — Persistence and presets | not started | |
 | 6 — Remaining modules, polish | not started | |
 
-Landed on `feature/arrange-ux`. Suite at 511 tests / 27 files green.
+Landed on `feature/arrange-ux`. Phase 4 adds rack MIDI instruments, audio-in rack inserts, PARAM OUT polling, and offline rack mounts. Suite at 527 tests / 32 files green.
 
 **Deferred out of phases 0–1** (each marked with a `ponytail:` comment at the site):
 

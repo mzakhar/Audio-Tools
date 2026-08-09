@@ -21,8 +21,11 @@ import ad from './ad.js'
 import rnd from './rnd.js'
 import euclid from './euclid.js'
 import quant from './quant.js'
+import midiIn from './midi-in.js'
+import audioIn from './audio-in.js'
+import paramOut from './param-out.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, audioIn, paramOut]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 

@@ -625,6 +625,7 @@ function initProjectBar() {
       tracks: state.tracks,
       audioStore: AudioStore,
       durationBeats,
+      racks: state.racks,
       sampleRate: state.sampleRate
     })
     await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
@@ -691,6 +692,7 @@ function initArrangeTransport() {
       audioStore: AudioStore,
       mixerEngine: MixerEngine,
       palettes: Palettes,
+      racks: ProjectStore.getState().racks,
       rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
     })
     document.getElementById('arr-play-btn').setAttribute('aria-pressed', 'true')
@@ -740,6 +742,7 @@ function initArrangeTransport() {
         audioStore: AudioStore,
         mixerEngine: MixerEngine,
         palettes: Palettes,
+        racks: ProjectStore.getState().racks,
         rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
       })
     } else {
