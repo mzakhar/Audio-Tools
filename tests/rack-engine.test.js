@@ -326,6 +326,25 @@ describe('RackEngine', () => {
     })
   })
 
+  describe('attenuverters', () => {
+    it('passes an attenuated input at unity when the rack stores no value', () => {
+      const handle = mount(rack(
+        [mod('m-1', 'src'), mod('m-2', 'dst')],
+        [cable('c-1', 'm-1', 'out', 'm-2', 'cv')]
+      ))
+      // A 0 default would silently swallow every cable into an attenuated input.
+      expect(handle.atten.get('m-2:cv:0').gain.value).toBe(1)
+    })
+
+    it('still honours an explicitly stored zero', () => {
+      const handle = mount(rack(
+        [mod('m-1', 'src'), mod('m-2', 'dst', {}, { atten: { cv: 0 } })],
+        [cable('c-1', 'm-1', 'out', 'm-2', 'cv')]
+      ))
+      expect(handle.atten.get('m-2:cv:0').gain.value).toBe(0)
+    })
+  })
+
   describe('normalled inputs', () => {
     it('tells a module which of its inputs a cable landed on', () => {
       const handle = mount(rack(

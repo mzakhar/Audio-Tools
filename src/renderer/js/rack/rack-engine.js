@@ -79,7 +79,10 @@ function attenNode(handle, moduleId, portId, channel, target) {
   let node = handle.atten.get(key)
   if (!node) {
     node = handle.ctx.createGain()
-    node.gain.value = handle.rack.modules.find(m => m.id === moduleId)?.atten?.[portId] ?? 0
+    // Unity, not zero: nothing in the UI turns an attenuverter up yet, so a 0
+    // default silently swallows every cable into an attenuated input. An explicit
+    // stored 0 still means 0 — only the absent case changes.
+    node.gain.value = handle.rack.modules.find(m => m.id === moduleId)?.atten?.[portId] ?? 1
     node.connect(target)
     handle.atten.set(key, node)
   }
