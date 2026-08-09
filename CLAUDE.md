@@ -38,7 +38,9 @@ audio-engine.js → palettes.js → keyboard.js → sequencer.js → recorder.js
 
 Specs are the source of truth: `specs/modular-rack.md`, `specs/modular-rack-modules.md`, and `specs/modular-rack-implementation-plan.md` (that last one carries the phase status table and the deferral list — read it before picking up rack work).
 
-Phases 0–1 are in: state + pure math + engine + the P0 native module set. No UI yet.
+Phases 0–4 are in: rack UI, transport clocking, MIDI instruments, rack
+inserts, PARAM OUT control polling, and offline rack bounce. Phase 5 remains
+persistence/presets; Phase 6 remains remaining modules/polish.
 
 ```
 store/ProjectStore.js   state.racks{}, schema version 2 + migrate(), rack commands
@@ -50,6 +52,14 @@ rack/modules/index.js   registry + validateRegistry (throws in dev) + canConnect
 rack/modules/*.js       one definition per module: ports, params, create(ctx, opts)
 utils/cv.js             PURE 1 V/oct math — 0.1 CV = 1 octave, 0.0 = C4
 ```
+
+Phase 4 integration:
+
+- MIDI tracks use `instrument: { type: 'palette', paletteKey }` or
+  `{ type: 'rack', rackId }`; `TimelinePlayer` uses one note strategy for both.
+- `audio-in` exposes host audio only; it never requests microphone access.
+- `param-out` polls at 60 Hz. Current target syntax supports
+  `<channelId>.volume` and `<channelId>.pan` during rack-track playback.
 
 Rules that are not negotiable:
 

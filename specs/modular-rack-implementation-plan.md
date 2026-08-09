@@ -19,7 +19,7 @@ Ground rules for every phase:
 | 1 — Engine + P0 modules | **done** | `dc0446a` |
 | 2 — Rack view, panels, cables | **done** | `7faf785` |
 | 3 — Clock, sequencing, transport | **done** | `4a8e50f` |
-| 4 — Full DAW citizen | **done** | pending |
+| 4 — Full DAW citizen | **done** | `b68fb08` |
 | 5 — Persistence and presets | not started | |
 | 6 — Remaining modules, polish | not started | |
 
