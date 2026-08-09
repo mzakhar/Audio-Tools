@@ -17,6 +17,7 @@ import MixerEngine from './audio/mixer-engine.js'
 import TimelinePlayer from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
+import { Tr909View } from './components/tr909-view.js'
 import ShortcutManager from './shortcuts.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
@@ -31,8 +32,10 @@ const activeVoices = {} // midi note → voice object
 
 let _arrangementView = null
 let _pianoRoll = null
+let _tr909View = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
 let _currentMode = 'synth'    // 'synth' | 'arrange'
+let _selectedArrangeTrackId = null
 let _rafId = null
 let _midiRecording = false
 let _midiTargetTrackId = null  // track to write recorded MIDI into
@@ -53,6 +56,8 @@ async function ensureAudio() {
 
 // ─── Palette switching ─────────────────────────────────────────────────────
 function switchPalette(key) {
+  if (key !== 'tr909') _tr909View?.stop()
+
   // Stop any held notes
   Object.keys(activeVoices).forEach(note => {
     try { activeVoices[note].stop(AudioEngine.getContext()?.currentTime || 0) } catch (e) {}
@@ -77,6 +82,11 @@ function switchPalette(key) {
   })
 
   const isDrum = key === 'drum'
+  const is909 = key === 'tr909'
+  document.getElementById('knob-panel').style.display = is909 ? 'none' : ''
+  document.getElementById('keyboard-section').style.display = is909 ? 'none' : ''
+  document.getElementById('sequencer-section').style.display = is909 ? 'none' : ''
+  document.getElementById('tr909-view').style.display = is909 ? 'block' : 'none'
   document.getElementById('keyboard-wrap').style.display = isDrum ? 'none' : ''
   document.getElementById('keyboard-hint').style.display = isDrum ? 'none' : ''
   document.getElementById('drum-pads').style.display    = isDrum ? 'flex' : 'none'
@@ -135,6 +145,18 @@ document.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
   const idx = ['1','2','3','4'].indexOf(e.key)
   if (idx !== -1) triggerDrumPad(idx)
+})
+
+document.addEventListener('keydown', (e) => {
+  if (currentPaletteKey !== 'tr909') return
+  if (_currentMode !== 'synth') return
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+  const tag = document.activeElement?.tagName
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+  const idx = ['1','2','3','4','5','6','7','8','9','0','-'].indexOf(e.key)
+  if (idx === -1) return
+  const inst = ['bd','sd','lt','mt','ht','rs','cp','ch','oh','cr','rd'][idx]
+  _tr909View?.trigger(inst, 0.9)
 })
 
 // ─── Knob panel ────────────────────────────────────────────────────────────
@@ -344,9 +366,13 @@ function initRecorder() {
 
   let recording = false, interval = null, elapsed = 0
 
-  btn.addEventListener('click', () => {
-    ensureAudio()
+  btn.addEventListener('click', async () => {
+    await ensureAudio()
     if (!recording) {
+      if (!AudioEngine.hasRecorder()) {
+        status.textContent = 'REC NEEDS HTTPS'
+        return
+      }
       recording = true
       elapsed = 0
       btn.textContent = '■ STOP & SAVE'
@@ -383,6 +409,7 @@ function switchMode(mode) {
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   })
   if (mode === 'arrange') {
+    _tr909View?.stop()
     appEl.style.display = 'none'
     arrangeEl.style.display = 'flex'
     startArrangeLoop()
@@ -434,11 +461,7 @@ function syncMixerStrips(state) {
       const strip = new MixerStrip(bar, {
         channel, track,
         onParam: (channelId, param, value) => {
-          ProjectStore.dispatch(SetMixerParam(channelId, param, value))
-          MixerEngine.setVolume(channelId, ProjectStore.getState().mixer.channels.find(c => c.id === channelId)?.volume ?? 1)
-          if (param === 'volume') MixerEngine.setVolume(channelId, value)
-          if (param === 'pan')    MixerEngine.setPan(channelId, value)
-          if (param === 'mute')   MixerEngine.setMute(channelId, value)
+          document.dispatchEvent(new CustomEvent('mixer-param', { detail: { channelId, param, value } }))
         }
       })
       _mixerStrips.set(channel.id, strip)
@@ -478,7 +501,16 @@ function initProjectBar() {
     const handle = await FileAdapter.openProjectFolder(getLastDir(DIR_KEY_PROJECT))
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
-    const { state } = await FileAdapter.readProject(handle)
+    let state
+    try {
+      ;({ state } = await FileAdapter.readProject(handle))
+    } catch (e) {
+      console.warn('[open-project] Could not read project.json:', e)
+      // Clear the stale stored path so we don't hit this again next time
+      localStorage.removeItem(DIR_KEY_PROJECT)
+      alert(`Could not open project:\n${e.message}`)
+      return
+    }
     ProjectStore.load(state)
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -502,9 +534,9 @@ function initProjectBar() {
     await FileAdapter.writeProject(handle, ProjectStore.getState())
   })
 
-  document.getElementById('import-audio-btn')?.addEventListener('click', async () => {
+  // Shared audio import helper — picks a file and adds it to targetTrackId (or creates a new track)
+  async function importAudioToTrack(targetTrackId) {
     if (!AudioStore.getProjectDir()) return
-    // In browser: show file picker. In Electron: show open dialog.
     let fileHandle
     if (window.electronFS) {
       const audioDialogOpts = {
@@ -526,27 +558,46 @@ function initProjectBar() {
     }
     await ensureAudio()
     const fileKey = await AudioStore.importFile(fileHandle)
-    // Add a new audio track + clip to the project
     const state = ProjectStore.getState()
-    const trackName = fileKey.split('/').pop().replace(/\.[^.]+$/, '')
-    ProjectStore.dispatch(AddTrack('audio', trackName))
-    const newState = ProjectStore.getState()
-    const newTrack = newState.tracks[newState.tracks.length - 1]
+    const bpm = state.bpm
     const buf = AudioStore.getBuffer(fileKey)
-    const duration = buf ? buf.duration / (60 / state.bpm) : 4
-    ProjectStore.dispatch(AddClip(newTrack.id, {
+    const duration = buf ? buf.duration / (60 / bpm) : 4
+
+    let trackId = targetTrackId
+    if (!trackId || !state.tracks.find(t => t.id === trackId)) {
+      // Create a new track
+      const trackName = fileKey.split('/').pop().replace(/\.[^.]+$/, '')
+      ProjectStore.dispatch(AddTrack('audio', trackName))
+      trackId = ProjectStore.getState().tracks.at(-1).id
+      syncMixerStrips(ProjectStore.getState())
+    }
+
+    // Find the first free beat position (after last clip on this track)
+    const track = ProjectStore.getState().tracks.find(t => t.id === trackId)
+    const startBeat = track
+      ? Math.max(0, ...track.clips.map(c => c.startBeat + (c.duration || 0)))
+      : 0
+
+    ProjectStore.dispatch(AddClip(trackId, {
       id: `clip-${Date.now()}`,
       type: 'audio',
       file: fileKey,
-      startBeat: 0,
+      startBeat,
       duration,
       offset: 0,
       fadeIn: 0,
       fadeOut: 0
     }))
-    syncMixerStrips(ProjectStore.getState())
     // Switch to arrange view so the user can immediately see the new track
     switchMode('arrange')
+  }
+
+  document.getElementById('import-audio-btn')?.addEventListener('click', () => {
+    importAudioToTrack(_selectedArrangeTrackId)
+  })
+
+  document.addEventListener('add-sample-to-track', (e) => {
+    importAudioToTrack(e.detail.trackId)
   })
 
   document.getElementById('bounce-btn')?.addEventListener('click', async () => {
@@ -577,14 +628,51 @@ function initSidebarModes() {
       switchMode(btn.dataset.tool)
     })
   })
+  document.addEventListener('track-selected', (e) => {
+    _selectedArrangeTrackId = e.detail.trackId
+  })
+}
+
+// ─── Mixer param bus ─────────────────────────────────────────────────────────
+// Single handler for all mute/solo/volume/pan changes from any source
+// (mixer strips, arrangement track headers, etc.)
+function initMixerParamBus() {
+  document.addEventListener('mixer-param', (e) => {
+    const { channelId, param, value } = e.detail
+    ProjectStore.dispatch(SetMixerParam(channelId, param, value))
+    // Mute and solo are mutually exclusive
+    if (param === 'mute' && value) ProjectStore.dispatch(SetMixerParam(channelId, 'solo', false))
+    if (param === 'solo' && value) ProjectStore.dispatch(SetMixerParam(channelId, 'mute', false))
+    if (param === 'volume') MixerEngine.setVolume(channelId, value)
+    if (param === 'pan')    MixerEngine.setPan(channelId, value)
+    if (param === 'mute')   MixerEngine.setMute(channelId, value)
+    if (param === 'solo') {
+      const allIds = ProjectStore.getState().mixer.channels.map(c => c.id)
+      MixerEngine.setSolo(channelId, value, allIds)
+    }
+  })
 }
 
 // ─── Arrange transport (play/stop) ──────────────────────────────────────────
 function initArrangeTransport() {
   // Dedicated arrange toolbar buttons
-  document.getElementById('arr-play-btn')?.addEventListener('click', () => {
-    ensureAudio()
+  document.getElementById('arr-play-btn')?.addEventListener('click', async () => {
+    await ensureAudio()
     const state = ProjectStore.getState()
+    // Pre-load any buffers that failed to load when the project was opened
+    if (AudioStore.getProjectDir()) {
+      const loads = []
+      for (const track of state.tracks) {
+        for (const clip of track.clips) {
+          if (clip.type === 'audio' && clip.file && !AudioStore.getBuffer(clip.file)) {
+            loads.push(
+              AudioStore.loadBuffer(clip.file).catch(e => console.warn('[Play] Buffer load failed:', clip.file, e))
+            )
+          }
+        }
+      }
+      if (loads.length) await Promise.all(loads)
+    }
     TimelinePlayer.play({
       beat: 0,
       bpm: state.bpm,
@@ -604,6 +692,22 @@ function initArrangeTransport() {
   document.getElementById('arr-bpm')?.addEventListener('change', (e) => {
     const bpm = parseInt(e.target.value) || 120
     ProjectStore.dispatch(SetBpm(bpm))
+  })
+
+  // Add Track button in arrange toolbar
+  document.getElementById('arr-add-track-btn')?.addEventListener('click', () => {
+    ProjectStore.dispatch(AddTrack('audio', 'Track'))
+    syncMixerStrips(ProjectStore.getState())
+  })
+
+  // Add Track from arrangement context menu
+  document.addEventListener('add-audio-track', () => {
+    ProjectStore.dispatch(AddTrack('audio', 'Track'))
+    syncMixerStrips(ProjectStore.getState())
+  })
+  document.addEventListener('add-midi-track', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    syncMixerStrips(ProjectStore.getState())
   })
 
   // Keep BPM input in sync with store (e.g. after project open)
@@ -899,6 +1003,8 @@ function boot() {
   Keyboard.render('keyboard')
   renderDrumPads()
   Sequencer.init('seq-tracks')
+  const tr909Container = document.getElementById('tr909-view')
+  if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 
   renderKnobPanel()
   initMasterVolume()
@@ -913,6 +1019,7 @@ function boot() {
 
   initProjectBar()
   initSidebarModes()
+  initMixerParamBus()
   initArrangeTransport()
   initShortcuts()
   initMidi()

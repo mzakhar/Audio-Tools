@@ -1,7 +1,6 @@
 /**
  * mixer-strip.js
  * Per-track mixer channel strip: label, volume fader, pan, mute/solo,
-<<<<<<< HEAD
  * a row of up to 4 effect insert slots, and a sends section.
  */
 export class MixerStrip {

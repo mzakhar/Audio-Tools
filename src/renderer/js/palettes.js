@@ -380,5 +380,15 @@ const padPalette = {
 
 export { noteToFreq, applyADSR }
 
-const Palettes = { classic: classicPalette, fm: fmPalette, drum: drumPalette, pad: padPalette }
+const tr909Palette = {
+  name: '909 Rhythm Composer',
+  type: 'drum',
+  params: { reverb: 0.12 },
+  knobs: [],
+  selectors: [],
+  createVoice() { return { stop() {} } },
+  createDrumVoice() { return { stop() {} } },
+}
+
+const Palettes = { classic: classicPalette, fm: fmPalette, drum: drumPalette, tr909: tr909Palette, pad: padPalette }
 export default Palettes

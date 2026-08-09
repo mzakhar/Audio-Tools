@@ -67,7 +67,10 @@ const TimelinePlayer = {
       track.clips.forEach(clip => {
         if (clip.type !== 'audio') return
         const buf = audioStore.getBuffer(clip.file)
-        if (!buf) return
+        if (!buf) {
+          console.warn('[TimelinePlayer] Buffer not loaded for', clip.file, '— clip skipped')
+          return
+        }
 
         // When does this clip end in beats?
         const clipEndBeat = clip.startBeat + clip.duration
