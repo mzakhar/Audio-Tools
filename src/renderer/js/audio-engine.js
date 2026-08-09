@@ -12,9 +12,9 @@ const AudioEngine = {
   _convolver: null,
   _premaster: null,
   _compressor: null,
+  _workletReady: false,
 
-  _buildImpulseResponse(duration = 2.5, decay = 2.0) {
-    const ctx = this._ctx
+  _buildImpulseResponse(ctx, duration = 2.5, decay = 2.0) {
     const rate = ctx.sampleRate
     const length = Math.floor(rate * duration)
     const buf = ctx.createBuffer(2, length, rate)
@@ -34,10 +34,6 @@ const AudioEngine = {
     }
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
-    this._ctx = ctx
-
-    // Load AudioWorklet module so Recorder can use it immediately
-    await ctx.audioWorklet.addModule(recorderProcessorUrl)
 
     // Master chain:
     // masterGain → dryGain ─┐
@@ -52,7 +48,7 @@ const AudioEngine = {
     this._reverbSend.gain.value = 0.25
 
     this._convolver = ctx.createConvolver()
-    this._convolver.buffer = this._buildImpulseResponse(2.5, 2)
+    this._convolver.buffer = this._buildImpulseResponse(ctx, 2.5, 2)
 
     this._premaster = ctx.createGain()
     this._premaster.gain.value = 0.8
@@ -71,9 +67,22 @@ const AudioEngine = {
     this._convolver.connect(this._premaster)
     this._premaster.connect(this._compressor)
     this._compressor.connect(ctx.destination)
+
+    this._ctx = ctx
+
+    // Recorder's worklet. `ctx.audioWorklet` is undefined outside a secure
+    // context (plain-http deploys), so this must not be fatal — synth audio
+    // works fine without it, only recording is lost.
+    try {
+      await ctx.audioWorklet.addModule(recorderProcessorUrl)
+      this._workletReady = true
+    } catch (e) {
+      console.warn('AudioWorklet unavailable, recording disabled:', e.message)
+    }
   },
 
   getContext() { return this._ctx },
+  hasRecorder() { return this._workletReady },
   getMasterInput() { return this._masterGain },
   getCompressor() { return this._compressor },
 
