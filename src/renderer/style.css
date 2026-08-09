@@ -132,6 +132,11 @@ html, body {
 
 .rack-jacks { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 5px; padding-top: 4px; }
 .rack-jacks-in { border-top: 1px dashed #ffffff1a; }
+/* Pinned, not flexible: the key divs are absolutely positioned against this box,
+   so letting .rack-params take its slack would overflow the keys off the panel. */
+.rack-keys { flex: 0 0 auto; position: relative; user-select: none; touch-action: none; margin-top: 4px; }
+.rack-keys:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
+
 .rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
 .rack-jack-slot em {
   font-style: normal; font-size: 7px; line-height: 1; letter-spacing: 0;

@@ -14,6 +14,11 @@ describe('rack panel', () => {
     expect(panel.querySelectorAll('input, select').length).toBeGreaterThan(0)
   })
 
+  it('draws its own DOM for a module with a panel() hook', () => {
+    const panel = renderPanel({ id: 'k1', type: 'keys', params: {} })
+    expect(panel.querySelector('.rack-keys')).toBeTruthy()
+  })
+
   it('sends selected module from browser and hides unavailable worklets', () => {
     const root = document.createElement('div'), pick = vi.fn()
     new ModuleBrowser(root, { hasWorklet: () => false, onPick: pick })

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import MODULES, { validateRegistry, paramDefaults } from '../src/renderer/js/rack/modules/index.js'
 import RackEngine from '../src/renderer/js/rack/rack-engine.js'
 import clock from '../src/renderer/js/rack/modules/clock.js'
+import keys from '../src/renderer/js/rack/modules/keys.js'
 
 // ---------------------------------------------------------------------------
 // Fuller BaseAudioContext fake — every node type the P0 module set builds.
@@ -167,6 +168,17 @@ describe('shipped module registry', () => {
     expect(envSource).toBeTruthy()
     expect(ramped).toBe(true)
     RackEngine.unmount(handle)
+  })
+
+  it('KEYS mounts as a poly note source and disposes clean, like MIDI IN', () => {
+    const inst = keys.create(ctx, { channels: 4, params: paramDefaults('keys') })
+    expect(inst.outputs.v_oct.length).toBe(4)
+    expect(inst.outputs.gate.length).toBe(4)
+    expect(inst.outputs.vel.length).toBe(4)
+    inst.onEvent('note', { type: 'note-on', note: 60 })
+    inst.dispose()
+    const leaked = ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)
+    expect(leaked).toEqual([])
   })
 
   it('CLOCK turns transport PPQN into quarter-note gates', () => {

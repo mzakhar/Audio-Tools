@@ -1,6 +1,6 @@
-import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModuleParam, Connect, Disconnect, LoadRackPatch } from '../store/ProjectStore.js'
+import ProjectStore, { AddRack, AddModule, MoveModule, RemoveModule, SetModuleParam, Connect, Disconnect, LoadRackPatch, SetRackRails } from '../store/ProjectStore.js'
 import MODULES, { canConnect } from '../rack/modules/index.js'
-import { canPlace, firstFreeSlot, pxToHp, tidyRack } from '../rack/rack-layout.js'
+import { canPlace, firstFreeSlot, pxToHp, tidyRack, minRails } from '../rack/rack-layout.js'
 import { renderPanel } from './rack-panel.js'
 import { ModuleBrowser } from './module-browser.js'
 import { RackCables } from './rack-cables.js'
@@ -36,7 +36,7 @@ export class RackView {
   constructor(container, { hasWorklet, getAudioContext, getMasterInput } = {}) {
     this.container = container; this.hasWorklet = hasWorklet || (() => false); this.getAudioContext = getAudioContext || (() => null); this.getMasterInput = getMasterInput || (() => null); this.rackId = null; this.selected = null; this.pending = null; this.engineHandle = null; this.poll = new RackPoll()
     const presetOptions = Object.entries(presets).map(([path]) => `<option value="${path}">${path.split('/').pop().replace('.json', '')}</option>`).join('')
-    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".6" max="2.5" step=".1" value="${DEFAULT_ZOOM}"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
+    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".6" max="2.5" step=".1" value="${DEFAULT_ZOOM}"></label><label>RAILS <input data-action="rails" type="number" min="1" max="8" step="1" value="2"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
     this.rails = container.querySelector('.rack-rails'); this.rails.style.setProperty('--rack-zoom', DEFAULT_ZOOM); this.canvas = new RackCables(container.querySelector('.rack-canvas'), this.rails)
     this.browser = new ModuleBrowser(container.querySelector('.module-browser'), { hasWorklet: this.hasWorklet, onPick: type => this.add(type) })
     container.querySelector('[data-action="add"]').onclick = () => container.classList.toggle('browser-open')
@@ -50,6 +50,12 @@ export class RackView {
     container.querySelector('[data-action="export"]').onclick = () => this.save()
     container.querySelector('[data-action="save-preset"]').onclick = () => this.save(`${this.rack()?.name || 'preset'}.synthrack`)
     container.querySelector('[data-action="zoom"]').oninput = e => { this.rails.style.setProperty('--rack-zoom', e.target.value); this.sizeRails(); this.canvas.draw() }
+    container.querySelector('[data-action="rails"]').onchange = e => {
+      const rack = this.rack(); if (!rack) return
+      const rails = Math.max(minRails(rack), Math.min(8, Number(e.target.value) || 1))
+      e.target.value = rails
+      ProjectStore.dispatch(SetRackRails(this.rackId, rails))
+    }
     // Delegated so it survives the panel rebuilds; the rails element itself is stable.
     this.rails.addEventListener('pointerdown', e => {
       const jack = e.target.closest('.rack-jack')
@@ -82,6 +88,8 @@ export class RackView {
     if (!this.rackId) return
     const rack = this.rack(); if (!rack) { this.unmountEngine(); return }
     const count = this.container.querySelector('.rack-count'); if (count) { const warning = rack.modules.length > 96 || rack.cables.length > 128; count.textContent = `${rack.modules.length}M ${rack.cables.length}C`; count.classList.toggle('warning', warning) }
+    const railsInput = this.container.querySelector('[data-action="rails"]')
+    if (railsInput && railsInput !== document.activeElement) railsInput.value = rack.rails
     // An engine failure must not take the panels down with it.
     try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
@@ -95,7 +103,7 @@ export class RackView {
     this.shape = shape
     this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
-      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args) })
+      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event) })
       panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; panel.classList.toggle('selected', this.selected === module.id)
       panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)
@@ -200,7 +208,7 @@ export class RackView {
     window.addEventListener('pointerup', up, { once: true })
   }
   drag(e, module, panel) {
-    if (e.target.closest('input,select,button')) return
+    if (e.target.closest('input,select,button,.rack-keys')) return
     // Pointer deltas arrive in screen px; the rails are scaled, so convert to layout px.
     const zoom = this.canvas.zoom()
     const start = { x: e.clientX, y: e.clientY, hp: module.hp, rail: module.rail }

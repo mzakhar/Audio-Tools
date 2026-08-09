@@ -5,6 +5,8 @@
  * Handles mouse, touch, and PC keyboard input.
  */
 
+import { KEY_MAP, keyLayout, noteToName } from './key-layout.js'
+
 // C3 = MIDI 48, C5 = MIDI 72
 const START_NOTE = 48 // C3
 const END_NOTE   = 72 // C5
@@ -13,37 +15,12 @@ const WHITE_KEY_H = 130
 const BLACK_KEY_W = 28
 const BLACK_KEY_H = 80
 
-// Which semitones in an octave are black keys (0=C)
-const BLACK_IN_OCT = new Set([1, 3, 6, 8, 10])
-// For each black-key semitone: how many white-key widths from the octave's C
-// to the CENTER of that black key. Formula: left = (octaveCX + offset)*W - W_b/2
-// semitone → (prevWhiteIdx + 1):  C#=1, D#=2, F#=4, G#=5, A#=6
-const BLACK_OFFSET = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 }
-
-// PC keyboard → MIDI note map
-const KEY_MAP = {
-  // Lower octave (C3–B3)
-  'a': 48, 'w': 49, 's': 50, 'e': 51, 'd': 52,
-  'f': 53, 't': 54, 'g': 55, 'y': 56, 'h': 57,
-  'u': 58, 'j': 59,
-  // Upper octave (C4–C5)
-  'k': 60, 'o': 61, 'l': 62, 'p': 63, ';': 64,
-  "'": 65, ']': 66, 'z': 67, '[': 68, 'x': 69,
-  '-': 70, 'c': 71, 'v': 72,
-}
-
 let container = null
 const pressedKeys = new Set() // MIDI notes currently held
 const activeMouseNote = { val: null } // currently held mouse note
 
 function noteToFreq(midi) {
   return 440 * Math.pow(2, (midi - 69) / 12)
-}
-
-function noteToName(midi) {
-  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
-  const oct = Math.floor(midi / 12) - 1
-  return names[midi % 12] + oct
 }
 
 function fireNoteOn(note) {
@@ -79,73 +56,26 @@ function render(containerId) {
   container.innerHTML = ''
   container.style.position = 'relative'
 
-  // Calculate white key positions
-  let whiteIndex = 0
-  const whitePositions = {} // MIDI → x position
+  const layout = keyLayout({ start: START_NOTE, end: END_NOTE, whiteW: WHITE_KEY_W, whiteH: WHITE_KEY_H, blackW: BLACK_KEY_W, blackH: BLACK_KEY_H })
+  container.style.width = layout.width + 'px'
+  container.style.height = layout.height + 'px'
 
-  for (let note = START_NOTE; note <= END_NOTE; note++) {
-    const semitone = note % 12
-    if (!BLACK_IN_OCT.has(semitone)) {
-      whitePositions[note] = whiteIndex
-      whiteIndex++
-    }
-  }
-
-  const totalWhites = whiteIndex
-  container.style.width = (totalWhites * WHITE_KEY_W) + 'px'
-  container.style.height = WHITE_KEY_H + 'px'
-
-  // Render white keys first (behind black)
-  for (let note = START_NOTE; note <= END_NOTE; note++) {
-    const semitone = note % 12
-    if (BLACK_IN_OCT.has(semitone)) continue
-
-    const x = whitePositions[note]
+  for (const key of layout.keys) {
     const div = document.createElement('div')
-    div.className = 'key-white'
-    div.dataset.note = note
+    div.className = key.black ? 'key-black' : 'key-white'
+    div.dataset.note = key.note
     div.style.position = 'absolute'
-    div.style.left = (x * WHITE_KEY_W) + 'px'
+    div.style.left = key.x + 'px'
     div.style.top = '0'
-    div.style.width = WHITE_KEY_W + 'px'
-    div.style.height = WHITE_KEY_H + 'px'
+    div.style.width = key.w + 'px'
+    div.style.height = key.h + 'px'
 
     const label = document.createElement('span')
     label.className = 'key-label'
-    label.textContent = buildKeyboardLabel(note) || (semitone === 0 ? noteToName(note) : '')
+    label.textContent = buildKeyboardLabel(key.note) || (!key.black && key.note % 12 === 0 ? noteToName(key.note) : '')
     div.appendChild(label)
 
-    attachMouseEvents(div, note)
-    container.appendChild(div)
-  }
-
-  // Render black keys on top
-  for (let note = START_NOTE; note <= END_NOTE; note++) {
-    const semitone = note % 12
-    if (!BLACK_IN_OCT.has(semitone)) continue
-
-    const octaveStart = note - semitone // MIDI of the C in this octave (always white)
-    const cX = whitePositions[octaveStart]
-    if (cX === undefined) continue
-
-    // Center this black key at the boundary between the two flanking white keys
-    const x = (cX + BLACK_OFFSET[semitone]) * WHITE_KEY_W - BLACK_KEY_W / 2
-
-    const div = document.createElement('div')
-    div.className = 'key-black'
-    div.dataset.note = note
-    div.style.position = 'absolute'
-    div.style.left = Math.round(x) + 'px'
-    div.style.top = '0'
-    div.style.width = BLACK_KEY_W + 'px'
-    div.style.height = BLACK_KEY_H + 'px'
-
-    const label = document.createElement('span')
-    label.className = 'key-label'
-    label.textContent = buildKeyboardLabel(note)
-    div.appendChild(label)
-
-    attachMouseEvents(div, note)
+    attachMouseEvents(div, key.note)
     container.appendChild(div)
   }
 

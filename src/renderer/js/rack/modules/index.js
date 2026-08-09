@@ -24,6 +24,7 @@ import euclid from './euclid.js'
 // (Quantcast rule), which aborts the whole module graph and blanks the app.
 import quant from './quantizer.js'
 import midiIn from './midi-in.js'
+import keys from './keys.js'
 import audioIn from './audio-in.js'
 import paramOut from './param-out.js'
 import fmop from './fmop.js'
@@ -46,7 +47,7 @@ import ringmod from './ringmod.js'
 import split from './split.js'
 import merge from './merge.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, rnd, euclid, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 

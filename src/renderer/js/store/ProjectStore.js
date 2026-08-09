@@ -472,6 +472,10 @@ function rackCommand(label, rackId, mutate) {
   }
 }
 
+export function SetRackRails(rackId, rails) {
+  return rackCommand(`Set rails to ${rails}`, rackId, rack => { rack.rails = Math.max(1, Math.min(8, rails | 0)) })
+}
+
 export function AddRack(name = 'Rack', rackId = null) {
   return {
     label: `Add rack "${name}"`,

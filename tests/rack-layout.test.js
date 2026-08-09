@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   HP_PX, UNKNOWN_HP, hpToPx, pxToHp, moduleWidthHp,
-  canPlace, firstFreeSlot, packRail, tidyRack
+  canPlace, firstFreeSlot, packRail, tidyRack, minRails
 } from '../src/renderer/js/rack/rack-layout.js'
 
 const registry = { vco: { hp: 8 }, vcf: { hp: 6 }, mult: { hp: 4 } }
@@ -133,6 +133,19 @@ describe('packRail', () => {
     const r = rack([{ id: 'm1', type: 'mult', rail: 0, hp: 20 }])
     packRail(r, registry, 0)
     expect(r.modules[0].hp).toBe(20)
+  })
+})
+
+describe('minRails', () => {
+  it('is 1 for an empty rack', () => {
+    expect(minRails(rack([]))).toBe(1)
+  })
+  it('is one past the highest occupied rail', () => {
+    const r = rack([
+      { id: 'm1', type: 'vco', rail: 0, hp: 0 },
+      { id: 'm2', type: 'vco', rail: 2, hp: 0 }
+    ])
+    expect(minRails(r)).toBe(3)
   })
 })
 

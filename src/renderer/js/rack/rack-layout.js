@@ -68,6 +68,12 @@ export function packRail(rack, registry, rail) {
   return packed
 }
 
+// Lowest rail count that still holds every module. Guards the rail stepper from
+// shrinking a rack out from under an occupied rail.
+export function minRails(rack) {
+  return Math.max(1, ...rack.modules.map(m => m.rail + 1), 1)
+}
+
 export function tidyRack(rack, registry) {
   const hpById = new Map()
   for (let rail = 0; rail < rack.rails; rail++) {

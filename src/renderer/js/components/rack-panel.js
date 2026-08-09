@@ -1,6 +1,6 @@
 import { getModule, paramDefaults } from '../rack/modules/index.js'
 
-export function renderPanel(module, { onParam, onJack } = {}) {
+export function renderPanel(module, { onParam, onJack, onEvent } = {}) {
   const def = getModule(module.type)
   const el = document.createElement('article')
   el.className = 'rack-panel'
@@ -31,6 +31,11 @@ export function renderPanel(module, { onParam, onJack } = {}) {
     input.addEventListener('input', () => onParam?.(module.id, param.key, input.type === 'checkbox' ? input.checked : (param.options ? input.value : Number(input.value))))
     label.append(input); body.append(label)
   }
+  const custom = def.panel?.(module, {
+    sendEvent: (port, event) => onEvent?.(module.id, port, event),
+    params: () => ({ ...paramDefaults(module.type), ...module.params })
+  })
+  if (custom) el.append(custom)
   // Inputs and outputs get their own labelled block, the way a real panel is silk-screened.
   for (const dir of ['in', 'out']) {
     const ports = def.ports.filter(port => port.dir === dir)
