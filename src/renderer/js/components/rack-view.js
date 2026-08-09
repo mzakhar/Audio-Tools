@@ -11,6 +11,9 @@ import { RackPoll } from '../rack/rack-poll.js'
 
 const presets = import.meta.glob('../../presets/racks/*.json', { eager: true, import: 'default' })
 
+// Panels are small at 1:1; the rack is more usable zoomed in with less rail visible.
+const DEFAULT_ZOOM = 1.6
+
 // Kept in patch form so NEW and the empty-rack bootstrap both go through importPatch.
 const starter = {
   format: 'synthrack',
@@ -33,20 +36,27 @@ export class RackView {
   constructor(container, { hasWorklet, getAudioContext, getMasterInput } = {}) {
     this.container = container; this.hasWorklet = hasWorklet || (() => false); this.getAudioContext = getAudioContext || (() => null); this.getMasterInput = getMasterInput || (() => null); this.rackId = null; this.selected = null; this.pending = null; this.engineHandle = null; this.poll = new RackPoll()
     const presetOptions = Object.entries(presets).map(([path]) => `<option value="${path}">${path.split('/').pop().replace('.json', '')}</option>`).join('')
-    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".5" max="1.5" step=".1" value="1"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
-    this.rails = container.querySelector('.rack-rails'); this.canvas = new RackCables(container.querySelector('.rack-canvas'), this.rails)
+    container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".6" max="2.5" step=".1" value="${DEFAULT_ZOOM}"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
+    this.rails = container.querySelector('.rack-rails'); this.rails.style.setProperty('--rack-zoom', DEFAULT_ZOOM); this.canvas = new RackCables(container.querySelector('.rack-canvas'), this.rails)
     this.browser = new ModuleBrowser(container.querySelector('.module-browser'), { hasWorklet: this.hasWorklet, onPick: type => this.add(type) })
     container.querySelector('[data-action="add"]').onclick = () => container.classList.toggle('browser-open')
     container.querySelector('[data-action="delete"]').onclick = () => this.selected && ProjectStore.dispatch(RemoveModule(this.rackId, this.selected))
-    container.querySelector('[data-action="tidy"]').onclick = () => this.load(tidyRack(this.rack(), MODULES))
+    // tidyRack returns a bare rack, not a patch — importPatch would reject it.
+    container.querySelector('[data-action="tidy"]').onclick = () => ProjectStore.dispatch(LoadRackPatch(this.rackId, tidyRack(this.rack(), MODULES)))
     container.querySelector('[data-action="cables"]').onclick = e => { this.canvas.hidden = !this.canvas.hidden; e.currentTarget.classList.toggle('active', !this.canvas.hidden) }
     container.querySelector('[data-action="new"]').onclick = () => this.load(starter)
     container.querySelector('[data-action="preset"]').onchange = e => { if (e.target.value) this.load(presets[e.target.value]); e.target.value = '' }
     container.querySelector('[data-action="import"]').onclick = async () => { try { const json = await FileAdapter.importRackPatch(); if (json) this.load(json) } catch (e) { if (e.name !== 'AbortError') console.warn('Rack import failed', e) } }
     container.querySelector('[data-action="export"]').onclick = () => this.save()
     container.querySelector('[data-action="save-preset"]').onclick = () => this.save(`${this.rack()?.name || 'preset'}.synthrack`)
-    container.querySelector('[data-action="zoom"]').oninput = e => { this.rails.style.setProperty('--rack-zoom', e.target.value); this.canvas.draw() }
-    this.rails.addEventListener('dblclick', e => { const hit = this.canvas.hitTest(e.offsetX, e.offsetY); if (hit) ProjectStore.dispatch(Disconnect(this.rackId, hit.id)) })
+    container.querySelector('[data-action="zoom"]').oninput = e => { this.rails.style.setProperty('--rack-zoom', e.target.value); this.sizeRails(); this.canvas.draw() }
+    // offsetX/Y is relative to whatever was hit — and panels now cover the full rail
+    // height, so a cable is almost always over a panel. Measure against the rails.
+    this.rails.addEventListener('dblclick', e => {
+      const rect = this.rails.getBoundingClientRect(), zoom = this.canvas.zoom()
+      const hit = this.canvas.hitTest((e.clientX - rect.left) / zoom, (e.clientY - rect.top) / zoom)
+      if (hit) ProjectStore.dispatch(Disconnect(this.rackId, hit.id))
+    })
     this.unsubscribe = ProjectStore.subscribe(() => this.render())
   }
   show() { this.container.style.display = 'grid'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter) } this.render() }
@@ -65,7 +75,8 @@ export class RackView {
     try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
     this.rails.replaceChildren(this.canvas.canvas)
-    this.rails.style.width = `${rack.railHp * 16}px`; this.rails.style.height = `${rack.rails * 220}px`
+    this.railHp = rack.railHp; this.railCount = rack.rails
+    this.sizeRails()
     for (const module of rack.modules) {
       const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args) })
       panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; panel.classList.toggle('selected', this.selected === module.id)
@@ -74,6 +85,18 @@ export class RackView {
       this.rails.append(panel)
     }
     this.canvas.setCables(rack.cables)
+  }
+  // `transform: scale()` does not grow the layout box, so the scroll container would
+  // clip a zoomed-in rack. Reserve the extra with margins.
+  sizeRails() {
+    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220
+    const zoom = Number(getComputedStyle(this.rails).getPropertyValue('--rack-zoom')) || 1
+    Object.assign(this.rails.style, {
+      width: `${width}px`,
+      height: `${height}px`,
+      marginRight: `${width * (zoom - 1)}px`,
+      marginBottom: `${height * (zoom - 1)}px`
+    })
   }
   syncEngine(rack) {
     const ctx = this.getAudioContext()
@@ -97,7 +120,13 @@ export class RackView {
   }
   drag(e, module, panel) {
     if (e.target.closest('input,select,button')) return
-    const start = { x: e.clientX, y: e.clientY, hp: module.hp, rail: module.rail }, move = ev => { panel.style.left = `${start.hp * 16 + ev.clientX - start.x}px`; panel.style.top = `${start.rail * 220 + ev.clientY - start.y}px`; this.canvas.draw() }, up = ev => { window.removeEventListener('pointermove', move); const rack = this.rack(), rail = Math.max(0, Math.min(rack.rails - 1, Math.round((start.rail * 220 + ev.clientY - start.y) / 220))), hp = Math.max(0, pxToHp(start.hp * 16 + ev.clientX - start.x)); if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp)); else this.render() }
+    // Pointer deltas arrive in screen px; the rails are scaled, so convert to layout px.
+    const zoom = this.canvas.zoom()
+    const start = { x: e.clientX, y: e.clientY, hp: module.hp, rail: module.rail }
+    const left = ev => start.hp * 16 + (ev.clientX - start.x) / zoom
+    const top = ev => start.rail * 220 + (ev.clientY - start.y) / zoom
+    const move = ev => { panel.style.left = `${left(ev)}px`; panel.style.top = `${top(ev)}px`; this.canvas.draw() }
+    const up = ev => { window.removeEventListener('pointermove', move); const rack = this.rack(), rail = Math.max(0, Math.min(rack.rails - 1, Math.round(top(ev) / 220))), hp = Math.max(0, pxToHp(left(ev))); if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp)); else this.render() }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true })
   }
 }

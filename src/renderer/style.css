@@ -124,9 +124,9 @@ html, body {
 
 .rack-jacks { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 5px; padding-top: 4px; }
 .rack-jacks-in { border-top: 1px dashed #ffffff1a; }
-.rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 20px; gap: 1px; }
+.rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
 .rack-jack-slot em {
-  font-style: normal; font-size: 7px; line-height: 1; letter-spacing: .2px;
+  font-style: normal; font-size: 7px; line-height: 1; letter-spacing: 0;
   color: #97a3b0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rack-jack {
