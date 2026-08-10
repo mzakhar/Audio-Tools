@@ -673,6 +673,86 @@ input[type=range]::-moz-range-thumb {
   padding: 6px 10px;
 }
 
+.tr909-barstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tr909-barstrip-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.tr909-bar-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.tr909-bar-btn-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tr909-bar-btn {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.tr909-bar-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* Selected — persistent outline, the bar the editor is showing. */
+.tr909-bar-btn.selected {
+  border-color: #f05a28;
+  color: #f05a28;
+}
+/* Playing — bright animated fill, the bar currently sounding in chain mode.
+   Composes with .selected: a bar can be both at once. */
+.tr909-bar-btn.bar-playing {
+  background: #f05a28;
+  color: #050505;
+  box-shadow: 0 0 10px #f05a2899;
+  animation: tr909-bar-pulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes tr909-bar-pulse {
+  from { box-shadow: 0 0 6px #f05a2866; }
+  to   { box-shadow: 0 0 14px #f05a28cc; }
+}
+.tr909-bar-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  line-height: 12px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg2);
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+.tr909-bar-remove:hover { border-color: #ff4444; color: #ff4444; }
+.tr909-bar-add,
+.tr909-bar-copy {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  height: 26px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.tr909-bar-add:hover,
+.tr909-bar-copy:hover { border-color: var(--accent); color: var(--accent); }
+
 .tr909-pattern,
 .tr909-control,
 .tr909-param {
