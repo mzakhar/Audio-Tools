@@ -138,6 +138,39 @@ html, body {
    and the keys end up flush against the knobs. */
 .rack-panel.docked .rack-keys { order: 1; flex: 0 0 auto; margin: 18px auto 0; }
 
+/* The util row above the rails — half-height, row-wrap like the dock, but
+   bolted to the top of the case (border-bottom, not border-top) and with the
+   header shrunk to a caption rather than hidden outright. Keep in step with
+   UTIL_H in rack-view.js. */
+/* Controls sit LEFT of the jacks, not above them: the knob block spans both jack
+   rows so an IN/OUT pair stacks in one column, the way a 1U panel is laid out.
+   The knob column collapses to zero width on a module with no params (BUS). */
+.rack-panel.util {
+  --util-col: 40px;
+  height: 106px; padding: 5px 8px; gap: 2px;
+  display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto auto;
+  justify-content: start; align-content: start;
+  border-bottom: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default;
+}
+.rack-panel.util header {
+  grid-column: 1 / -1; font-size: 9px; letter-spacing: .3px; margin: 0; padding: 0 0 1px;
+}
+.rack-panel.util .rack-params { grid-column: 1; grid-row: 2 / span 2; align-self: center; }
+.rack-panel.util .rack-jacks { grid-column: 2; }
+/* Knob row and every jack row share one fixed column track (--util-col), so
+   an input jack lands directly above its output jack. */
+.rack-panel.util .rack-params,
+.rack-panel.util .rack-jacks { display: flex; flex-direction: row; gap: 0; margin: 0; padding: 0; overflow: visible; }
+.rack-panel.util .rack-jacks-in { border-top: none; }
+.rack-panel.util .rack-params > *,
+.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+/* Captions belong under their control on both rows — knobs render label-above
+   by default, so flip the knob's own stack for a util panel only. */
+.rack-panel.util .knob { flex-direction: column-reverse; gap: 2px; }
+.rack-panel.util .rack-jack { width: 12px; height: 12px; }
+.rack-panel.util .rack-jack-slot em { font-size: 6px; }
+.rack-panel.util .knob-dial { width: 22px; height: 22px; }
+
 /* Rotary knob: a dial the pointer drags, wrapped around a hidden range input. */
 .rack-panel .knob { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 40px; margin: 0; }
 .knob-cap { font-size: 8px; letter-spacing: .4px; color: #b9c4d0; white-space: nowrap; }

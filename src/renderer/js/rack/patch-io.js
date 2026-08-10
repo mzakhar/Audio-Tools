@@ -30,7 +30,20 @@ export function importPatch(json, registry) {
   // A cable naming a port no module has is dead weight: drop it and say so,
   // rather than leaving a patch that looks wired but makes no sound.
   const typeOf = Object.fromEntries(rack.modules.map(m => [m.id, m.type]))
+  // ponytail: one-way compat shim for pre-mono OUT patches saved before OUT
+  // collapsed L/R into a single `in` port. Rewrite l/r -> in, then drop the
+  // rewritten cable if an identical one already survived (keys-voice-shaped
+  // patches wired the same source to both l and r, which would double the gain).
+  const seenOutIn = new Set()
   rack.cables = (Array.isArray(rack.cables) ? rack.cables : []).filter(cable => {
+    if (typeOf[cable.to?.moduleId] === 'out' && (cable.to.port === 'l' || cable.to.port === 'r')) {
+      cable.to.port = 'in'
+      const key = `${cable.from?.moduleId}.${cable.from?.port}->${cable.to.moduleId}.in`
+      if (seenOutIn.has(key)) return false
+      seenOutIn.add(key)
+    }
+    return true
+  }).filter(cable => {
     for (const [side, end] of [['from', cable.from], ['to', cable.to]]) {
       const known = registry[typeOf[end?.moduleId]]
       const port = known?.ports.find(p => p.id === end.port)

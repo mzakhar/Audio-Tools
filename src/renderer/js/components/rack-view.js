@@ -19,8 +19,14 @@ const DEFAULT_ZOOM = 1.6
 // fit in 220px. Keep in step with `.rack-panel.docked` height in style.css.
 const DOCK_H = 236
 
+// The util row sits above the rails (rail index -2), half-height, for modules
+// that never need a full 220px. Keep in step with `.rack-panel.util` in style.css.
+const UTIL_RAIL = -2
+const UTIL_H = 110
+
 // Kept in patch form so NEW and the empty-rack bootstrap both go through importPatch.
-const starter = {
+// Exported for tests only — production code below still reaches it via closure.
+export const starter = {
   format: 'synthrack',
   version: 1,
   rack: {
@@ -37,7 +43,7 @@ const starter = {
     // gating it closes the VCA until the user patches a gate into it.
     cables: [
       { id: 'starter-vco-vca', from: { moduleId: 'starter-vco', port: 'out' }, to: { moduleId: 'starter-vca', port: 'in' } },
-      { id: 'starter-vca-out', from: { moduleId: 'starter-vca', port: 'out' }, to: { moduleId: 'starter-out', port: 'l' } },
+      { id: 'starter-vca-out', from: { moduleId: 'starter-vca', port: 'out' }, to: { moduleId: 'starter-out', port: 'in' } },
       { id: 'starter-adsr-vca', from: { moduleId: 'starter-adsr', port: 'env' }, to: { moduleId: 'starter-vca', port: 'cv' } }
     ]
   }
@@ -92,12 +98,17 @@ export class RackView {
   add(type) {
     const rack = this.rack(), def = MODULES[type]
     if (!def) return
-    const slot = def.dock
-      ? { rail: -1, hp: rack.modules.filter(m => m.rail < 0).reduce((x, m) => x + moduleWidthHp(m, MODULES), 0) }
+    const slot = def.util
+      ? { rail: UTIL_RAIL, hp: rack.modules.filter(m => m.rail === UTIL_RAIL).reduce((x, m) => x + moduleWidthHp(m, MODULES), 0) }
+      : def.dock
+      ? { rail: -1, hp: rack.modules.filter(m => m.rail === -1).reduce((x, m) => x + moduleWidthHp(m, MODULES), 0) }
       : firstFreeSlot(rack, MODULES, def.hp)
     if (slot) ProjectStore.dispatch(AddModule(this.rackId, type, slot))
   }
-  railTop(rack, rail) { return (rail < 0 ? rack.rails : rail) * 220 }
+  railTop(rack, rail) {
+    if (rail === UTIL_RAIL) return 0
+    return (this.railOffset ?? 0) + (rail < 0 ? rack.rails : rail) * 220
+  }
   // Live params for a module, read from the store at call time. Panels that draw
   // from params (KEYS, ALGO) outlive the snapshot they were built with.
   moduleParams(moduleId) {
@@ -122,7 +133,9 @@ export class RackView {
     try { this.syncEngine(rack) } catch (e) { console.warn('Rack engine sync failed', e) }
     if (this.container.style.display === 'none') return
     this.railHp = rack.railHp; this.railCount = rack.rails
-    this.dockRows = rack.modules.some(m => m.rail < 0) ? 1 : 0
+    this.dockRows = rack.modules.some(m => m.rail === -1) ? 1 : 0
+    this.utilRows = rack.modules.some(m => m.rail === UTIL_RAIL) ? 1 : 0
+    this.railOffset = this.utilRows * UTIL_H
     this.sizeRails()
     // Rebuilding the panels on every store change destroys whatever control the user
     // is holding — an open <select> closes, a slider drag drops. Only rebuild when the
@@ -133,7 +146,7 @@ export class RackView {
     this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
       const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event), getParams: id => this.moduleParams(id) })
-      panel.style.left = `${module.hp * 16}px`; panel.style.top = `${this.railTop(rack, module.rail)}px`; panel.classList.toggle('selected', this.selected === module.id); panel.classList.toggle('docked', module.rail < 0)
+      panel.style.left = `${module.hp * 16}px`; panel.style.top = `${this.railTop(rack, module.rail)}px`; panel.classList.toggle('selected', this.selected === module.id); panel.classList.toggle('docked', module.rail === -1); panel.classList.toggle('util', module.rail === UTIL_RAIL)
       panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)
       this.rails.append(panel)
@@ -163,7 +176,7 @@ export class RackView {
   // `transform: scale()` does not grow the layout box, so the scroll container would
   // clip a zoomed-in rack. Reserve the extra with margins.
   sizeRails() {
-    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220 + (this.dockRows ?? 0) * DOCK_H
+    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220 + (this.dockRows ?? 0) * DOCK_H + (this.utilRows ?? 0) * UTIL_H
     const zoom = Number(getComputedStyle(this.rails).getPropertyValue('--rack-zoom')) || 1
     Object.assign(this.rails.style, {
       width: `${width}px`,
@@ -244,9 +257,25 @@ export class RackView {
     const zoom = this.canvas.zoom()
     const start = { x: e.clientX, y: e.clientY, hp: module.hp, rail: module.rail }
     const left = ev => start.hp * 16 + (ev.clientX - start.x) / zoom
-    const top = ev => start.rail * 220 + (ev.clientY - start.y) / zoom
+    const top = ev => this.railTop(this.rack(), start.rail) + (ev.clientY - start.y) / zoom
     const move = ev => { panel.style.left = `${left(ev)}px`; panel.style.top = `${top(ev)}px`; this.canvas.draw() }
-    const up = ev => { window.removeEventListener('pointermove', move); const rack = this.rack(), rail = Math.max(0, Math.min(rack.rails - 1, Math.round(top(ev) / 220))), hp = Math.max(0, pxToHp(left(ev))); if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp)); else { panel.style.left = `${module.hp * 16}px`; panel.style.top = `${module.rail * 220}px`; this.canvas.draw() } }
+    const up = ev => {
+      window.removeEventListener('pointermove', move)
+      const rack = this.rack()
+      const rail = Math.max(0, Math.min(rack.rails - 1, Math.round((top(ev) - (this.railOffset ?? 0)) / 220)))
+      const hp = Math.max(0, pxToHp(left(ev)))
+      if (canPlace(rack, MODULES, { rail, hp, widthHp: MODULES[module.type]?.hp || 8, ignoreId: module.id })) {
+        ProjectStore.dispatch(MoveModule(this.rackId, module.id, rail, hp))
+      }
+      // Snap to whatever the store settled on. Covers a rejected drop and a no-op drop,
+      // where the shape is unchanged so render() will not rebuild this panel.
+      const now = this.rack(), placed = now.modules.find(m => m.id === module.id)
+      if (placed) {
+        panel.style.left = `${placed.hp * 16}px`
+        panel.style.top = `${this.railTop(now, placed.rail)}px`
+      }
+      this.canvas.draw()
+    }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true })
   }
 }

@@ -43,13 +43,15 @@ import drive from './drive.js'
 import math from './math.js'
 import mult from './mult.js'
 import sum from './sum.js'
+import vc from './vc.js'
+import bus from './bus.js'
 import reverb from './reverb.js'
 import chorus from './chorus.js'
 import ringmod from './ringmod.js'
 import split from './split.js'
 import merge from './merge.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
@@ -117,6 +119,7 @@ export function validateRegistry(registry = MODULES) {
       if (port.dir !== 'in' && port.dir !== 'out') at(`port "${port.id}" has invalid dir "${port.dir}"`)
       if (!VALID_KINDS.includes(port.kind)) at(`port "${port.id}" has invalid kind "${port.kind}"`)
       if (port.atten && port.dir !== 'in') at(`port "${port.id}" is an output and cannot have an attenuverter`)
+      if (port.row !== undefined && !(Number.isInteger(port.row) && port.row >= 0)) at(`port "${port.id}" row must be a non-negative integer`)
     }
 
     if (!Array.isArray(def.params)) { at('params must be an array'); continue }

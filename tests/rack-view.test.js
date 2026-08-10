@@ -59,12 +59,24 @@ describe('rack panel', () => {
 
     // Invisible to rail packing: TIDY must not pull it onto a rail, and a rail
     // module must still be free to take hp 0.
-    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 28 })
+    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 34 })
     expect(tidyRack(view.rack(), MODULES).modules.find(m => m.id === keys.id).hp).toBe(keys.hp)
 
     // A second docked module stacks beside it, not on top of it.
     view.add('keys')
     expect(view.rack().modules.at(-1)).toMatchObject({ rail: -1, hp: MODULES.keys.hp })
+    view.destroy()
+  })
+
+  it('places a util:true module in the half-height row above the rails', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.show()
+
+    view.add('bus')
+    const bus = view.rack().modules.at(-1)
+    expect(bus.rail).toBe(-2)
+    expect(view.railTop(view.rack(), bus.rail)).toBe(0)
     view.destroy()
   })
 

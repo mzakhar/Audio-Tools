@@ -2,22 +2,22 @@
 // module's `output` node to the rack's destination (its mixer channel input,
 // or the insert chain's output).
 //
-// ponytail: mono sum of L and R. True stereo needs a ChannelMerger plus
-// normalling (R follows L when unpatched), which needs the engine to tell a
-// module which of its inputs are patched — add that when a stereo module
-// (CHORUS, DELAY ping-pong) actually needs it.
+// ponytail: mono by design, one IN jack. True stereo needs a ChannelMerger
+// plus normalling (R follows L when unpatched), which needs the engine to
+// tell a module which of its inputs are patched — add that when a stereo
+// module (CHORUS, DELAY ping-pong) actually needs it.
 
 export default {
   type: 'out',
   name: 'OUT',
   group: 'io',
-  hp: 4,
+  hp: 10,
   tier: 'native',
+  util: true,
   poly: false,     // sums every poly channel that lands on it
   terminal: true,
   ports: [
-    { id: 'l', dir: 'in', kind: 'audio', label: 'L' },
-    { id: 'r', dir: 'in', kind: 'audio', label: 'R' }
+    { id: 'in', dir: 'in', kind: 'audio', label: 'IN' }
   ],
   params: [
     { key: 'level', label: 'LEVEL', min: 0, max: 1, step: 0.01, def: 0.7, fmt: '' },
@@ -32,7 +32,7 @@ export default {
     input.connect(out)
 
     return {
-      inputs: { l: [input], r: [input] },
+      inputs: { in: [input] },
       outputs: {},
       output: out,
 

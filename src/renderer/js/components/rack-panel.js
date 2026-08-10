@@ -10,9 +10,10 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}
   if (!def) { el.textContent = `UNKNOWN\n${module.type}`; return el }
   el.innerHTML = `<header>${def.name}</header>`
   const body = document.createElement('div'); body.className = 'rack-params'
-  // A module that draws its own panel needs the height for it — stack its knobs
-  // and selects across the width instead of down the panel.
-  if (def.panel) body.classList.add('rack-params-compact')
+  // A module that draws its own panel needs the height for it — lay its controls
+  // across the width instead of down the panel. Docked panels already do this
+  // their own way; applying both wraps their knobs and pushes the drawing out.
+  if (def.panel && !def.dock) body.classList.add('rack-params-compact')
   el.append(body)
   const params = { ...paramDefaults(module.type), ...module.params }
   for (const param of def.params) {
@@ -34,7 +35,7 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}
     input.dataset.param = param.key
     input.addEventListener('input', () => onParam?.(module.id, param.key, input.type === 'checkbox' ? input.checked : (param.options ? input.value : Number(input.value))))
     // A docked panel has width but little height: knobs in a row, not stacked sliders.
-    if (def.dock && input.type === 'range') { body.append(renderKnob(param, input)); continue }
+    if ((def.dock || def.util) && input.type === 'range') { body.append(renderKnob(param, input)); continue }
     label.append(input); body.append(label)
   }
   const custom = def.panel?.(module, {
@@ -52,11 +53,17 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}
     if (custom.refresh) { el.__refresh = custom.refresh; el.addEventListener('input', custom.refresh) }
   }
   // Inputs and outputs get their own labelled block, the way a real panel is silk-screened.
-  for (const dir of ['in', 'out']) {
-    const ports = def.ports.filter(port => port.dir === dir)
+  // A module may declare its own jack rows (`port.row`) instead of the default
+  // in-block-then-out-block — bus needs two independent rows, each mixing an
+  // input with its own outputs.
+  const rows = def.ports.some(p => p.row !== undefined)
+    ? [...new Set(def.ports.map(p => p.row ?? 0))].sort((a, b) => a - b).map(r => def.ports.filter(p => (p.row ?? 0) === r))
+    : ['in', 'out'].map(d => def.ports.filter(p => p.dir === d))
+  for (const ports of rows) {
     if (!ports.length) continue
+    const dir = ports.every(p => p.dir === ports[0].dir) ? ports[0].dir : null
     const group = document.createElement('div')
-    group.className = `rack-jacks rack-jacks-${dir}`
+    group.className = dir ? `rack-jacks rack-jacks-${dir}` : 'rack-jacks'
     for (const port of ports) {
       const slot = document.createElement('span')
       slot.className = 'rack-jack-slot'
@@ -64,8 +71,8 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}
       jack.className = `rack-jack ${port.dir} ${port.kind}`
       jack.dataset.port = port.id
       jack.dataset.dir = port.dir
-      jack.setAttribute('aria-label', `${def.name} ${port.label || port.id} ${dir === 'in' ? 'input' : 'output'}`)
-      jack.title = `${port.label || port.id} — ${port.kind} ${dir === 'in' ? 'input' : 'output'}`
+      jack.setAttribute('aria-label', `${def.name} ${port.label || port.id} ${port.dir === 'in' ? 'input' : 'output'}`)
+      jack.title = `${port.label || port.id} — ${port.kind} ${port.dir === 'in' ? 'input' : 'output'}`
       jack.addEventListener('click', () => onJack?.(module.id, port.id, port.dir, jack))
       const caption = document.createElement('em')
       caption.textContent = port.label || port.id

@@ -80,7 +80,7 @@ function starterRack() {
   }
   patch('vco', 'out', 'vcf', 'in')
   patch('vcf', 'out', 'vca', 'in')
-  patch('vca', 'out', 'out', 'l')
+  patch('vca', 'out', 'out', 'in')
   patch('adsr', 'env', 'vca', 'cv')
   patch('lfo', 'bi', 'vcf', 'cut')
   patch('noise', 'wht', 'vcf', 'in')
@@ -192,6 +192,39 @@ describe('shipped module registry', () => {
         .flatMap(p => (p.setValueAtTime?.mock?.calls || []).map(([value]) => value))
     ).filter(v => !Number.isFinite(v))
     expect(nonFinite).toEqual([])
+    inst.dispose()
+  })
+
+  it('VC builds 4 inputs, 4 outs plus MIX, one channel', () => {
+    const vc = MODULES.vc
+    const inst = vc.create(ctx, { channels: 1, params: paramDefaults('vc') })
+    for (const port of ['a', 'b', 'c', 'd']) expect(inst.inputs[port].length).toBe(1)
+    for (const port of ['outa', 'outb', 'outc', 'outd']) expect(inst.outputs[port].length).toBe(1)
+    expect(inst.outputs.mix.length).toBe(1)
+    inst.dispose()
+  })
+
+  it('VC drops and restores its normal cleanly and leaves no source running after dispose', () => {
+    const vc = MODULES.vc
+    const inst = vc.create(ctx, { channels: 1, params: paramDefaults('vc') })
+    inst.setInputPatched('a', true)
+    inst.setInputPatched('a', false)
+    inst.dispose()
+    const leaked = ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)
+    expect(leaked).toEqual([])
+  })
+
+  it('BUS fans each of its two independent inputs out to its own four outputs', () => {
+    const inst = MODULES.bus.create(ctx, { channels: 1, params: paramDefaults('bus') })
+    expect(inst.inputs.in1.length).toBe(1)
+    expect(inst.inputs.in2.length).toBe(1)
+    for (const port of ['a1', 'b1', 'c1', 'd1', 'a2', 'b2', 'c2', 'd2']) expect(inst.outputs[port].length).toBe(1)
+    const outs1 = ['a1', 'b1', 'c1', 'd1'].map(p => inst.outputs[p][0])
+    const outs2 = ['a2', 'b2', 'c2', 'd2'].map(p => inst.outputs[p][0])
+    // Every node bus1 touches is disjoint from every node bus2 touches.
+    expect(outs1.some(n => outs2.includes(n))).toBe(false)
+    expect(inst.inputs.in1[0].connect.mock.calls.map(c => c[0])).toEqual(outs1)
+    expect(inst.inputs.in2[0].connect.mock.calls.map(c => c[0])).toEqual(outs2)
     inst.dispose()
   })
 

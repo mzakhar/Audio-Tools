@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import MODULES from '../src/renderer/js/rack/modules/index.js'
 import { exportPatch, importPatch } from '../src/renderer/js/rack/patch-io.js'
+import { starter } from '../src/renderer/js/components/rack-view.js'
 
 const rack = { id: 'r1', name: 'Test', rails: 2, railHp: 84, modules: [{ id: 'v1', type: 'vco', rail: 0, hp: 0, params: { level: 0.5 } }], cables: [] }
 const presetFiles = import.meta.glob('../src/renderer/presets/racks/*.json', { eager: true, import: 'default' })
@@ -17,5 +18,26 @@ describe('rack patch IO', () => {
 
   it('imports every shipped preset cleanly', () => {
     for (const preset of Object.values(presetFiles)) expect(importPatch(preset, MODULES).warnings).toEqual([])
+  })
+
+  it('imports the starter patch cleanly', () => {
+    expect(importPatch(starter, MODULES).warnings).toEqual([])
+  })
+
+  it('collapses legacy out.l/out.r cables from the same source into one out.in cable', () => {
+    const legacy = {
+      format: 'synthrack', version: 1,
+      rack: {
+        modules: [{ id: 'v1', type: 'vco' }, { id: 'o1', type: 'out' }],
+        cables: [
+          { id: 'c1', from: { moduleId: 'v1', port: 'out' }, to: { moduleId: 'o1', port: 'l' } },
+          { id: 'c2', from: { moduleId: 'v1', port: 'out' }, to: { moduleId: 'o1', port: 'r' } }
+        ]
+      }
+    }
+    const { rack, warnings } = importPatch(legacy, MODULES)
+    expect(warnings).toEqual([])
+    expect(rack.cables).toHaveLength(1)
+    expect(rack.cables[0].to).toMatchObject({ moduleId: 'o1', port: 'in' })
   })
 })
