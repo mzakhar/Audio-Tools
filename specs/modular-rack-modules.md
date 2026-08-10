@@ -133,7 +133,8 @@ Priority: **P0** = required for the first shippable rack, **P1** = same release,
 | **OUT** | 4 | native | sums poly | `L` audio, `R` audio (normalled from L) | — | level 0–1, mute | P0 |
 | **AUDIO IN** | 4 | native | no | — | `L` audio, `R` audio | gain 0–2 | P1 |
 | **PARAM OUT** | 6 | native | no | `IN` cv | — | target (mixer/effect param picker), range min/max, smoothing 0–500 ms | P1 |
-| **SCOPE** | 12 | native | shows ch 1–4 | `A` any, `B` any, `TRIG` gate | — | time 1–500 ms/div, scale ±0.1…±2, mode (wave/xy/spectrum), trigger (auto/rising/off) | P1 |
+| **SCOPE** | 12 | native | no | `A` any, `B` any, `TRIG` gate | `A` audio, `B` audio (pass-through) | time 1–500 ms/div, scale 0.1–2, mode (wave/xy/spectrum), trigger level −1…1, slope (rising/falling) | P1 |
+| **METER** | 8 | native | no | `1`–`4` audio | `1`–`4` audio (pass-through) | mode (audio/cv), source (peak/rms) | P1 |
 | **CV MON** | 4 | native | shows ch 1–8 | `IN` any | — | display (volts / semitones / Hz / raw) | P1 |
 | **TUNER** | 6 | native | no | `IN` audio | — | reference A 415–466 Hz | P1 |
 
@@ -145,7 +146,9 @@ Priority: **P0** = required for the first shippable rack, **P1** = same release,
 
 **PARAM OUT.** Control-rate bridge described in §5.7 of the main spec: an `AnalyserNode` on the input is polled at 60 Hz, mapped through `range`, and written via `MixerEngine.setVolume/setPan/setEffectParam`. Panel states "control rate" so nobody expects audio-rate mixer modulation.
 
-**SCOPE / CV MON / TUNER.** All `AnalyserNode` readers on the shared 30 fps poll loop, suspended when the rack view is hidden. `TUNER` uses autocorrelation on a 2048-sample window — accurate enough for tuning a VCO, and it is the fastest way to prove 1 V/oct tracking is correct.
+**SCOPE / METER / CV MON / TUNER.** All `AnalyserNode` readers on the shared 30 fps poll loop, suspended when the rack view is hidden. `TUNER` uses autocorrelation on a 2048-sample window — accurate enough for tuning a VCO, and it is the fastest way to prove 1 V/oct tracking is correct.
+
+**SCOPE and METER are inline, not taps.** An `AnalyserNode` passes its input through unchanged and keeps analysing whether or not its output is patched, so both wire `IN → analyser → OUT` and can sit in the middle of a patch. `SCOPE` triggers on `TRIG` when something is patched there and on `A` otherwise; with no edge found it free-runs and paints `UNTRIG`. `METER`'s `cv` mode is not a dB meter — a control voltage is legitimately a steady, possibly negative DC (0.1 CV = 1 octave, 0.0 = C4), which `abs()` and a −60 dB floor both destroy, so it switches to a bipolar centre-zero scale with a single 30 ms follower and no peak-hold or clip latch.
 
 ---
 

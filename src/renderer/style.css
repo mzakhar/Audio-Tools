@@ -242,6 +242,15 @@ html, body {
    reads on top of an .on cell without hiding whether the step is armed. */
 .algo-cell.at { border-color: #fff; box-shadow: 0 0 6px 1px #ffffffb0, inset 0 0 4px #ffffff40; }
 
+/* SCOPE and METER paint a canvas. Only the box is styled here — the panel's poll
+   job sizes the backing store by devicePixelRatio and draws in CSS pixels. The
+   wrapper takes the panel's slack so the screen grows with the rail height. */
+.rack-scope, .rack-meter { flex: 1 1 auto; min-height: 60px; margin-top: 4px; display: flex; }
+.rack-scope canvas, .rack-meter canvas {
+  flex: 1 1 auto; width: 100%; height: 100%;
+  background: #0d1114; border: 1px solid #59616c; border-radius: 2px;
+}
+
 .rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
 .rack-jack-slot em {
   font-style: normal; font-size: 7px; line-height: 1; letter-spacing: 0;
