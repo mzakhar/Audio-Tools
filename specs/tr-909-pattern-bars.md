@@ -131,11 +131,19 @@ lanes from:
   shuffle, flam and accent from there.
 
 Because bars can have different `lastStep`, the scheduler's step count must be
-re-read per wrap rather than fixed at `start()`. Check whether
-`LookaheadScheduler` (`src/renderer/js/rack/scheduler.js`) reads `steps` each
-tick or captures it once; if it captures it, pass a getter instead of a number.
-That is the one place this design can break, so it is worth confirming before
-writing the UI.
+re-read per wrap rather than fixed at `start()`. **Verified**: `LookaheadScheduler`
+(`src/renderer/js/rack/scheduler.js`) evaluates `this.steps` inside `tick()`
+(`this.step = (this.step + 1) % this.steps`), so assigning
+`schedulerLoop.steps = n` between wraps takes effect immediately. No getter
+needed.
+
+The assignment must happen **at `stepIndex === 0`, not at the last step of the
+outgoing bar**. The wrap `(lastStep - 1 + 1) % steps` has to use the *outgoing*
+bar's `lastStep` to land on 0; swapping `steps` before that increment gives
+`lastStep % newSteps`, which is not 0 when the next bar is longer. So:
+`scheduleStep(0, …)` advances `playChainPos` (except on the very first
+scheduled step) and only then assigns the new bar's `lastStep` to
+`schedulerLoop.steps`.
 
 **Bar advance must be derived from scheduled time, not from the playhead RAF
 loop.** The RAF loop (`tr909-view.js:365`) exists only to paint. It reads

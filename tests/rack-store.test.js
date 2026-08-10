@@ -26,10 +26,10 @@ describe('rack store', () => {
   beforeEach(() => ProjectStore.reset())
 
   describe('schema', () => {
-    it('defaults to an empty racks map at version 2', () => {
+    it('defaults to an empty racks map at the current version', () => {
       expect(ProjectStore.getState().racks).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(2)
+      expect(CURRENT_VERSION).toBe(3)
     })
   })
 
@@ -195,7 +195,7 @@ describe('rack store', () => {
     it('adds an empty racks map to a v1 project', () => {
       const old = { version: 1, bpm: 128, tracks: [], mixer: { channels: [], master: {} }, patterns: {} }
       const next = migrate(old)
-      expect(next.version).toBe(2)
+      expect(next.version).toBe(CURRENT_VERSION)
       expect(next.racks).toEqual({})
       expect(next.bpm).toBe(128)
     })
@@ -204,9 +204,12 @@ describe('rack store', () => {
       expect(migrate({ bpm: 90 }).racks).toEqual({})
     })
 
-    it('leaves a v2 project untouched', () => {
+    it('leaves a v2 project\'s racks untouched, adding patterns and bumping version', () => {
       const v2 = { version: 2, racks: { 'rack-1': { id: 'rack-1', modules: [], cables: [] } } }
-      expect(migrate(v2)).toEqual(v2)
+      const next = migrate(v2)
+      expect(next.version).toBe(CURRENT_VERSION)
+      expect(next.racks).toEqual(v2.racks)
+      expect(next.patterns).toEqual({})
     })
 
     it('does not mutate its input', () => {
@@ -218,7 +221,7 @@ describe('rack store', () => {
     it('runs on load()', () => {
       ProjectStore.load({ version: 1, bpm: 100, tracks: [], mixer: { channels: [] }, patterns: {} })
       const state = ProjectStore.getState()
-      expect(state.version).toBe(2)
+      expect(state.version).toBe(CURRENT_VERSION)
       expect(state.racks).toEqual({})
     })
   })

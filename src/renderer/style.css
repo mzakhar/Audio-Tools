@@ -467,7 +467,6 @@ input[type=range]::-moz-range-thumb {
 
 /* Master vol slider (wider) */
 #master-vol { width: 70px; }
-#bpm-slider  { width: 120px; }
 
 /* ─── Keyboard Section ─────────────────────────────────────────────────────── */
 #keyboard-section {
@@ -1094,12 +1093,6 @@ input[type=range]::-moz-range-thumb {
 .transport-btn.stop:hover { border-color: #ff4444; color: #ff4444; }
 .transport-btn.clear:hover { border-color: var(--accent2); color: var(--accent2); }
 
-.bpm-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* ─── Scrollbars ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -1108,6 +1101,35 @@ input[type=range]::-moz-range-thumb {
 
 /* ─── Utility ──────────────────────────────────────────────────────────────── */
 button { font-family: var(--font-mono); }
+
+/* ─── Global Header (BPM, master volume, transport) ─────────────────────── */
+#global-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+#global-bpm {
+  width: 52px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+  border-radius: 3px;
+}
+#header-view-slot {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 /* ─── Phase 1: Project Bar ────────────────────────────────────────────────── */
 #project-bar {
@@ -1165,17 +1187,6 @@ button { font-family: var(--font-mono); }
 #arrange-toolbar .transport-btn {
   padding: 4px 12px;
   font-size: 11px;
-}
-#arr-bpm {
-  width: 52px;
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 3px 6px;
-  font-family: inherit;
-  font-size: 12px;
-  text-align: center;
-  border-radius: 3px;
 }
 #arrangement-container {
   flex: 1;

@@ -1,6 +1,8 @@
 // ProjectStore.js — Central state store for the DAW
 // Implements a command pattern for undo/redo.
 
+import { INSTRUMENTS } from '../drums/tr909-kit.js'
+
 // ---------------------------------------------------------------------------
 // ID generation (no crypto dependency)
 // ---------------------------------------------------------------------------
@@ -10,7 +12,7 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
-export const CURRENT_VERSION = 2
+export const CURRENT_VERSION = 3
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -38,6 +40,10 @@ export function migrate(projectJson) {
   if ((next.version ?? 1) < 2) {
     if (!next.racks) next.racks = {}
     next.version = 2
+  }
+  if ((next.version ?? 1) < 3) {
+    if (!next.patterns) next.patterns = {}
+    next.version = 3
   }
   for (const track of next.tracks || []) {
     if (track.type === 'midi' && !track.instrument) {
@@ -618,6 +624,138 @@ export function LoadRackPatch(rackId, rackData) {
     },
     undo(state) { return state }
   }
+}
+
+// ---------------------------------------------------------------------------
+// TR-909 pattern bars (specs/tr-909-pattern-bars.md)
+//
+// state.patterns[patternId] = { id, name, currentBar, chain, bars[] }
+// Each bar holds its own scale/shuffle/flam/lastStep/totalAccent and a
+// lanes map keyed by INSTRUMENTS id. `chain` is a list of indices into
+// `bars`, so a bar can repeat without duplicating its lanes.
+// ---------------------------------------------------------------------------
+
+const BAR_PARAM_KEYS = new Set(['scale', 'shuffle', 'flam', 'lastStep', 'totalAccent'])
+
+function makeStep() {
+  return { on: false, velocity: 0.85, accent: false, flam: false }
+}
+
+export function makeBar() {
+  return {
+    id: genId('bar'),
+    scale: '1/16',
+    shuffle: 0,
+    flam: 0.18,
+    lastStep: 16,
+    totalAccent: 0.45,
+    lanes: Object.fromEntries(INSTRUMENTS.map(inst => [
+      inst.id,
+      Array.from({ length: 16 }, makeStep)
+    ]))
+  }
+}
+
+export function makePattern909(id) {
+  return {
+    id,
+    name: '909',
+    currentBar: 0,
+    chain: [0],
+    bars: [makeBar()]
+  }
+}
+
+// Chain cursor wraparound — pure, used by playback and by tests.
+export function nextChainPos(pos, chainLength) {
+  if (chainLength <= 0) return 0
+  return (pos + 1) % chainLength
+}
+
+// Clone state, ensure the pattern exists (creating it via makePattern909 if
+// absent), mutate it, return the new state. Mirrors rackCommand above.
+function patternCommand(label, patternId, mutate) {
+  return {
+    label,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.patterns) next.patterns = {}
+      if (!next.patterns[patternId]) next.patterns[patternId] = makePattern909(patternId)
+      mutate(next.patterns[patternId], next)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function SetPatternStep(patternId, barIndex, instrumentId, stepIndex, patch) {
+  return patternCommand('Set step', patternId, pattern => {
+    const bar = pattern.bars[barIndex]
+    if (!bar) return
+    const lane = bar.lanes[instrumentId]
+    if (!lane || !lane[stepIndex]) return
+    Object.assign(lane[stepIndex], patch)
+  })
+}
+
+export function SetBarParam(patternId, barIndex, key, value) {
+  return patternCommand('Set bar param', patternId, pattern => {
+    if (!BAR_PARAM_KEYS.has(key)) return
+    const bar = pattern.bars[barIndex]
+    if (!bar) return
+    bar[key] = value
+  })
+}
+
+export function AddBar(patternId, { copyFrom = null } = {}) {
+  return patternCommand('Add bar', patternId, pattern => {
+    let bar
+    if (copyFrom !== null && pattern.bars[copyFrom]) {
+      bar = JSON.parse(JSON.stringify(pattern.bars[copyFrom]))
+      bar.id = genId('bar')
+    } else {
+      bar = makeBar()
+    }
+    pattern.bars.push(bar)
+    pattern.chain.push(pattern.bars.length - 1)
+  })
+}
+
+export function RemoveBar(patternId, barIndex) {
+  return patternCommand('Remove bar', patternId, pattern => {
+    if (pattern.bars.length <= 1) return
+    if (barIndex < 0 || barIndex >= pattern.bars.length) return
+    pattern.bars.splice(barIndex, 1)
+    pattern.chain = pattern.chain
+      .filter(i => i !== barIndex)
+      .map(i => (i > barIndex ? i - 1 : i))
+    if (!pattern.chain.length) pattern.chain = [0]
+    if (pattern.currentBar >= pattern.bars.length) pattern.currentBar = pattern.bars.length - 1
+    else if (pattern.currentBar > barIndex) pattern.currentBar -= 1
+  })
+}
+
+export function SetCurrentBar(patternId, barIndex) {
+  return patternCommand('Set current bar', patternId, pattern => {
+    if (barIndex < 0 || barIndex >= pattern.bars.length) return
+    pattern.currentBar = barIndex
+  })
+}
+
+export function SetChain(patternId, chain) {
+  return patternCommand('Set chain', patternId, pattern => {
+    pattern.chain = [...chain]
+  })
+}
+
+export function ClearBar(patternId, barIndex) {
+  return patternCommand('Clear bar', patternId, pattern => {
+    const bar = pattern.bars[barIndex]
+    if (!bar) return
+    for (const instId of Object.keys(bar.lanes)) {
+      bar.lanes[instId] = Array.from({ length: bar.lanes[instId].length }, makeStep)
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------

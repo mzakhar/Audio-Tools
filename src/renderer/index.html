@@ -24,6 +24,18 @@
       </button>
     </nav>
     <div id="main">
+    <div id="global-header" role="toolbar" aria-label="Global transport">
+      <label class="knob-label" for="global-bpm">BPM</label>
+      <input type="number" id="global-bpm" min="40" max="240" value="120" aria-label="Tempo in BPM">
+      <div id="master-vol-wrap">
+        <label class="knob-label" for="master-vol">VOL</label>
+        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume">
+        <span class="knob-val" id="master-vol-display" aria-hidden="true">80</span>
+      </div>
+      <button id="global-play-btn" class="transport-btn play" aria-pressed="false">▶ Play</button>
+      <button id="global-stop-btn" class="transport-btn stop">■ Stop</button>
+      <div id="header-view-slot"></div>
+    </div>
     <div id="project-bar" role="toolbar" aria-label="Project controls">
       <button id="new-project-btn" title="New project (Ctrl+N)">NEW</button>
       <button id="open-project-btn" title="Open project (Ctrl+O)">OPEN</button>
@@ -42,11 +54,6 @@
     </div>
     <div id="arrange-view">
       <div id="arrange-toolbar" role="toolbar" aria-label="Arrange transport">
-        <button id="arr-play-btn" class="transport-btn play" aria-pressed="false">▶ Play</button>
-        <button id="arr-stop-btn" class="transport-btn stop">■ Stop</button>
-        <label class="knob-label" for="arr-bpm">BPM</label>
-        <input type="number" id="arr-bpm" min="40" max="240" value="120" aria-label="Tempo in BPM">
-        <span class="project-bar-sep" aria-hidden="true"></span>
         <button id="arr-add-track-btn" class="transport-btn">+ TRACK</button>
       </div>
       <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
@@ -88,11 +95,6 @@
         <button class="tab" data-palette="tr909" role="tab" aria-selected="false">909</button>
         <button class="tab" data-palette="pad" role="tab" aria-selected="false">PAD / AMBIENT</button>
       </div>
-      <div id="master-vol-wrap">
-        <label class="knob-label" for="master-vol">VOL</label>
-        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume">
-        <span class="knob-val" id="master-vol-display" aria-hidden="true">80</span>
-      </div>
     </header>
 
     <div id="record-bar" role="toolbar" aria-label="Recorder">
@@ -124,15 +126,8 @@
       <div id="seq-tracks"></div>
       <div id="sequencer-controls">
         <div class="transport" role="toolbar" aria-label="Transport">
-          <button id="play-btn" class="transport-btn play" aria-pressed="false">▶ Play</button>
-          <button id="stop-btn" class="transport-btn stop">■ Stop</button>
           <button id="clear-btn" class="transport-btn clear">✕ Clear</button>
           <button id="add-track-btn" class="transport-btn">+ Track</button>
-        </div>
-        <div class="bpm-group">
-          <label class="knob-label" for="bpm-slider">BPM</label>
-          <input type="range" id="bpm-slider" min="40" max="220" value="120" step="1" aria-label="Beats per minute">
-          <span class="knob-val" id="bpm-display" aria-hidden="true">120</span>
         </div>
       </div>
     </section>
