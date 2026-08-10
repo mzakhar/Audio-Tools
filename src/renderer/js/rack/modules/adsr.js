@@ -94,6 +94,13 @@ export default {
         if (!v) return
         if (portId === 'gate' && event.type === 'gate-on') attackStage(v, event.time)
         else if (portId === 'gate' && event.type === 'gate-off') releaseStage(v, event.time)
+        // A trigger is a very short gate, and that is how hardware treats one on a
+        // gate input. Without this an ALGO/SEQ8 lane in trig mode lands on GATE and
+        // does nothing at all, while the same trigger drives an AD envelope fine.
+        else if (portId === 'gate' && event.type === 'trig') {
+          attackStage(v, event.time)
+          releaseStage(v, event.time + (event.pulseWidth ?? 0.01))
+        }
         else if (portId === 'retrig' && event.type === 'trig') attackStage(v, event.time)
       },
 
