@@ -16,6 +16,7 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
   if (def.panel && !def.dock) body.classList.add('rack-params-compact')
   el.append(body)
   const params = { ...paramDefaults(module.type), ...module.params }
+  let knobs = 0
   for (const param of def.params) {
     // Structured params (seq8 steps, drum patterns) have no scalar control —
     // a range input over an array is worse than showing nothing.
@@ -34,8 +35,10 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
     }
     input.dataset.param = param.key
     input.addEventListener('input', () => onParam?.(module.id, param.key, input.type === 'checkbox' ? input.checked : (param.options ? input.value : Number(input.value))))
-    // A docked panel has width but little height: knobs in a row, not stacked sliders.
-    if ((def.dock || def.util) && input.type === 'range') { body.append(renderKnob(param, input)); continue }
+    // Panels with width but little height take knobs, not stacked full-width
+    // sliders: docked and util rows are short by construction, and a panel that
+    // draws needs its height for the drawing.
+    if ((def.dock || def.util || def.panel) && input.type === 'range') { body.append(renderKnob(param, input)); knobs++; continue }
     label.append(input); body.append(label)
   }
   const custom = def.panel?.(module, {
@@ -56,6 +59,11 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
   if (custom) {
     el.append(custom)
     if (custom.refresh) { el.__refresh = custom.refresh; el.addEventListener('input', custom.refresh) }
+    // Knobs stacked above a drawing still eat the height it needs — SCOPE's
+    // output jacks fell off the bottom of the panel. Move them into a column
+    // down the right instead. Only when there are knobs to move: a panel whose
+    // controls are all selects (METER) keeps the full width for its display.
+    if (knobs && !def.dock && !def.util) el.classList.add('rack-panel-side')
   }
   // Inputs and outputs get their own labelled block, the way a real panel is silk-screened.
   // A module may declare its own jack rows (`port.row`) instead of the default

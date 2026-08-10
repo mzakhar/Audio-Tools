@@ -226,6 +226,28 @@ html, body {
 .rack-params-compact { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 6px; overflow: visible; }
 .rack-params-compact label { flex: 1 1 64px; margin: 0; }
 
+/* A drawing panel whose controls include knobs stands them in a column down the
+   right, with the display taking the rest of the width. Stacked across the top
+   they wrapped to three rows and pushed the output jacks clean off the bottom of
+   the 216px panel. Jack rows still span the full width, under both columns. */
+.rack-panel-side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--side-col, 58px);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 6px;
+  align-content: start;
+}
+.rack-panel-side > header { grid-column: 1 / -1; }
+.rack-panel-side > .rack-params {
+  grid-column: 2; grid-row: 2;
+  flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 5px;
+}
+.rack-panel-side > .rack-scope,
+.rack-panel-side > .rack-meter { grid-column: 1; grid-row: 2; margin-top: 0; }
+.rack-panel-side > .rack-jacks { grid-column: 1 / -1; }
+.rack-panel-side .knob { width: 100%; gap: 1px; }
+.rack-panel-side .rack-params label { width: 100%; margin: 0; text-align: center; }
+
 /* One row of 8 steps for the lane the selector points at — eight stacked rows
    was unreadable at 20 HP, and only one lane is ever being edited. */
 .algo-seq { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
