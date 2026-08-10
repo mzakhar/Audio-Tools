@@ -101,7 +101,21 @@ html, body {
 .browser-open .module-browser { display: block; }
 .module-browser input { width: 100%; margin-bottom: 8px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 5px; }
 .module-browser h3 { color: var(--text-dim); font-size: 10px; margin: 10px 0 4px; }.module-browser button { display: block; width: 100%; text-align: left; margin: 2px 0; }
-.rack-scroll { flex: 1; overflow: auto; padding: 24px; }.rack-rails { --rack-zoom: 1; position: relative; transform-origin: top left; transform: scale(var(--rack-zoom)); background: repeating-linear-gradient(to bottom, #191919 0 216px, #080808 216px 220px); }
+.rack-scroll { flex: 1; overflow: auto; padding: 24px; }
+/* Two bands: the half-height util row on top, then the 220px rail pitch offset
+   below it. The offset is why the util row is always painted even when empty —
+   stripes that came and went would slide every panel off its rail. Keep
+   --rack-util-h in step with UTIL_H in rack-view.js. */
+.rack-rails {
+  --rack-zoom: 1; --rack-util-h: 110px;
+  position: relative; transform-origin: top left; transform: scale(var(--rack-zoom));
+  background-image:
+    linear-gradient(to bottom, #1d1d1d 0 106px, #080808 106px var(--rack-util-h)),
+    repeating-linear-gradient(to bottom, #191919 0 216px, #080808 216px 220px);
+  background-repeat: no-repeat, repeat;
+  background-position: 0 0, 0 var(--rack-util-h);
+  background-size: 100% var(--rack-util-h), 100% 100%;
+}
 /* Above .rack-panel (z-index 3) — patch cables run over the front panels, not behind them. */
 .rack-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 /* Beats the global `input[type=range] { width: 90px }`, which overflows narrow HP panels. */

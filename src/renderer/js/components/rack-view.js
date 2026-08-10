@@ -20,7 +20,10 @@ const DEFAULT_ZOOM = 1.6
 const DOCK_H = 236
 
 // The util row sits above the rails (rail index -2), half-height, for modules
-// that never need a full 220px. Keep in step with `.rack-panel.util` in style.css.
+// that never need a full 220px. Always present, empty or not: the rail stripes
+// are painted from it, so a row that appeared and vanished would shift every
+// panel off its stripe. Keep in step with `.rack-panel.util` and the
+// `--rack-util-h` background offset in style.css.
 const UTIL_RAIL = -2
 const UTIL_H = 110
 
@@ -32,9 +35,10 @@ export const starter = {
   rack: {
     name: 'Starter rack', rails: 2, railHp: 104,
     modules: [
+      { id: 'starter-vc', type: 'vc', rail: UTIL_RAIL, hp: 0, params: {}, atten: {} },
+      { id: 'starter-out', type: 'out', rail: UTIL_RAIL, hp: 24, params: {}, atten: {} },
       { id: 'starter-vco', type: 'vco', rail: 0, hp: 0, params: {}, atten: {} },
       { id: 'starter-vca', type: 'vca', rail: 0, hp: 12, params: {}, atten: {} },
-      { id: 'starter-out', type: 'out', rail: 0, hp: 20, params: {}, atten: {} },
       { id: 'starter-adsr', type: 'adsr', rail: 0, hp: 26, params: {}, atten: {} }
     ],
     // The ADSR is here to keep the rack quiet, not just to be useful: an
@@ -134,8 +138,7 @@ export class RackView {
     if (this.container.style.display === 'none') return
     this.railHp = rack.railHp; this.railCount = rack.rails
     this.dockRows = rack.modules.some(m => m.rail === -1) ? 1 : 0
-    this.utilRows = rack.modules.some(m => m.rail === UTIL_RAIL) ? 1 : 0
-    this.railOffset = this.utilRows * UTIL_H
+    this.railOffset = UTIL_H
     this.sizeRails()
     // Rebuilding the panels on every store change destroys whatever control the user
     // is holding — an open <select> closes, a slider drag drops. Only rebuild when the
@@ -176,7 +179,7 @@ export class RackView {
   // `transform: scale()` does not grow the layout box, so the scroll container would
   // clip a zoomed-in rack. Reserve the extra with margins.
   sizeRails() {
-    const width = (this.railHp ?? 104) * 16, height = (this.railCount ?? 2) * 220 + (this.dockRows ?? 0) * DOCK_H + (this.utilRows ?? 0) * UTIL_H
+    const width = (this.railHp ?? 104) * 16, height = UTIL_H + (this.railCount ?? 2) * 220 + (this.dockRows ?? 0) * DOCK_H
     const zoom = Number(getComputedStyle(this.rails).getPropertyValue('--rack-zoom')) || 1
     Object.assign(this.rails.style, {
       width: `${width}px`,

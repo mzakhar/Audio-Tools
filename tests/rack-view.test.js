@@ -55,11 +55,13 @@ describe('rack panel', () => {
     view.add('keys')
     const keys = view.rack().modules.at(-1)
     expect(keys.rail).toBe(-1)
-    expect(view.railTop(view.rack(), keys.rail)).toBe(view.rack().rails * 220)
+    // The dock sits below every rail, and every rail sits below the always-on
+    // 110px util row.
+    expect(view.railTop(view.rack(), keys.rail)).toBe(110 + view.rack().rails * 220)
 
     // Invisible to rail packing: TIDY must not pull it onto a rail, and a rail
     // module must still be free to take hp 0.
-    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 34 })
+    expect(firstFreeSlot(view.rack(), MODULES, 4)).toEqual({ rail: 0, hp: 24 })
     expect(tidyRack(view.rack(), MODULES).modules.find(m => m.id === keys.id).hp).toBe(keys.hp)
 
     // A second docked module stacks beside it, not on top of it.
