@@ -93,6 +93,20 @@ function switchPalette(key) {
   document.getElementById('keyboard-hint').style.display = isDrum ? 'none' : ''
   document.getElementById('drum-pads').style.display    = isDrum ? 'flex' : 'none'
   document.getElementById('drum-hint').style.display    = isDrum ? '' : 'none'
+
+  updateGlobalPlayAvailability()
+}
+
+// The 909 has its own Bar/Chain transport, so the shared Play is meaningless
+// while it is on screen. Derived from both mode and palette and called from
+// both switches — keying it off the palette alone left Play stuck disabled
+// after leaving the 909 for arrange or rack, which never re-run switchPalette.
+function updateGlobalPlayAvailability() {
+  const btn = document.getElementById('global-play-btn')
+  if (!btn) return
+  const on909 = _currentMode === 'synth' && currentPaletteKey === 'tr909'
+  btn.disabled = on909
+  btn.title = on909 ? '909 uses its own Bar/Chain transport' : ''
 }
 
 // ─── Drum pads ─────────────────────────────────────────────────────────────
@@ -264,45 +278,64 @@ function addDivider(panel) {
   panel.appendChild(div)
 }
 
-// ─── Master volume ──────────────────────────────────────────────────────────
-function initMasterVolume() {
-  const slider = document.getElementById('master-vol')
-  const disp   = document.getElementById('master-vol-display')
-  if (!slider) return
-
-  function update() {
-    const v = parseFloat(slider.value)
-    const pct = v * 100
-    slider.style.setProperty('--fill', pct + '%')
-    slider.classList.add('filled')
-    if (disp) disp.textContent = Math.round(pct)
-    AudioEngine.setMasterVolume(v)
+// ─── Global header: BPM, master volume, transport ──────────────────────────
+function initGlobalHeader() {
+  // Master volume
+  const volSlider = document.getElementById('master-vol')
+  const volDisp   = document.getElementById('master-vol-display')
+  if (volSlider) {
+    function updateVol() {
+      const v = parseFloat(volSlider.value)
+      const pct = v * 100
+      volSlider.style.setProperty('--fill', pct + '%')
+      volSlider.classList.add('filled')
+      if (volDisp) volDisp.textContent = Math.round(pct)
+      AudioEngine.setMasterVolume(v)
+    }
+    volSlider.addEventListener('input', updateVol)
+    updateVol()
   }
 
-  slider.addEventListener('input', update)
-  // Init fill
-  const pct = parseFloat(slider.value) * 100
-  slider.style.setProperty('--fill', pct + '%')
-  slider.classList.add('filled')
-  if (disp) disp.textContent = Math.round(pct)
-}
+  // BPM
+  const bpmEl = document.getElementById('global-bpm')
+  bpmEl?.addEventListener('change', (e) => {
+    const bpm = parseInt(e.target.value) || 120
+    ProjectStore.dispatch(SetBpm(bpm))
+  })
+  // Store is the source of truth; push into Sequencer's copy and keep the
+  // input in sync (e.g. after project open).
+  ProjectStore.subscribe(() => {
+    const bpm = ProjectStore.getState().bpm
+    if (bpmEl) bpmEl.value = bpm
+    Sequencer.setBPM(bpm)
+  })
 
-// ─── BPM slider ────────────────────────────────────────────────────────────
-function initBPM() {
-  const slider = document.getElementById('bpm-slider')
-  const disp   = document.getElementById('bpm-display')
-  if (!slider) return
-
-  function update() {
-    Sequencer.setBPM(slider.value)
-    if (disp) disp.textContent = slider.value
-    const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100
-    slider.style.setProperty('--fill', pct + '%')
-  }
-
-  slider.classList.add('filled')
-  slider.addEventListener('input', update)
-  update()
+  // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
+  document.getElementById('global-play-btn')?.addEventListener('click', () => {
+    ensureAudio()
+    if (_currentMode === 'arrange') {
+      const state = ProjectStore.getState()
+      TimelinePlayer.play({
+        beat: 0,
+        bpm: state.bpm,
+        tracks: state.tracks,
+        audioStore: AudioStore,
+        mixerEngine: MixerEngine,
+        palettes: Palettes,
+        racks: ProjectStore.getState().racks,
+        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
+      })
+    } else {
+      Sequencer.play()
+    }
+  })
+  document.getElementById('global-stop-btn')?.addEventListener('click', () => {
+    if (_currentMode === 'arrange') {
+      TimelinePlayer.stop()
+    } else {
+      Sequencer.stop()
+    }
+  })
 }
 
 // ─── Note events (from Keyboard) ───────────────────────────────────────────
@@ -331,13 +364,6 @@ document.addEventListener('note-off', (e) => {
 
 // ─── Transport buttons ──────────────────────────────────────────────────────
 function initTransport() {
-  document.getElementById('play-btn')?.addEventListener('click', () => {
-    ensureAudio()
-    Sequencer.play()
-  })
-  document.getElementById('stop-btn')?.addEventListener('click', () => {
-    Sequencer.stop()
-  })
   document.getElementById('clear-btn')?.addEventListener('click', () => {
     Sequencer.clear()
   })
@@ -403,6 +429,7 @@ function initRecorder() {
 // ─── Mode switching ──────────────────────────────────────────────────────────
 function switchMode(mode) {
   _currentMode = mode
+  updateGlobalPlayAvailability()
   const appEl     = document.getElementById('app')
   const arrangeEl = document.getElementById('arrange-view')
   const rackEl = document.getElementById('rack-view')
@@ -669,49 +696,8 @@ function initMixerParamBus() {
   })
 }
 
-// ─── Arrange transport (play/stop) ──────────────────────────────────────────
-function initArrangeTransport() {
-  // Dedicated arrange toolbar buttons
-  document.getElementById('arr-play-btn')?.addEventListener('click', async () => {
-    await ensureAudio()
-    const state = ProjectStore.getState()
-    // Pre-load any buffers that failed to load when the project was opened
-    if (AudioStore.getProjectDir()) {
-      const loads = []
-      for (const track of state.tracks) {
-        for (const clip of track.clips) {
-          if (clip.type === 'audio' && clip.file && !AudioStore.getBuffer(clip.file)) {
-            loads.push(
-              AudioStore.loadBuffer(clip.file).catch(e => console.warn('[Play] Buffer load failed:', clip.file, e))
-            )
-          }
-        }
-      }
-      if (loads.length) await Promise.all(loads)
-    }
-    TimelinePlayer.play({
-      beat: 0,
-      bpm: state.bpm,
-      tracks: state.tracks,
-      audioStore: AudioStore,
-      mixerEngine: MixerEngine,
-      palettes: Palettes,
-      racks: ProjectStore.getState().racks,
-      rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
-    })
-    document.getElementById('arr-play-btn').setAttribute('aria-pressed', 'true')
-  })
-
-  document.getElementById('arr-stop-btn')?.addEventListener('click', () => {
-    TimelinePlayer.stop()
-    document.getElementById('arr-play-btn')?.setAttribute('aria-pressed', 'false')
-  })
-
-  document.getElementById('arr-bpm')?.addEventListener('change', (e) => {
-    const bpm = parseInt(e.target.value) || 120
-    ProjectStore.dispatch(SetBpm(bpm))
-  })
-
+// ─── Arrange toolbar (non-transport wiring; transport lives in the global header) ──
+function initArrangeToolbar() {
   // Add Track button in arrange toolbar
   document.getElementById('arr-add-track-btn')?.addEventListener('click', () => {
     ProjectStore.dispatch(AddTrack('audio', 'Track'))
@@ -726,39 +712,6 @@ function initArrangeTransport() {
   document.addEventListener('add-midi-track', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
     syncMixerStrips(ProjectStore.getState())
-  })
-
-  // Keep BPM input in sync with store (e.g. after project open)
-  ProjectStore.subscribe(() => {
-    const bpmEl = document.getElementById('arr-bpm')
-    if (bpmEl) bpmEl.value = ProjectStore.getState().bpm
-  })
-
-  // Synth mode transport
-  document.getElementById('play-btn')?.addEventListener('click', () => {
-    ensureAudio()
-    if (_currentMode === 'arrange') {
-      const state = ProjectStore.getState()
-      TimelinePlayer.play({
-        beat: 0,
-        bpm: state.bpm,
-        tracks: state.tracks,
-        audioStore: AudioStore,
-        mixerEngine: MixerEngine,
-        palettes: Palettes,
-        racks: ProjectStore.getState().racks,
-        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
-      })
-    } else {
-      Sequencer.play()
-    }
-  })
-  document.getElementById('stop-btn')?.addEventListener('click', () => {
-    if (_currentMode === 'arrange') {
-      TimelinePlayer.stop()
-    } else {
-      Sequencer.stop()
-    }
   })
 }
 
@@ -995,8 +948,8 @@ function initShortcuts() {
 
   // Transport — Space = play/stop toggle (mode-aware)
   ShortcutManager.register({ key: ' ' }, () => {
-    const playBtn = document.getElementById('play-btn')
-    const stopBtn = document.getElementById('stop-btn')
+    const playBtn = document.getElementById('global-play-btn')
+    const stopBtn = document.getElementById('global-stop-btn')
     if (_isPlaying) {
       stopBtn?.click()
       _isPlaying = false
@@ -1010,9 +963,9 @@ function initShortcuts() {
 
   // Stop always resets
   ShortcutManager.register({ key: ' ', shift: true }, () => {
-    document.getElementById('stop-btn')?.click()
+    document.getElementById('global-stop-btn')?.click()
     _isPlaying = false
-    document.getElementById('play-btn')?.setAttribute('aria-pressed', 'false')
+    document.getElementById('global-play-btn')?.setAttribute('aria-pressed', 'false')
   })
 }
 
@@ -1028,8 +981,7 @@ function boot() {
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 
   renderKnobPanel()
-  initMasterVolume()
-  initBPM()
+  initGlobalHeader()
   initTransport()
   initTabs()
   initRecorder()
@@ -1041,7 +993,7 @@ function boot() {
   initProjectBar()
   initSidebarModes()
   initMixerParamBus()
-  initArrangeTransport()
+  initArrangeToolbar()
   initShortcuts()
   initMidi()
   initPianoRoll()
