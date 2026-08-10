@@ -15,6 +15,10 @@ import ProjectStore, {
 const STEPS = 16
 const PATTERN_ID = '909-main'
 
+// Grid rows read bottom-up: BD on the bottom row, RD on the top, the way a
+// drummer sits behind the kit. INSTRUMENTS stays low-to-high everywhere else.
+const LANE_ORDER = [...INSTRUMENTS].reverse()
+
 function formatPct(v) {
   return Math.round(v * 100)
 }
@@ -170,17 +174,18 @@ export class Tr909View {
               <span>${this.selectedInstrument().name}</span>
               <button class="tr909-audition" data-action="audition">Trig</button>
             </div>
-            <div class="tr909-steps" role="grid" aria-label="Selected instrument steps">
-              ${Array.from({ length: STEPS }, (_, i) => this.renderStepButton(bar, this.selectedInstrumentId, i)).join('')}
-            </div>
-            <div class="tr909-sub-lanes">
-              <div class="tr909-sub-label">Accent</div>
-              <div class="tr909-mini-steps">${Array.from({ length: STEPS }, (_, i) => this.renderMiniButton(bar, 'accent', i)).join('')}</div>
-              <div class="tr909-sub-label">Flam</div>
-              <div class="tr909-mini-steps">${Array.from({ length: STEPS }, (_, i) => this.renderMiniButton(bar, 'flam', i)).join('')}</div>
+            <div class="tr909-lane-row tr909-selected-lane" role="grid" aria-label="Selected instrument steps">
+              <span class="tr909-lane-label">${this.selectedInstrument().label}</span>
+              <div class="tr909-steps">
+                ${Array.from({ length: STEPS }, (_, i) => this.renderStepButton(bar, this.selectedInstrumentId, i)).join('')}
+              </div>
             </div>
             <div class="tr909-all-lanes"${this.showAllLanes ? '' : ' hidden'}>
-              ${INSTRUMENTS.map(inst => this.renderAllLane(bar, inst)).join('')}
+              ${LANE_ORDER.map(inst => this.renderAllLane(bar, inst)).join('')}
+            </div>
+            <div class="tr909-sub-lanes">
+              ${this.renderSubLane(bar, 'accent', 'Accent')}
+              ${this.renderSubLane(bar, 'flam', 'Flam')}
             </div>
           </div>
           <div class="tr909-params">
@@ -240,6 +245,17 @@ export class Tr909View {
     `
   }
 
+  renderSubLane(bar, key, label) {
+    return `
+      <div class="tr909-lane-row">
+        <span class="tr909-lane-label">${label}</span>
+        <div class="tr909-mini-steps">
+          ${Array.from({ length: STEPS }, (_, i) => this.renderMiniButton(bar, key, i)).join('')}
+        </div>
+      </div>
+    `
+  }
+
   renderMiniButton(bar, key, index) {
     const step = bar.lanes[this.selectedInstrumentId][index]
     return `<button class="tr909-mini${step[key] ? ' on' : ''}" data-sub="${key}" data-step="${index}" aria-pressed="${step[key]}"></button>`
@@ -247,8 +263,8 @@ export class Tr909View {
 
   renderAllLane(bar, inst) {
     return `
-      <div class="tr909-grid-row" style="--inst-color:${inst.color}">
-        <button class="tr909-grid-label" data-inst="${inst.id}">${inst.label}</button>
+      <div class="tr909-lane-row" style="--inst-color:${inst.color}">
+        <button class="tr909-lane-label tr909-grid-label" data-inst="${inst.id}">${inst.label}</button>
         <div class="tr909-grid-steps">
           ${Array.from({ length: STEPS }, (_, i) => this.renderGridCell(bar, inst.id, i)).join('')}
         </div>
