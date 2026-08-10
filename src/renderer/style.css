@@ -238,6 +238,9 @@ html, body {
 .algo-cell { height: 26px; padding: 0; background: #1b1e22; border: 1px solid #59616c; border-radius: 2px; cursor: pointer; }
 .algo-cell.beat { background: #262b31; }
 .algo-cell.on { background: var(--accent); border-color: var(--accent); }
+/* Playhead: the border glows as the clock passes the slot. Border-only so it
+   reads on top of an .on cell without hiding whether the step is armed. */
+.algo-cell.at { border-color: #fff; box-shadow: 0 0 6px 1px #ffffffb0, inset 0 0 4px #ffffff40; }
 
 .rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
 .rack-jack-slot em {

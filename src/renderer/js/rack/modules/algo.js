@@ -50,6 +50,10 @@ export default {
     const eoc = ctx.createGain()
     let step = -1
     let stopped = false
+    // Steps are scheduled ahead of the clock, so the panel cannot just read
+    // `step` — it would light the slot before it sounds. Keep the recent
+    // schedule and let the panel ask which one the context has reached.
+    let scheduled = []
 
     return {
       inputs: { clk: [clk], rst: [rst] },
@@ -58,13 +62,25 @@ export default {
         eoc: [eoc]
       },
       setParam(key, value) { params[key] = value },
+      // Which slot the clock has actually reached, or -1 before the first tick.
+      // Read-only, safe to call from a UI poll.
+      uiStep() {
+        const now = ctx.currentTime
+        let current = -1
+        for (const entry of scheduled) if (entry.time <= now) current = entry.step
+        return current
+      },
       onEvent(portId, event) {
-        if (portId === 'rst' && event.type !== 'gate-off') { step = -1; stopped = false; return }
+        if (portId === 'rst' && event.type !== 'gate-off') { step = -1; stopped = false; scheduled = []; return }
         if (portId !== 'clk' || event.type === 'gate-off') return
         if (stopped) return
         const time = event.time ?? ctx.currentTime
         const width = event.pulseWidth ?? 0.05
         step = params.order === 'rand' ? Math.floor(Math.random() * STEPS) : (step + 1) % STEPS
+        // Append in schedule order (so uiStep can scan for the last one reached)
+        // and trim from the front, never below one full bar of lookbehind.
+        scheduled.push({ step, time })
+        if (scheduled.length > STEPS * 2) scheduled = scheduled.slice(-STEPS)
         for (let lane = 0; lane < LANES; lane++) {
           if (!params.pattern[cellIndex(lane, step)]) continue
           const port = `out${lane + 1}`
@@ -87,7 +103,7 @@ export default {
   },
 
   // Without this the pattern is unreachable — renderPanel skips structured params.
-  panel(module, { params, setParam }) {
+  panel(module, { params, setParam, getInstance, addPoll }) {
     const wrapper = document.createElement('div')
     wrapper.className = 'algo-seq'
     let lane = 0
@@ -133,6 +149,19 @@ export default {
 
     paintLanes()
     paintSteps()
+
+    // Playhead: the running module reports which slot the clock has reached and
+    // the cell borders glow as it passes. Unregisters itself once the panel is
+    // off the DOM — RackView rebuilds panels wholesale and never tears them down.
+    let lit = -1
+    const removePoll = addPoll(() => {
+      if (!wrapper.isConnected) { removePoll(); return }
+      const at = getInstance()?.uiStep?.() ?? -1
+      if (at === lit) return
+      lit = at
+      for (const cell of stepRow.children) cell.classList.toggle('at', Number(cell.dataset.step) === at)
+    })
+
     // A param change does not rebuild the panel, so undo and preset loads have
     // to repaint the visible lane themselves.
     wrapper.refresh = paintSteps

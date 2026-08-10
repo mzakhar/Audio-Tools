@@ -148,7 +148,7 @@ export class RackView {
     this.shape = shape
     this.rails.replaceChildren(this.canvas.canvas)
     for (const module of rack.modules) {
-      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event), getParams: id => this.moduleParams(id) })
+      const panel = renderPanel(module, { onParam: (id, key, value) => ProjectStore.dispatch(SetModuleParam(this.rackId, id, key, value)), onJack: (...args) => this.jack(...args), onEvent: (id, port, event) => this.engineHandle && RackEngine.sendEvent(this.engineHandle, id, port, event), getParams: id => this.moduleParams(id), getInstance: id => this.engineHandle && RackEngine.getInstance(this.engineHandle, id), addPoll: job => this.poll.add(job) })
       panel.style.left = `${module.hp * 16}px`; panel.style.top = `${this.railTop(rack, module.rail)}px`; panel.classList.toggle('selected', this.selected === module.id); panel.classList.toggle('docked', module.rail === -1); panel.classList.toggle('util', module.rail === UTIL_RAIL)
       panel.onclick = e => { if (!e.target.classList.contains('rack-jack')) this.select(module.id) }
       panel.onpointerdown = e => this.drag(e, module, panel)

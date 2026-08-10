@@ -1,7 +1,7 @@
 import { getModule, paramDefaults } from '../rack/modules/index.js'
 import { renderKnob } from './knob.js'
 
-export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}) {
+export function renderPanel(module, { onParam, onJack, onEvent, getParams, getInstance, addPoll } = {}) {
   const def = getModule(module.type)
   const el = document.createElement('article')
   el.className = 'rack-panel'
@@ -43,7 +43,12 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams } = {}
     // Must read live state: a param change does not rebuild the panel, so the
     // `module` captured here goes stale the moment a knob moves.
     params: () => getParams?.(module.id) ?? { ...paramDefaults(module.type), ...module.params },
-    setParam: (key, value) => onParam?.(module.id, key, value)
+    setParam: (key, value) => onParam?.(module.id, key, value),
+    // For panels that show what the running module is doing (a playhead, a meter).
+    // `addPoll` returns its own remover; a panel that registers one is responsible
+    // for calling it once the panel leaves the DOM.
+    getInstance: () => getInstance?.(module.id) ?? null,
+    addPoll: job => addPoll?.(job) ?? (() => {})
   })
   // A panel that draws from params has to redraw when they change. `input` covers
   // the user turning a control; RackView calls __refresh for undo/preset changes,
