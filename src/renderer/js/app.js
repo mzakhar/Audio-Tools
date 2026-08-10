@@ -94,12 +94,19 @@ function switchPalette(key) {
   document.getElementById('drum-pads').style.display    = isDrum ? 'flex' : 'none'
   document.getElementById('drum-hint').style.display    = isDrum ? '' : 'none'
 
-  // 909 has its own Bar/Chain transport; the shared Play is meaningless there.
-  const globalPlayBtn = document.getElementById('global-play-btn')
-  if (globalPlayBtn) {
-    globalPlayBtn.disabled = is909
-    globalPlayBtn.title = is909 ? '909 uses its own Bar/Chain transport' : ''
-  }
+  updateGlobalPlayAvailability()
+}
+
+// The 909 has its own Bar/Chain transport, so the shared Play is meaningless
+// while it is on screen. Derived from both mode and palette and called from
+// both switches — keying it off the palette alone left Play stuck disabled
+// after leaving the 909 for arrange or rack, which never re-run switchPalette.
+function updateGlobalPlayAvailability() {
+  const btn = document.getElementById('global-play-btn')
+  if (!btn) return
+  const on909 = _currentMode === 'synth' && currentPaletteKey === 'tr909'
+  btn.disabled = on909
+  btn.title = on909 ? '909 uses its own Bar/Chain transport' : ''
 }
 
 // ─── Drum pads ─────────────────────────────────────────────────────────────
@@ -422,6 +429,7 @@ function initRecorder() {
 // ─── Mode switching ──────────────────────────────────────────────────────────
 function switchMode(mode) {
   _currentMode = mode
+  updateGlobalPlayAvailability()
   const appEl     = document.getElementById('app')
   const arrangeEl = document.getElementById('arrange-view')
   const rackEl = document.getElementById('rack-view')
