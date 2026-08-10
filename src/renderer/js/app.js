@@ -414,6 +414,10 @@ function switchMode(mode) {
   if (mode === 'arrange') {
     _tr909View?.stop()
     appEl.style.display = 'none'
+    // The rack is a sibling of #arrange-view, both flex: 1 — leaving it visible
+    // stacks the two views and keeps RackPoll's interval running.
+    rackEl.style.display = 'none'
+    _rackView?.hide()
     arrangeEl.style.display = 'flex'
     startArrangeLoop()
     // Canvas may still be 0×0 if ResizeObserver hasn't fired since the element was hidden.

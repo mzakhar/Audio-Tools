@@ -103,10 +103,15 @@ function connectCable(handle, cable, cycleCables) {
   const attenuated = !!dst.def?.ports.find(p => p.id === cable.to.port)?.atten
   const inCycle = cycleCables.has(cable.id)
 
-  // A poly source into a mono destination sums down — the eurorack/VCV rule.
+  // The eurorack/VCV channel rules, both directions: a poly source into a mono
+  // destination sums down, and a mono source into a poly destination fans out to
+  // every channel. Without the fan-out an LFO into a 4-voice VCA's CV would
+  // modulate voice 1 and leave the rest wide open.
   const pairs = dstPorts.length === 1
     ? srcPorts.map(s => [s, dstPorts[0]])
-    : srcPorts.slice(0, dstPorts.length).map((s, i) => [s, dstPorts[i]])
+    : srcPorts.length === 1
+      ? dstPorts.map(d => [srcPorts[0], d])
+      : srcPorts.slice(0, dstPorts.length).map((s, i) => [s, dstPorts[i]])
 
   pairs.forEach(([from, to], i) => {
     let target = attenuated ? attenNode(handle, cable.to.moduleId, cable.to.port, i, to) : to
