@@ -36,6 +36,7 @@ import slew from './slew.js'
 import sh from './sh.js'
 import comp from './comp.js'
 import scope from './scope.js'
+import meter from './meter.js'
 import cvMon from './cv-mon.js'
 import tuner from './tuner.js'
 import delay from './delay.js'
@@ -51,7 +52,7 @@ import ringmod from './ringmod.js'
 import split from './split.js'
 import merge from './merge.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, meter, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
