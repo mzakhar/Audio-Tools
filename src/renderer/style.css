@@ -2,6 +2,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Native widgets (select popups, scrollbars, checkboxes) follow the dark palette
+     instead of rendering light with a bright system-blue highlight. */
+  color-scheme: dark;
+  accent-color: #00e5ff;
+
   --bg:        #0d0d0d;
   --bg2:       #141414;
   --bg3:       #1c1c1c;
@@ -85,6 +90,177 @@ html, body {
   flex: 1;
   min-height: 0;
 }
+
+/* toolbar spans the top row; browser + scroll share the row below it */
+#rack-view { flex: 1; min-height: 0; position: relative; background: var(--bg); overflow: hidden; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; }
+.rack-toolbar { grid-column: 1 / -1; }
+.rack-toolbar { height: 42px; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.rack-toolbar button, .module-browser button { font: inherit; color: var(--text); background: var(--bg3); border: 1px solid var(--border); padding: 5px 8px; cursor: pointer; }
+.rack-toolbar input { vertical-align: middle; }
+.module-browser { display: none; width: 190px; flex: 0 0 190px; padding: 8px; overflow: auto; border-right: 1px solid var(--border); }
+.browser-open .module-browser { display: block; }
+.module-browser input { width: 100%; margin-bottom: 8px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 5px; }
+.module-browser h3 { color: var(--text-dim); font-size: 10px; margin: 10px 0 4px; }.module-browser button { display: block; width: 100%; text-align: left; margin: 2px 0; }
+.rack-scroll { flex: 1; overflow: auto; padding: 24px; }
+/* Two bands: the half-height util row on top, then the 220px rail pitch offset
+   below it. The offset is why the util row is always painted even when empty —
+   stripes that came and went would slide every panel off its rail. Keep
+   --rack-util-h in step with UTIL_H in rack-view.js. */
+.rack-rails {
+  --rack-zoom: 1; --rack-util-h: 110px;
+  position: relative; transform-origin: top left; transform: scale(var(--rack-zoom));
+  background-image:
+    linear-gradient(to bottom, #1d1d1d 0 106px, #080808 106px var(--rack-util-h)),
+    repeating-linear-gradient(to bottom, #191919 0 216px, #080808 216px 220px);
+  background-repeat: no-repeat, repeat;
+  background-position: 0 0, 0 var(--rack-util-h);
+  background-size: 100% var(--rack-util-h), 100% 100%;
+}
+/* Above .rack-panel (z-index 3) — patch cables run over the front panels, not behind them. */
+.rack-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+/* Beats the global `input[type=range] { width: 90px }`, which overflows narrow HP panels. */
+#rack-view .rack-panel input, #rack-view .rack-panel select { width: 100%; box-sizing: border-box; }
+/* A panel fills the full 3U rail height (216px of the 220px pitch), like real hardware. */
+.rack-panel {
+  position: absolute; z-index: 3; box-sizing: border-box; height: 216px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 6px; color: var(--text); background: #30343a;
+  border: 1px solid #59616c; border-radius: 2px; user-select: none;
+  background-image: linear-gradient(#ffffff0d, #0000001a);
+}
+.rack-panel.selected { border-color: var(--accent); box-shadow: var(--glow); }
+/* The dock strip below the rails — same panel, bolted to the case instead of a rail. */
+/* Deeper than a rail panel — keep in step with DOCK_H in rack-view.js.
+   Row-wrap, so knobs and jacks share one band and the keyboard takes its own
+   line below. Same DOM as any other panel; only the flow differs. */
+.rack-panel.docked {
+  height: 232px; flex-flow: row wrap; align-content: flex-start; gap: 0;
+  border-top: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default;
+}
+/* KEYS needs no nameplate — a piano keyboard is self-evident, and the row is
+   worth more as key height. */
+.rack-panel.docked header { display: none; }
+.rack-panel.docked .rack-params { flex: 0 1 auto; display: flex; gap: 14px; overflow: visible; }
+.rack-panel.docked .rack-jacks { margin-left: auto; align-items: flex-start; padding: 0; }
+.rack-panel.docked .rack-jacks-in { border-top: none; }
+/* Zero-height full-width item that ends the knob/jack line, so the keyboard
+   keeps its own width (flex-basis:100% would stretch it and strand the keys
+   against the left edge) and can still centre itself. */
+.rack-panel.docked::after { content: ''; flex: 0 0 100%; height: 0; }
+/* Explicit top margin, not `auto`: align-content:flex-start sizes each wrap line
+   to its content, so there is no free cross space for an auto margin to absorb
+   and the keys end up flush against the knobs. */
+.rack-panel.docked .rack-keys { order: 1; flex: 0 0 auto; margin: 18px auto 0; }
+
+/* The util row above the rails — half-height, row-wrap like the dock, but
+   bolted to the top of the case (border-bottom, not border-top) and with the
+   header shrunk to a caption rather than hidden outright. Keep in step with
+   UTIL_H in rack-view.js. */
+/* Controls sit LEFT of the jacks, not above them: the knob block spans both jack
+   rows so an IN/OUT pair stacks in one column, the way a 1U panel is laid out.
+   The knob column collapses to zero width on a module with no params (BUS). */
+.rack-panel.util {
+  --util-col: 40px;
+  height: 106px; padding: 5px 8px; gap: 2px;
+  display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto auto;
+  justify-content: start; align-content: start;
+  border-bottom: 2px solid #59616c; background-image: linear-gradient(#ffffff14, #00000026); cursor: default;
+}
+.rack-panel.util header {
+  grid-column: 1 / -1; font-size: 9px; letter-spacing: .3px; margin: 0; padding: 0 0 1px;
+}
+.rack-panel.util .rack-params { grid-column: 1; grid-row: 2 / span 2; align-self: center; }
+.rack-panel.util .rack-jacks { grid-column: 2; }
+/* Knob row and every jack row share one fixed column track (--util-col), so
+   an input jack lands directly above its output jack. */
+.rack-panel.util .rack-params,
+.rack-panel.util .rack-jacks { display: flex; flex-direction: row; gap: 0; margin: 0; padding: 0; overflow: visible; }
+.rack-panel.util .rack-jacks-in { border-top: none; }
+.rack-panel.util .rack-params > *,
+.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+/* Captions belong under their control on both rows — knobs render label-above
+   by default, so flip the knob's own stack for a util panel only. */
+.rack-panel.util .knob { flex-direction: column-reverse; gap: 2px; }
+.rack-panel.util .rack-jack { width: 12px; height: 12px; }
+.rack-panel.util .rack-jack-slot em { font-size: 6px; }
+.rack-panel.util .knob-dial { width: 22px; height: 22px; }
+
+/* Rotary knob: a dial the pointer drags, wrapped around a hidden range input. */
+.rack-panel .knob { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 40px; margin: 0; }
+.knob-cap { font-size: 8px; letter-spacing: .4px; color: #b9c4d0; white-space: nowrap; }
+.knob-dial {
+  --angle: 0deg;
+  position: relative; width: 30px; height: 30px; border-radius: 50%; cursor: ns-resize;
+  background: radial-gradient(circle at 50% 35%, #4c545e, #23272c 70%);
+  border: 1px solid #6d7681; box-shadow: 0 1px 2px #0006;
+}
+.knob-dial::after {
+  content: ''; position: absolute; left: 50%; top: 3px; width: 2px; height: 11px; margin-left: -1px;
+  background: var(--accent); border-radius: 1px; transform-origin: 50% 12px; transform: rotate(var(--angle));
+}
+/* Focusable and keyboard-operable, just not painted. */
+#rack-view .rack-panel .knob input[type=range] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.knob:focus-within .knob-dial { border-color: var(--accent); }
+.rack-panel header {
+  flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
+  padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;
+}
+/* Controls take the slack; jack blocks stay pinned to the bottom of the panel. */
+.rack-params { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.rack-panel label { display: block; font-size: 8px; line-height: 1.1; letter-spacing: .4px; margin: 0 0 4px; color: #b9c4d0; }
+#rack-view .rack-panel input[type=range] { height: 3px; margin: 1px 0 0; }
+#rack-view .rack-panel input[type=range]::-webkit-slider-thumb { width: 9px; height: 9px; }
+#rack-view .rack-panel select { font-size: 9px; padding: 0 2px; height: 15px; background: #1b1e22; color: var(--text-bright); border: 1px solid #59616c; }
+/* The popup list is browser-drawn; option colours are honoured, the highlighted
+   row is not stylable without replacing <select> outright. */
+#rack-view .rack-panel option { background: #1b1e22; color: var(--text-bright); font-size: 11px; }
+#rack-view .rack-panel input[type=checkbox] { width: 12px; height: 12px; }
+
+.rack-jacks { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 5px; padding-top: 4px; }
+.rack-jacks-in { border-top: 1px dashed #ffffff1a; }
+/* Pinned, not flexible: the key divs are absolutely positioned against this box,
+   so letting .rack-params take its slack would overflow the keys off the panel. */
+.rack-keys { flex: 0 0 auto; position: relative; user-select: none; touch-action: none; margin-top: 4px; }
+.rack-keys:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.rack-params-compact { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 6px; overflow: visible; }
+.rack-params-compact label { flex: 1 1 64px; margin: 0; }
+
+/* One row of 8 steps for the lane the selector points at — eight stacked rows
+   was unreadable at 20 HP, and only one lane is ever being edited. */
+.algo-seq { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+.algo-lanes, .algo-steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.algo-lane {
+  height: 15px; padding: 0; font: inherit; font-size: 8px; line-height: 1; cursor: pointer;
+  color: var(--text-dim); background: #1b1e22; border: 1px solid #3d444c; border-radius: 2px;
+}
+.algo-lane.sel { color: #0d1114; background: var(--accent); border-color: var(--accent); }
+.algo-cell { height: 26px; padding: 0; background: #1b1e22; border: 1px solid #59616c; border-radius: 2px; cursor: pointer; }
+.algo-cell.beat { background: #262b31; }
+.algo-cell.on { background: var(--accent); border-color: var(--accent); }
+/* Playhead: the border glows as the clock passes the slot. Border-only so it
+   reads on top of an .on cell without hiding whether the step is armed. */
+.algo-cell.at { border-color: #fff; box-shadow: 0 0 6px 1px #ffffffb0, inset 0 0 4px #ffffff40; }
+
+.rack-jack-slot { display: flex; flex-direction: column; align-items: center; width: 22px; gap: 1px; }
+.rack-jack-slot em {
+  font-style: normal; font-size: 7px; line-height: 1; letter-spacing: 0;
+  color: #97a3b0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rack-jack {
+  width: 14px; height: 14px; padding: 0; border-radius: 50%;
+  border: 2px solid #aaa; background: #111; cursor: crosshair;
+  box-shadow: inset 0 0 0 1px #0008;
+}
+/* Colour = signal kind; filled centre = output, hollow = input. */
+.rack-jack.audio { border-color: #00e5ff; }
+.rack-jack.cv    { border-color: #ff00aa; }
+.rack-jack.gate  { border-color: #39ff14; }
+.rack-jack.out.audio { background: #00e5ff40; }
+.rack-jack.out.cv    { background: #ff00aa40; }
+.rack-jack.out.gate  { background: #39ff1440; }
+.rack-jack:hover { filter: brightness(1.6); }
+.rack-jack.patching { background: #eee; }
 
 /* ─── Record Bar ────────────────────────────────────────────────────────────── */
 #record-bar {
@@ -1023,6 +1199,7 @@ button { font-family: var(--font-mono); }
   position: absolute;
   left: 0;
   top: 32px; /* below ruler */
+  bottom: 0;  /* without this the absolutely-positioned list is 0px tall and clips every header */
   width: 160px;
   overflow: hidden;
   background: var(--bg2);
@@ -1166,10 +1343,12 @@ button { font-family: var(--font-mono); }
   max-width: 72px;
   text-align: center;
 }
-.mixer-fader {
+/* Attribute selector needed: plain `.mixer-fader` loses to `input[type=range] { width: 90px }`,
+   which is wider than the 80px strip and spills over the neighbouring channel. */
+input[type=range].mixer-fader {
   width: 64px;
 }
-.mixer-pan {
+input[type=range].mixer-pan {
   width: 48px;
 }
 .mixer-strip .mute-btn,

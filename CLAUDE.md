@@ -34,6 +34,42 @@ audio-engine.js → palettes.js → keyboard.js → sequencer.js → recorder.js
     #app — all synth UI (header, record-bar, knob-panel, keyboard-section, sequencer-section)
 ```
 
+### Modular rack (in progress)
+
+Specs are the source of truth: `specs/modular-rack.md`, `specs/modular-rack-modules.md`, and `specs/modular-rack-implementation-plan.md` (that last one carries the phase status table and the deferral list — read it before picking up rack work).
+
+Phases 0–4 are in: rack UI, transport clocking, MIDI instruments, rack
+inserts, PARAM OUT control polling, and offline rack bounce. Phase 5 remains
+persistence/presets; Phase 6 remains remaining modules/polish.
+
+```
+store/ProjectStore.js   state.racks{}, schema version 2 + migrate(), rack commands
+rack/rack-engine.js     mount/update/setParamLive/unmount — the only thing that
+                        connects one module to another
+rack/poly.js            resolveChannels — pure, every polyphony bug lives here
+rack/rack-layout.js     PURE HP math (1 HP = 16 px), no DOM
+rack/modules/index.js   registry + validateRegistry (throws in dev) + canConnect
+rack/modules/*.js       one definition per module: ports, params, create(ctx, opts)
+utils/cv.js             PURE 1 V/oct math — 0.1 CV = 1 octave, 0.0 = C4
+```
+
+Phase 4 integration:
+
+- MIDI tracks use `instrument: { type: 'palette', paletteKey }` or
+  `{ type: 'rack', rackId }`; `TimelinePlayer` uses one note strategy for both.
+- `audio-in` exposes host audio only; it never requests microphone access.
+- `param-out` polls at 60 Hz. Current target syntax supports
+  `<channelId>.volume` and `<channelId>.pan` during rack-track playback.
+
+Rules that are not negotiable:
+
+- `create(ctx, { channels, params })` takes the context as an argument and reads **no** globals — that is what makes offline bounce and the fake-context tests work.
+- `inputs`/`outputs` are objects of **arrays indexed by poly channel**, holding `AudioNode`s or `AudioParam`s. A module never connects to another module.
+- `dispose()` stops and disconnects everything it made. The leak test asserts no source is left running after `unmount`.
+- Attenuverters, cycle-breaking `DelayNode`s and poly→mono mixdown are the engine's job, never a module's.
+- Nothing on the basic-voice path (VCO/VCF/VCA/ADSR/LFO/NOISE/MIX/OUT) may be worklet tier — the LAN deploy is plain HTTP and has no `audioWorklet`.
+- Gates from a scheduler travel in the **event domain** (`inst.onEvent(port, { type, time, channel })` with a future timestamp), not as a polled signal. That is how ADSR stays sample-accurate without a worklet.
+
 ## Key conventions
 
 **Adding a new palette:** add an object to `palettes.js` following the existing interface, then register it in the `Palettes` map at the bottom and add a `.tab` button in `index.html`.

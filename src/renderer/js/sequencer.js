@@ -5,11 +5,10 @@
  */
 import AudioEngine from './audio-engine.js'
 import Palettes from './palettes.js'
+import { LookaheadScheduler } from './rack/scheduler.js'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const STEPS = 16
-const LOOK_AHEAD_SEC = 0.1
-const SCHEDULE_INTERVAL = 25
 
 const PALETTE_LABELS = { classic: 'CLSC', fm: 'FM', drum: 'DRUM', pad: 'PAD' }
 const DRUM_NAMES = ['Kick', 'Snare', 'Hi-Hat', 'Clap']
@@ -28,10 +27,7 @@ for (let midi = 36; midi <= 84; midi++) {
 // ─── State ─────────────────────────────────────────────────────────────────
 let bpm = 120
 let isPlaying = false
-let currentStep = 0
-let nextNoteTime = 0
-let timerId = null
-const stepTimes = new Array(STEPS).fill(-Infinity)
+let schedulerLoop = null
 
 let tracks = []
 let containerEl = null
@@ -199,7 +195,6 @@ function stepDuration() {
 }
 
 function scheduleStep(step, time) {
-  stepTimes[step] = time
   const ctx = AudioEngine.getContext()
   if (!ctx) return
   const out = AudioEngine.getMasterInput()
@@ -221,31 +216,20 @@ function scheduleStep(step, time) {
   })
 }
 
-function advanceStep() {
-  nextNoteTime += stepDuration()
-  currentStep = (currentStep + 1) % STEPS
-}
-
-function scheduler() {
-  const ctx = AudioEngine.getContext()
-  if (!ctx) return
-  while (nextNoteTime < ctx.currentTime + LOOK_AHEAD_SEC) {
-    scheduleStep(currentStep, nextNoteTime)
-    advanceStep()
-  }
-  timerId = setTimeout(scheduler, SCHEDULE_INTERVAL)
-}
-
 // ─── Transport ──────────────────────────────────────────────────────────────
 function play() {
   if (isPlaying) return
   const ctx = AudioEngine.getContext()
   if (!ctx) return
   isPlaying = true
-  currentStep = 0
-  nextNoteTime = ctx.currentTime + 0.05
-  stepTimes.fill(-Infinity)
-  scheduler()
+  schedulerLoop = new LookaheadScheduler({
+    getCurrentTime: () => AudioEngine.getContext()?.currentTime,
+    schedule: scheduleStep,
+    advance: stepDuration,
+    steps: STEPS
+  })
+  schedulerLoop.stepTimes = new Array(STEPS).fill(-Infinity)
+  schedulerLoop.start({ time: ctx.currentTime + 0.05 })
   startPlayhead()
   document.getElementById('play-btn')?.classList.add('active-btn')
 }
@@ -253,8 +237,7 @@ function play() {
 function stop() {
   if (!isPlaying) return
   isPlaying = false
-  clearTimeout(timerId)
-  timerId = null
+  schedulerLoop?.stop()
   stopPlayhead()
   document.getElementById('play-btn')?.classList.remove('active-btn')
 }
@@ -297,8 +280,8 @@ function animatePlayhead() {
     let bestStep = -1
     let bestTime = -Infinity
     for (let i = 0; i < STEPS; i++) {
-      if (stepTimes[i] <= now && stepTimes[i] > bestTime) {
-        bestTime = stepTimes[i]
+      if (schedulerLoop?.stepTimes[i] <= now && schedulerLoop.stepTimes[i] > bestTime) {
+        bestTime = schedulerLoop.stepTimes[i]
         bestStep = i
       }
     }

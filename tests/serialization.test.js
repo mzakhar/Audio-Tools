@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { validateProjectPath } from '../src/renderer/js/io/FileAdapter.js'
-import ProjectStore, { AddTrack, AddClip, DEFAULT_STATE } from '../src/renderer/js/store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, DEFAULT_STATE, CURRENT_VERSION } from '../src/renderer/js/store/ProjectStore.js'
 
 describe('Serialization', () => {
   beforeEach(() => {
@@ -98,13 +98,13 @@ describe('Serialization', () => {
   // ─── Version field ────────────────────────────────────────────────────────
 
   describe('version field', () => {
-    it('DEFAULT_STATE has version: 1', () => {
-      expect(DEFAULT_STATE.version).toBe(1)
+    it('DEFAULT_STATE is at the current schema version', () => {
+      expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
     })
 
     it('serialized state preserves version field', () => {
       const parsed = JSON.parse(JSON.stringify(ProjectStore.getState()))
-      expect(parsed.version).toBe(1)
+      expect(parsed.version).toBe(CURRENT_VERSION)
     })
   })
 

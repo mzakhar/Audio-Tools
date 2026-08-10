@@ -171,6 +171,15 @@ describe('BrowserAdapter', () => {
       )
     })
   })
+
+  it('imports and exports .synthrack files', async () => {
+    const writable = { write: vi.fn(), close: vi.fn() }
+    window.showOpenFilePicker = vi.fn(async () => [{ getFile: async () => ({ text: async () => '{"format":"synthrack"}' }) }])
+    window.showSaveFilePicker = vi.fn(async () => ({ createWritable: async () => writable }))
+    expect(await BrowserAdapter.importRackPatch()).toContain('synthrack')
+    await BrowserAdapter.exportRackPatch('{"format":"synthrack"}', 'test.synthrack')
+    expect(writable.write).toHaveBeenCalledWith('{"format":"synthrack"}')
+  })
 })
 
 // ─── ElectronAdapter tests ────────────────────────────────────────────────────
@@ -266,6 +275,14 @@ describe('ElectronAdapter', () => {
 
       expect(window.electronFS.writeProject).toHaveBeenCalledWith('/projects/my-song', state)
     })
+  })
+
+  it('delegates .synthrack import and export to Electron', async () => {
+    window.electronFS.importRackPatch = vi.fn(async () => '{}')
+    window.electronFS.exportRackPatch = vi.fn()
+    expect(await ElectronAdapter.importRackPatch()).toBe('{}')
+    await ElectronAdapter.exportRackPatch('{}', 'test.synthrack')
+    expect(window.electronFS.exportRackPatch).toHaveBeenCalledWith('{}', 'test.synthrack')
   })
 })
 

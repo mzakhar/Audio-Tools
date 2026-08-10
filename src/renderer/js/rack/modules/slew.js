@@ -1,0 +1,2 @@
+import { workletModule } from './worklet-placeholder.js'
+export default workletModule({ type: 'slew', name: 'SLEW', group: 'mod', hp: 4, poly: false, ports: [{ id: 'in', dir: 'in', kind: 'cv', label: 'IN' }, { id: 'out', dir: 'out', kind: 'cv', label: 'OUT' }, { id: 'rising', dir: 'out', kind: 'gate', label: 'RISING' }], params: [{ key: 'rise', label: 'RISE', min: 0, max: 4, step: .01, def: .1, fmt: 's' }, { key: 'fall', label: 'FALL', min: 0, max: 4, step: .01, def: .1, fmt: 's' }, { key: 'shape', label: 'SHAPE', options: ['lin', 'exp'], def: 'lin' }] })

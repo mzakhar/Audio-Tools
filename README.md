@@ -2,6 +2,8 @@
 
 A browser-based synthesizer with a 16-step sequencer and WAV recorder. No build step, no dependencies — open `index.html` directly.
 
+The modular rack includes native P1 sources, processors, utilities, and instrumentation. Worklet-only DSP modules remain labelled patch-preserving placeholders until asynchronous worklet loading is added; rack scopes/meters share one 30 fps loop that stops while the rack is hidden.
+
 ## Features
 
 - **4 synthesis engines:** Classic (subtractive), FM, Drum Machine, Pad/Ambient

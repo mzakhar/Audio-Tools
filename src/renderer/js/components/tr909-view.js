@@ -1,10 +1,9 @@
 import AudioEngine from '../audio-engine.js'
 import Sequencer from '../sequencer.js'
 import { INSTRUMENTS, PARAM_DEFS, makeKitParams, createTr909Voice } from '../drums/tr909-kit.js'
+import { LookaheadScheduler } from '../rack/scheduler.js'
 
 const STEPS = 16
-const LOOK_AHEAD_SEC = 0.1
-const SCHEDULE_INTERVAL = 25
 
 function makeStep() {
   return { on: false, velocity: 0.85, accent: false, flam: false }
@@ -39,10 +38,7 @@ export class Tr909View {
     this.selectedInstrumentId = 'bd'
     this.showAllLanes = false
     this.isPlaying = false
-    this.currentStep = 0
-    this.nextStepTime = 0
-    this.timerId = null
-    this.stepTimes = new Array(STEPS).fill(-Infinity)
+    this.schedulerLoop = null
     this.playheadStep = -1
     this.rafId = null
 
@@ -312,20 +308,23 @@ export class Tr909View {
     const ctx = AudioEngine.getContext()
     if (!ctx) return
     this.isPlaying = true
-    this.currentStep = 0
-    this.nextStepTime = ctx.currentTime + 0.05
-    this.stepTimes.fill(-Infinity)
+    this.schedulerLoop = new LookaheadScheduler({
+      getCurrentTime: () => AudioEngine.getContext()?.currentTime,
+      schedule: (step, time) => this.scheduleStep(step, time),
+      advance: () => this.stepDuration(),
+      steps: this.pattern.lastStep
+    })
+    this.schedulerLoop.stepTimes = new Array(STEPS).fill(-Infinity)
     this.container.querySelector('[data-action="play"]')?.classList.add('active-btn')
     this.container.querySelector('[data-action="play"]')?.setAttribute('aria-pressed', 'true')
-    this.scheduler()
+    this.schedulerLoop.start({ time: ctx.currentTime + 0.05 })
     this.startPlayhead()
   }
 
   stop() {
     if (!this.isPlaying) return
     this.isPlaying = false
-    clearTimeout(this.timerId)
-    this.timerId = null
+    this.schedulerLoop?.stop()
     cancelAnimationFrame(this.rafId)
     this.playheadStep = -1
     this.container.querySelector('[data-action="play"]')?.classList.remove('active-btn')
@@ -333,18 +332,7 @@ export class Tr909View {
     this.updatePlayhead()
   }
 
-  scheduler() {
-    const ctx = AudioEngine.getContext()
-    if (!ctx || !this.isPlaying) return
-    while (this.nextStepTime < ctx.currentTime + LOOK_AHEAD_SEC) {
-      this.scheduleStep(this.currentStep, this.nextStepTime)
-      this.advanceStep()
-    }
-    this.timerId = setTimeout(() => this.scheduler(), SCHEDULE_INTERVAL)
-  }
-
   scheduleStep(stepIndex, time) {
-    this.stepTimes[stepIndex] = time
     const stepDur = this.stepDuration()
     const shuffleOffset = this.pattern.shuffle * stepDur * 0.45
     const shuffledTime = stepIndex % 2 === 1 ? time + shuffleOffset : time
@@ -371,11 +359,6 @@ export class Tr909View {
     })
   }
 
-  advanceStep() {
-    this.nextStepTime += this.stepDuration()
-    this.currentStep = (this.currentStep + 1) % this.pattern.lastStep
-  }
-
   stepDuration() {
     const bpm = Sequencer.getBPM ? Sequencer.getBPM() : 120
     const sixteenth = (60 / bpm) / 4
@@ -390,9 +373,9 @@ export class Tr909View {
         let bestStep = -1
         let bestTime = -Infinity
         for (let i = 0; i < STEPS; i++) {
-          if (this.stepTimes[i] <= ctx.currentTime && this.stepTimes[i] > bestTime) {
+          if (this.schedulerLoop?.stepTimes[i] <= ctx.currentTime && this.schedulerLoop.stepTimes[i] > bestTime) {
             bestStep = i
-            bestTime = this.stepTimes[i]
+            bestTime = this.schedulerLoop.stepTimes[i]
           }
         }
         if (bestStep !== this.playheadStep) {

@@ -10,8 +10,10 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
+export const CURRENT_VERSION = 2
+
 export const DEFAULT_STATE = {
-  version: 1,
+  version: CURRENT_VERSION,
   bpm: 120,
   timeSignature: [4, 4],
   sampleRate: 44100,
@@ -25,6 +27,24 @@ export const DEFAULT_STATE = {
     { id: 'reverb', name: 'Reverb', returnLevel: 0.8,  params: { decay: 1.5 } },
     { id: 'delay',  name: 'Delay',  returnLevel: 0.6,  params: { time: 0.375, feedback: 0.4 } },
   ],
+  racks: {},        // rackId → Rack
+}
+
+// ---------------------------------------------------------------------------
+// Migration — projects saved before a schema bump
+// ---------------------------------------------------------------------------
+export function migrate(projectJson) {
+  const next = JSON.parse(JSON.stringify(projectJson))
+  if ((next.version ?? 1) < 2) {
+    if (!next.racks) next.racks = {}
+    next.version = 2
+  }
+  for (const track of next.tracks || []) {
+    if (track.type === 'midi' && !track.instrument) {
+      track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+    }
+  }
+  return next
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +67,7 @@ export function AddTrack(type = 'audio', name = 'Track') {
         clips: [],
         effects: []
       })
+      if (type === 'midi') next.tracks.at(-1).instrument = { type: 'palette', paletteKey: 'classic' }
       next.mixer.channels.push({
         id: channelId,
         trackId,
@@ -268,7 +289,7 @@ export function AddEffect(trackId, type, params = {}) {
       if (!track) return next
       if (!track.effects) track.effects = []
       const effectId = genId('effect')
-      track.effects.push({ id: effectId, type, params: { ...params } })
+      track.effects.push({ id: effectId, type, params: { ...params } }) // rack params carry { rack }
       return next
     },
     undo(state) {
@@ -420,6 +441,186 @@ export function SetEffectParam(trackId, effectId, param, value) {
 }
 
 // ---------------------------------------------------------------------------
+// Modular rack command factories
+//
+// Rack state is plain JSON (see specs/modular-rack.md §5.1):
+//   { id, name, rails, railHp, cableColorMode, polyLimit, modules[], cables[] }
+// `hp` on a module is its left offset in HP within its rail; width comes from
+// the module registry, never from state.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_RACK = {
+  rails: 2,
+  railHp: 104,
+  cableColorMode: 'kind',
+  polyLimit: 8,
+}
+
+// Every rack command is "clone state, mutate one rack, return it".
+function rackCommand(label, rackId, mutate) {
+  return {
+    label,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.racks) next.racks = {}
+      const rack = next.racks[rackId]
+      if (!rack) return next
+      mutate(rack, next)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function SetRackRails(rackId, rails) {
+  return rackCommand(`Set rails to ${rails}`, rackId, rack => { rack.rails = Math.max(1, Math.min(8, rails | 0)) })
+}
+
+export function AddRack(name = 'Rack', rackId = null) {
+  return {
+    label: `Add rack "${name}"`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.racks) next.racks = {}
+      const id = rackId || genId('rack')
+      next.racks[id] = { id, name, ...DEFAULT_RACK, modules: [], cables: [] }
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function RemoveRack(rackId) {
+  return {
+    label: 'Remove rack',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      if (next.racks) delete next.racks[rackId]
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+export function RenameRack(rackId, name) {
+  return rackCommand(`Rename rack to "${name}"`, rackId, rack => { rack.name = name })
+}
+
+export function AddModule(rackId, type, { rail = 0, hp = 0, params = {}, id = null } = {}) {
+  return rackCommand(`Add ${type} module`, rackId, rack => {
+    rack.modules.push({
+      id: id || genId('mod'),
+      type,
+      rail,
+      hp,
+      params: { ...params },
+      atten: {},
+      bypassed: false,
+      name: null
+    })
+  })
+}
+
+export function RemoveModule(rackId, moduleId) {
+  return rackCommand('Remove module', rackId, rack => {
+    rack.modules = rack.modules.filter(m => m.id !== moduleId)
+    rack.cables = rack.cables.filter(
+      c => c.from.moduleId !== moduleId && c.to.moduleId !== moduleId
+    )
+  })
+}
+
+export function MoveModule(rackId, moduleId, rail, hp) {
+  return rackCommand('Move module', rackId, rack => {
+    const mod = rack.modules.find(m => m.id === moduleId)
+    if (!mod) return
+    mod.rail = rail
+    mod.hp = hp
+  })
+}
+
+export function SetModuleParam(rackId, moduleId, key, value) {
+  return rackCommand(`Set ${key}`, rackId, rack => {
+    const mod = rack.modules.find(m => m.id === moduleId)
+    if (!mod) return
+    mod.params[key] = value
+  })
+}
+
+export function SetAttenuverter(rackId, moduleId, portId, value) {
+  return rackCommand(`Set ${portId} attenuverter`, rackId, rack => {
+    const mod = rack.modules.find(m => m.id === moduleId)
+    if (!mod) return
+    if (!mod.atten) mod.atten = {}
+    mod.atten[portId] = Math.max(-1, Math.min(1, value))
+  })
+}
+
+export function SetModuleBypass(rackId, moduleId, bypassed) {
+  return rackCommand(bypassed ? 'Bypass module' : 'Un-bypass module', rackId, rack => {
+    const mod = rack.modules.find(m => m.id === moduleId)
+    if (!mod) return
+    mod.bypassed = !!bypassed
+  })
+}
+
+// from/to are { moduleId, port }. Port direction is validated by the registry
+// (rack/modules/index.js canConnect) before dispatch — the store only refuses
+// endpoints it can see are wrong: missing modules, self-patch, duplicates.
+export function Connect(rackId, from, to, color = null) {
+  return rackCommand('Patch cable', rackId, rack => {
+    const has = id => rack.modules.some(m => m.id === id)
+    if (!has(from.moduleId) || !has(to.moduleId)) return
+    if (from.moduleId === to.moduleId && from.port === to.port) return
+    const dup = rack.cables.some(c =>
+      c.from.moduleId === from.moduleId && c.from.port === from.port &&
+      c.to.moduleId === to.moduleId && c.to.port === to.port
+    )
+    if (dup) return
+    rack.cables.push({
+      id: genId('cable'),
+      from: { moduleId: from.moduleId, port: from.port },
+      to: { moduleId: to.moduleId, port: to.port },
+      color
+    })
+  })
+}
+
+export function Disconnect(rackId, cableId) {
+  return rackCommand('Unpatch cable', rackId, rack => {
+    rack.cables = rack.cables.filter(c => c.id !== cableId)
+  })
+}
+
+export function SetCableColor(rackId, cableId, color) {
+  return rackCommand('Set cable colour', rackId, rack => {
+    const cable = rack.cables.find(c => c.id === cableId)
+    if (cable) cable.color = color
+  })
+}
+
+// Replace a rack wholesale — preset load, patch import, undo-able as one step.
+export function LoadRackPatch(rackId, rackData) {
+  return {
+    label: 'Load rack patch',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.racks) next.racks = {}
+      next.racks[rackId] = {
+        ...DEFAULT_RACK,
+        ...JSON.parse(JSON.stringify(rackData)),
+        id: rackId
+      }
+      const rack = next.racks[rackId]
+      if (!Array.isArray(rack.modules)) rack.modules = []
+      if (!Array.isArray(rack.cables)) rack.cables = []
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ProjectStore
 // ---------------------------------------------------------------------------
 const MAX_HISTORY = 100
@@ -473,7 +674,7 @@ const ProjectStore = {
   },
 
   load(projectJson) {
-    _state = JSON.parse(JSON.stringify(projectJson))
+    _state = migrate(projectJson)
     _undoStack = []
     _redoStack = []
     notify()
