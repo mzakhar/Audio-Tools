@@ -4,7 +4,7 @@ vi.mock('../src/renderer/js/rack/rack-engine.js', () => ({ default: engine }))
 vi.mock('../src/renderer/js/components/rack-cables.js', () => ({ RackCables: class { constructor(canvas) { this.canvas = canvas } draw() {} setCables() {} hitTest() { return null } } }))
 import { renderPanel } from '../src/renderer/js/components/rack-panel.js'
 import { ModuleBrowser } from '../src/renderer/js/components/module-browser.js'
-import { RackView } from '../src/renderer/js/components/rack-view.js'
+import { RackView, presetMenu } from '../src/renderer/js/components/rack-view.js'
 import ProjectStore from '../src/renderer/js/store/ProjectStore.js'
 import MODULES from '../src/renderer/js/rack/modules/index.js'
 import { firstFreeSlot, tidyRack } from '../src/renderer/js/rack/rack-layout.js'
@@ -94,5 +94,29 @@ describe('rack panel', () => {
     expect(view.getEngineHandle()).toEqual({ ctx })
     view.destroy()
     expect(engine.unmount).toHaveBeenCalledWith({ ctx })
+  })
+})
+
+describe('preset menu', () => {
+  const entries = {
+    '../../presets/racks/zed.synthrack.json': { category: 'beat', rack: { name: 'Zed Kit' } },
+    '../../presets/racks/abc.synthrack.json': { category: 'beat', rack: { name: 'Abc Kit' } },
+    '../../presets/racks/loose.synthrack.json': { rack: { name: 'Loose Patch' } },
+    '../../presets/racks/gen.synthrack.json': { category: 'generative', rack: { name: 'Gen' } }
+  }
+
+  it('groups by category, named categories first and other last', () => {
+    const labels = [...presetMenu(entries).matchAll(/<optgroup label="([^"]+)"/g)].map(m => m[1])
+    expect(labels).toEqual(['BEAT', 'GENERATIVE', 'OTHER'])
+  })
+
+  it('labels options with the patch name, alphabetically inside a group', () => {
+    const names = [...presetMenu(entries).matchAll(/<option value="[^"]*">([^<]+)</g)].map(m => m[1])
+    expect(names.slice(0, 2)).toEqual(['Abc Kit', 'Zed Kit'])
+  })
+
+  it('falls back to the filename when a preset carries no name', () => {
+    const html = presetMenu({ '../../presets/racks/bare.synthrack.json': {} })
+    expect(html).toContain('>bare<')
   })
 })
