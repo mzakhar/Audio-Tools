@@ -156,6 +156,12 @@ function syncNormals(handle) {
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
+// A deep but finite chain (a burst into a divider into a sequencer) is legal;
+// anything past this is a cycle. One counter for the whole module is enough —
+// dispatch is synchronous and single-threaded, so no two emits ever interleave.
+const MAX_EVENT_DEPTH = 64
+let emitDepth = 0
+
 const RackEngine = {
   // `random` is injected rather than reached for: stochastic modules become
   // testable with a scripted sequence, and an offline bounce can pass a seeded
@@ -279,10 +285,21 @@ const RackEngine = {
 
   // Event domain (§5.4): scheduled gates travel as direct calls along cables,
   // carrying an audio-context timestamp in the future.
+  //
+  // Dispatch is synchronous, so a patched event cycle (AD's EOC back into its own
+  // TRIG is the obvious one) recurses until the stack blows and takes the tab
+  // with it. Cables are the user's to patch, so the guard lives here rather than
+  // in any module: past MAX_EVENT_DEPTH the chain is simply dropped.
   emitEvent(handle, fromModuleId, fromPort, event) {
-    for (const cable of handle.rack.cables) {
-      if (cable.from.moduleId !== fromModuleId || cable.from.port !== fromPort) continue
-      handle.mods.get(cable.to.moduleId)?.inst.onEvent?.(cable.to.port, event)
+    if (emitDepth >= MAX_EVENT_DEPTH) return
+    emitDepth++
+    try {
+      for (const cable of handle.rack.cables) {
+        if (cable.from.moduleId !== fromModuleId || cable.from.port !== fromPort) continue
+        handle.mods.get(cable.to.moduleId)?.inst.onEvent?.(cable.to.port, event)
+      }
+    } finally {
+      emitDepth--
     }
   },
 

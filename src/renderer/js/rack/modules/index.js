@@ -51,8 +51,21 @@ import chorus from './chorus.js'
 import ringmod from './ringmod.js'
 import split from './split.js'
 import merge from './merge.js'
+// E1 — beat core (specs/rack-expansion.md §3)
+import grids from './grids.js'
+import grid16 from './grid16.js'
+import burst from './burst.js'
+import prob from './prob.js'
+import tshift from './tshift.js'
+import duck from './duck.js'
+import clkmul from './clkmul.js'
+// E2 — generative core (specs/rack-expansion.md §4)
+import turing from './turing.js'
+import drift from './drift.js'
+import chord from './chord.js'
+import arp from './arp.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, meter, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, meter, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus, grids, grid16, burst, prob, tshift, duck, clkmul, turing, drift, chord, arp]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 

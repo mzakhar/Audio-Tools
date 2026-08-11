@@ -324,6 +324,20 @@ describe('RackEngine', () => {
       RackEngine.emitEvent(handle, 'm-1', 'out', { type: 'trig', time: 0 })
       expect(inst.onEvent).not.toHaveBeenCalled()
     })
+
+    // Patching a module's own trigger output back into its trigger input is a
+    // normal thing to try (a self-retriggering AD is a classic Krell patch) and
+    // dispatch is synchronous, so without a depth guard it is a stack overflow.
+    it('drops a patched event cycle instead of recursing', () => {
+      const state = rack([mod('m-1', 'src')], [cable('c-1', 'm-1', 'out', 'm-1', 'in')])
+      const handle = mount(state)
+      const inst = RackEngine.getInstance(handle, 'm-1')
+      let depth = 0
+      inst.onEvent = () => { depth++; RackEngine.emitEvent(handle, 'm-1', 'out', { type: 'trig', time: 0 }) }
+      expect(() => RackEngine.emitEvent(handle, 'm-1', 'out', { type: 'trig', time: 0 })).not.toThrow()
+      expect(depth).toBeGreaterThan(1)
+      expect(depth).toBeLessThan(200)
+    })
   })
 
   describe('attenuverters', () => {
