@@ -12,6 +12,34 @@ import { RackPoll } from '../rack/rack-poll.js'
 
 const presets = import.meta.glob('../../presets/racks/*.json', { eager: true, import: 'default' })
 
+// Named categories first, in this order; anything else lands in "other".
+const CATEGORY_ORDER = ['beat', 'generative', 'texture']
+
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+// A flat filename list stopped scaling past a dozen patches. Group by the
+// preset's own `category` field (metadata the importer ignores) and label each
+// entry with the patch name rather than its filename. Exported for tests.
+export function presetMenu(entries) {
+  const groups = new Map()
+  for (const [path, preset] of Object.entries(entries)) {
+    const category = preset?.category || 'other'
+    if (!groups.has(category)) groups.set(category, [])
+    groups.get(category).push({ path, name: preset?.rack?.name || path.split('/').pop().replace('.synthrack.json', '').replace('.json', '') })
+  }
+  const rank = c => { const i = CATEGORY_ORDER.indexOf(c); return i < 0 ? CATEGORY_ORDER.length + (c === 'other' ? 1 : 0) : i }
+  return [...groups.entries()]
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+    .map(([category, items]) => {
+      const options = items
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(({ path, name }) => `<option value="${escapeHtml(path)}">${escapeHtml(name)}</option>`)
+        .join('')
+      return `<optgroup label="${escapeHtml(category.toUpperCase())}">${options}</optgroup>`
+    })
+    .join('')
+}
+
 // Panels are small at 1:1; the rack is more usable zoomed in with less rail visible.
 const DEFAULT_ZOOM = 1.6
 
@@ -56,7 +84,7 @@ export const starter = {
 export class RackView {
   constructor(container, { hasWorklet, getAudioContext, getMasterInput } = {}) {
     this.container = container; this.hasWorklet = hasWorklet || (() => false); this.getAudioContext = getAudioContext || (() => null); this.getMasterInput = getMasterInput || (() => null); this.rackId = null; this.selected = null; this.pending = null; this.engineHandle = null; this.poll = new RackPoll()
-    const presetOptions = Object.entries(presets).map(([path]) => `<option value="${path}">${path.split('/').pop().replace('.json', '')}</option>`).join('')
+    const presetOptions = presetMenu(presets)
     container.innerHTML = `<div class="rack-toolbar"><button data-action="add">+ MODULE</button><button data-action="delete">REMOVE</button><button data-action="tidy">TIDY</button><button data-action="cables">CABLES</button><span class="rack-count"></span><button data-action="new">NEW</button><select data-action="preset"><option value="">LOAD PRESET</option>${presetOptions}</select><button data-action="import">IMPORT</button><button data-action="export">EXPORT</button><button data-action="save-preset">SAVE AS PRESET</button><label>ZOOM <input data-action="zoom" type="range" min=".6" max="2.5" step=".1" value="${DEFAULT_ZOOM}"></label><label>RAILS <input data-action="rails" type="number" min="1" max="8" step="1" value="2"></label></div><aside class="module-browser"></aside><main class="rack-scroll"><div class="rack-rails"><canvas class="rack-canvas"></canvas></div></main>`
     this.rails = container.querySelector('.rack-rails'); this.rails.style.setProperty('--rack-zoom', DEFAULT_ZOOM); this.canvas = new RackCables(container.querySelector('.rack-canvas'), this.rails)
     this.browser = new ModuleBrowser(container.querySelector('.module-browser'), { hasWorklet: this.hasWorklet, onPick: type => this.add(type) })

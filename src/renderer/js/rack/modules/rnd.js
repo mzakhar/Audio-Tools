@@ -12,7 +12,7 @@ export default {
     { key: 'probability', label: 'PROB', min: 0, max: 1, step: 0.01, def: 1, fmt: '' }
   ],
 
-  create(ctx, { params, emitEvent = () => {} }) {
+  create(ctx, { params, emitEvent = () => {}, random = Math.random }) {
     const trig = ctx.createGain()
     const value = ctx.createConstantSource()
     const cv = ctx.createGain()
@@ -25,10 +25,10 @@ export default {
       setParam(key, next) { params[key] = next },
       onEvent(portId, event) {
         if (portId !== 'trig' || (event.type !== 'trig' && event.type !== 'gate-on')) return
-        const random = Math.random()
-        const next = params.bipolar === 'on' ? (random * 2 - 1) * params.range : random * params.range
+        const roll = random()
+        const next = params.bipolar === 'on' ? (roll * 2 - 1) * params.range : roll * params.range
         value.offset.setValueAtTime(next, event.time)
-        if (Math.random() < params.probability) emitEvent('gate', { type: 'trig', time: event.time, channel: 0 })
+        if (random() < params.probability) emitEvent('gate', { type: 'trig', time: event.time, channel: 0 })
       },
       dispose() { value.stop(); trig.disconnect(); value.disconnect(); cv.disconnect(); gate.disconnect() }
     }

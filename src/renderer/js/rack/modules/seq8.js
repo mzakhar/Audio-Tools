@@ -24,7 +24,7 @@ export default {
     { key: 'quantize', label: 'QUANTIZE', options: ['off', 'scale'], def: 'off' }
   ],
 
-  create(ctx, { params = {}, emitEvent = () => {} } = {}) {
+  create(ctx, { params = {}, emitEvent = () => {}, random = Math.random } = {}) {
     params = { steps: defaultSteps(), length: 8, direction: 'fwd', quantize: 'off', ...params }
     const clk = ctx.createGain()
     const rst = ctx.createGain()
@@ -41,7 +41,7 @@ export default {
 
     const advance = () => {
       const length = Math.max(1, Math.min(8, params.length | 0))
-      if (params.direction === 'rand') return Math.floor(Math.random() * length)
+      if (params.direction === 'rand') return Math.floor(random() * length)
       if (params.direction === 'rev') return (index - 1 + length) % length
       if (params.direction === 'pend') {
         if (index + pendulum >= length || index + pendulum < 0) pendulum *= -1
