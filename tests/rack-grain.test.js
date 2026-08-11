@@ -51,7 +51,7 @@ describe('GRAIN', () => {
     })
 
   it('is a mono native source with the spec ports', () => {
-    expect([grain.group, grain.tier, grain.poly, grain.hp]).toEqual(['source', 'native', false, 12])
+    expect([grain.group, grain.tier, grain.poly, grain.hp]).toEqual(['source', 'native', false, 16])
     const inst = build()
     for (const port of grain.ports) {
       const bag = port.dir === 'in' ? inst.inputs : inst.outputs

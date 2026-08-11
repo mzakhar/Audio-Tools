@@ -9,7 +9,9 @@
 const GR_FLOOR = -24  // dB, full-scale of the gain-reduction readout
 
 export default {
-  type: 'dyn', name: 'DYN', group: 'fx', hp: 6, tier: 'native', poly: false,
+  // panelInline: the gain-reduction bar is a full-width strip, not a display
+  // that needs its own column — five knobs wrap above it.
+  type: 'dyn', name: 'DYN', group: 'fx', hp: 12, tier: 'native', poly: false, panelInline: true,
   ports: [
     { id: 'in', dir: 'in', kind: 'audio', label: 'IN' },
     { id: 'out', dir: 'out', kind: 'audio', label: 'OUT' }

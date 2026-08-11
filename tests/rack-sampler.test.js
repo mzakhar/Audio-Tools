@@ -59,7 +59,7 @@ describe('SAMPLR', () => {
     sampler.create(ctx, { params: { ...defaults(), fileKey: 'a.wav', ...params }, getBuffer })
 
   it('is a mono native source with the spec ports', () => {
-    expect([sampler.group, sampler.tier, sampler.poly, sampler.hp]).toEqual(['source', 'native', false, 12])
+    expect([sampler.group, sampler.tier, sampler.poly, sampler.hp]).toEqual(['source', 'native', false, 20])
     const inst = build()
     for (const port of sampler.ports) {
       const bag = port.dir === 'in' ? inst.inputs : inst.outputs

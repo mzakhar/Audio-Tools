@@ -8,7 +8,9 @@ const CHOKE_FADE = 0.005   // click guard on a choked voice, in seconds
 const clamp = (v, lo, hi) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo)
 
 export default {
-  type: 'sampler', name: 'SAMPLR', group: 'source', hp: 12, tier: 'native', poly: false,
+  // panelInline: the drawn panel is one file-button row, so the knobs wrap above
+  // it across the full width instead of being squeezed into a side column.
+  type: 'sampler', name: 'SAMPLR', group: 'source', hp: 20, tier: 'native', poly: false, panelInline: true,
   ports: [
     { id: 'trig', dir: 'in', kind: 'gate', label: 'TRIG' },
     { id: 'pitch', dir: 'in', kind: 'cv', label: 'PITCH' },

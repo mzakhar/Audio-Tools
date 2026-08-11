@@ -15,7 +15,8 @@ const HANN = Float32Array.from({ length: HANN_POINTS }, (_, i) => 0.5 - 0.5 * Ma
 const clamp = (v, lo, hi) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo)
 
 export default {
-  type: 'grain', name: 'GRAIN', group: 'source', hp: 12, tier: 'native', poly: false,
+  // panelInline: same one-row file panel as SAMPLR — knobs wrap above it.
+  type: 'grain', name: 'GRAIN', group: 'source', hp: 16, tier: 'native', poly: false, panelInline: true,
   ports: [
     { id: 'trig', dir: 'in', kind: 'gate', label: 'TRIG' },
     { id: 'pos', dir: 'in', kind: 'cv', label: 'POS', atten: true },

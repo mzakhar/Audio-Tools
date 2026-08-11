@@ -225,6 +225,14 @@ html, body {
 
 .rack-params-compact { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 6px; overflow: visible; }
 .rack-params-compact label { flex: 1 1 64px; margin: 0; }
+/* Knobs keep their own width instead of splitting the row: left to grow, eight
+   of them made four rows of two and pushed GRAIN's jacks off the panel. */
+.rack-params-compact .knob { flex: 0 0 52px; }
+/* An inline panel stacks controls and its drawn row down the panel, so the knob
+   block is the one part that can grow past 216px. Let it take the slack and
+   scroll instead: jack rows stay on the panel whatever a module declares, so a
+   new module with one knob too many degrades instead of spilling. */
+.rack-panel-inline .rack-params-compact { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 /* A drawing panel whose controls include knobs stands them in a column down the
    right, with the display taking the rest of the width. Stacked across the top
@@ -238,15 +246,24 @@ html, body {
   align-content: start;
 }
 .rack-panel-side > header { grid-column: 1 / -1; }
+/* A grid, not a column: past three knobs a single column runs off the bottom of
+   the panel, so it wraps into as many columns as it takes (renderPanel sets
+   --side-cols and widens --side-col to match). */
 .rack-panel-side > .rack-params {
   grid-column: 2; grid-row: 2;
-  flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 5px;
+  display: grid; grid-template-columns: repeat(var(--side-cols, 1), minmax(0, 1fr));
+  align-items: start; justify-items: center; gap: 5px 6px;
+  overflow: visible;
 }
 .rack-panel-side > .rack-scope,
 .rack-panel-side > .rack-meter { grid-column: 1; grid-row: 2; margin-top: 0; }
 .rack-panel-side > .rack-jacks { grid-column: 1 / -1; }
 .rack-panel-side .knob { width: 100%; gap: 1px; }
 .rack-panel-side .rack-params label { width: 100%; margin: 0; text-align: center; }
+/* Side-column controls are secondary to the display they sit beside, so their
+   dials are smaller — at full size three rows do not clear the jack block. */
+.rack-panel-side .knob-dial { width: 24px; height: 24px; }
+.rack-panel-side .knob-dial::after { height: 9px; transform-origin: 50% 9px; }
 
 /* One row of 8 steps for the lane the selector points at — eight stacked rows
    was unreadable at 20 HP, and only one lane is ever being edited. */

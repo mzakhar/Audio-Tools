@@ -1,6 +1,12 @@
 import { getModule, paramDefaults } from '../rack/modules/index.js'
 import { renderKnob } from './knob.js'
 
+// Side-column geometry. Keep in step with `--side-col` in style.css: a 216px
+// panel has room for three stacked knobs under the header and above the jacks.
+const SIDE_ROWS = 3
+const SIDE_COL_W = 58
+const SIDE_GAP = 6
+
 export function renderPanel(module, { onParam, onJack, onEvent, getParams, getInstance, addPoll } = {}) {
   const def = getModule(module.type)
   const el = document.createElement('article')
@@ -13,7 +19,11 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
   // A module that draws its own panel needs the height for it — lay its controls
   // across the width instead of down the panel. Docked panels already do this
   // their own way; applying both wraps their knobs and pushes the drawing out.
-  if (def.panel && !def.dock) body.classList.add('rack-params-compact')
+  // `compactParams` opts a panel in without a drawing: a module with five
+  // stacked full-width controls runs out of panel before it runs out of width,
+  // and wrapping them two-up is the difference between a visible SCALE select
+  // and one that scrolls out of sight.
+  if ((def.panel || def.compactParams) && !def.dock) body.classList.add('rack-params-compact')
   el.append(body)
   const params = { ...paramDefaults(module.type), ...module.params }
   let knobs = 0
@@ -21,6 +31,9 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
     // Structured params (seq8 steps, drum patterns) have no scalar control —
     // a range input over an array is worse than showing nothing.
     if (!param.options && !param.toggle && param.min === undefined) continue
+    // A param the module's own panel() already drives — GRIDS' X and Y are the
+    // XY pad. A knob beside the pad is a second control for one value.
+    if (param.hidden) continue
     const label = document.createElement('label')
     label.textContent = param.label
     let input
@@ -63,7 +76,23 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
     // output jacks fell off the bottom of the panel. Move them into a column
     // down the right instead. Only when there are knobs to move: a panel whose
     // controls are all selects (METER) keeps the full width for its display.
-    if (knobs && !def.dock && !def.util) el.classList.add('rack-panel-side')
+    //
+    // `panelInline` opts out: a panel that draws a single short row (SAMPLR's
+    // file button) wants the knobs wrapped above it across the full width, not
+    // squeezed into a side column beside 18px of nothing.
+    if (def.panelInline) el.classList.add('rack-panel-inline')
+    if (knobs && !def.dock && !def.util && !def.panelInline) {
+      el.classList.add('rack-panel-side')
+      // One column of knobs only fits three before it runs off the bottom of a
+      // 216px panel. Wrap into as many columns as that takes and widen the
+      // track to match, so the module's declared HP is what has to cover it.
+      // Every cell counts, not just the knobs: a select or a checkbox takes a
+      // row in the same grid, and leaving them out of the maths is what pushed
+      // TURING's BIPOLAR and CHORD's SCALE off the bottom.
+      const cols = Math.max(1, Math.ceil(body.children.length / SIDE_ROWS))
+      el.style.setProperty('--side-cols', cols)
+      el.style.setProperty('--side-col', `${cols * SIDE_COL_W + (cols - 1) * SIDE_GAP}px`)
+    }
   }
   // Inputs and outputs get their own labelled block, the way a real panel is silk-screened.
   // A module may declare its own jack rows (`port.row`) instead of the default

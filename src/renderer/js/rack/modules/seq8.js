@@ -6,7 +6,9 @@ export default {
   type: 'seq8',
   name: 'SEQ8',
   group: 'seq',
-  hp: 16,
+  // 10 HP, not 16: the width was reserved for a step editor that was never
+  // built, so the panel is three controls rattling around in a wide box.
+  hp: 10,
   tier: 'native',
   poly: false,
   ports: [
