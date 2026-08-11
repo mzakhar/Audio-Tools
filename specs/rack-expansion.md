@@ -216,6 +216,17 @@ Toolbar work: read `category` and `rack.name` from each preset, render `<optgrou
 
 ## 7. Phasing
 
+**Status:** E1 and E2 are in on `mzakhar/rack-expansion-e1-e2` — eleven modules, eight presets, suite at 773 tests. E3–E5 not started.
+
+Landed alongside them, beyond what the plan called for:
+
+- The event bus now drops a dispatch past depth 64. Cycles are the user's to patch and dispatch is synchronous, so `AD` EOC into its own TRIG — the obvious Krell move — was a stack overflow. `krell.synthrack.json` uses `ad` in `loop` mode instead, which was always the safer clock.
+- `GRIDS` and `GRID16` both grew an `accentThresh` param; the spec gave them an ACC jack with no rule for when it fires.
+- CV jacks that cannot be `AudioParam`s (GRIDS X/Y/CHAOS, BURST CNT, PROB P, TSHIFT DLY, DUCK DEPTH, TURING LOCK, DRIFT RATE, CHORD V/OCT) are `AnalyserNode` taps on the shared 30 Hz poll, scaled 1.0 CV = full knob range. The alternative was a decorative jack.
+- Preset menu categories moved forward from E4, since eight new presets landed at once.
+- `event.pitch` means a raw MIDI number out of `midi-in` but a pitch CV out of `quant`. `TURING` and `ARP` emit `cv` to stay out of it; normalising `midi-in` to emit both is the fix if a module ever needs to read pitch generically.
+
+
 Each phase is independently shippable, ends green, and ships its own presets. `npm test` before each commit; conventional commits.
 
 | Phase | Contents | New tests |
