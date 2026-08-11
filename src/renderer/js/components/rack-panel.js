@@ -13,9 +13,11 @@ const MIN_DISPLAY_W = 96
 const PANEL_PAD = 12
 
 // How many knob columns this panel can afford without starving its display.
-export function sideColumns(cells, hp, rows = SIDE_ROWS) {
+// `displayW` lets a module say its drawing needs less than the default — a
+// column of small LEDs is happy in 48px, and reserving 96 would cost it 3 HP.
+export function sideColumns(cells, hp, displayW = MIN_DISPLAY_W, rows = SIDE_ROWS) {
   const wanted = Math.max(1, Math.ceil(cells / rows))
-  const budget = hp * 16 - MIN_DISPLAY_W - PANEL_PAD - SIDE_GAP
+  const budget = hp * 16 - displayW - PANEL_PAD - SIDE_GAP
   const affordable = Math.max(1, Math.floor(budget / (SIDE_COL_W + SIDE_GAP)))
   return Math.min(wanted, affordable)
 }
@@ -102,7 +104,7 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
       // Every cell counts, not just the knobs: a select or a checkbox takes a
       // row in the same grid, and leaving them out of the maths is what pushed
       // TURING's BIPOLAR and CHORD's SCALE off the bottom.
-      const cols = sideColumns(body.children.length, def.hp || 8)
+      const cols = sideColumns(body.children.length, def.hp || 8, def.panelDisplayW)
       el.style.setProperty('--side-cols', cols)
       el.style.setProperty('--side-col', `${cols * SIDE_COL_W + (cols - 1) * SIDE_GAP}px`)
     }

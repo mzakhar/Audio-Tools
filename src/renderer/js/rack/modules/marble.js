@@ -19,9 +19,10 @@ export default {
   type: 'marble',
   name: 'MARBLE',
   group: 'mod',
-  // 24 HP: nine controls need three knob columns, which left 50px of display at
-  // 16. The hardware this follows is 18 HP with a smaller control set.
-  hp: 24,
+  // 18 HP, down from 24: nine controls still need three knob columns (186px),
+  // but the readout runs vertically now and asks for 48px instead of 96.
+  hp: 18,
+  panelDisplayW: 48,
   tier: 'native',
   poly: false,
   ports: [
@@ -145,15 +146,32 @@ export default {
   // Loop position on top, the three T lamps below. Without them DEJA VU is a
   // knob with no visible loop. Reuses TURING's LED classes rather than growing
   // the stylesheet for two rows of dots.
+  // Two readouts: the déjà-vu loop (16 slots, the ones past LOOP dimmed) and one
+  // activity lamp per T output. The loop runs top to bottom in two short columns
+  // rather than across the panel — vertical costs a fraction of the width, which
+  // is what lets MARBLE be 16 HP instead of 24. The lamps are captioned: three
+  // unlabelled dots under the loop read as decoration, not as T1/T2/T3.
   panel(module, { getInstance, addPoll }) {
     const wrapper = document.createElement('div')
+    wrapper.className = 'marble-display'
     const steps = document.createElement('div')
-    const lamps = document.createElement('div')
-    steps.className = 'turing-leds'
-    lamps.className = 'turing-leds'
+    steps.className = 'marble-steps'
+    steps.title = 'Déjà-vu loop position — slots past LOOP are dimmed'
     const led = () => { const s = document.createElement('span'); s.className = 'turing-led'; return s }
     for (let i = 0; i < MAX_LOOP; i++) steps.append(led())
-    for (let i = 0; i < 3; i++) lamps.append(led())
+
+    const lamps = document.createElement('div')
+    lamps.className = 'marble-lamps'
+    for (let i = 0; i < 3; i++) {
+      const cell = document.createElement('span')
+      cell.className = 'marble-lamp'
+      cell.title = `T${i + 1} gate activity`
+      const dot = led()
+      const cap = document.createElement('em')
+      cap.textContent = `T${i + 1}`
+      cell.append(dot, cap)
+      lamps.append(cell)
+    }
     wrapper.append(steps, lamps)
 
     let last = ''
@@ -167,7 +185,7 @@ export default {
         steps.children[i].classList.toggle('on', i === state.index)
         steps.children[i].style.opacity = i < state.len ? '' : '0.25'
       }
-      for (let i = 0; i < 3; i++) lamps.children[i].classList.toggle('on', !!state.fired[i])
+      for (let i = 0; i < 3; i++) lamps.children[i].firstChild.classList.toggle('on', !!state.fired[i])
     })
     return wrapper
   }
