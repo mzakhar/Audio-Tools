@@ -27,6 +27,8 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
   const el = document.createElement('article')
   el.className = 'rack-panel'
   el.dataset.moduleId = module.id
+  // Draws the arrows that say this module's outputs normal into each other.
+  if (getModule(module.type)?.cascading) el.classList.add('cascading')
   el.style.width = `${(def?.hp || 8) * 16}px`
   if (!def) { el.textContent = `UNKNOWN\n${module.type}`; return el }
   el.innerHTML = `<header>${def.name}</header>`

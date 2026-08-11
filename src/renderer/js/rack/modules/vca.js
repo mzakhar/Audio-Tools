@@ -10,7 +10,7 @@
 //
 // The CV input is normalled to unity via a ConstantSourceNode(1) so an
 // unpatched VCA passes audio at the GAIN knob. The engine calls
-// setInputPatched() to drop that normal when a cable lands on CV — otherwise
+// setPortPatched() to drop that normal when a cable lands on CV — otherwise
 // the patched envelope would add to unity instead of replacing it, and the VCA
 // would sit wide open.
 
@@ -73,7 +73,7 @@ export default {
         out: voices.map(v => v.vca)
       },
 
-      setInputPatched(portId, patched) {
+      setPortPatched(portId, patched) {
         if (portId !== 'cv') return
         const on = !patched
         for (const v of voices) {

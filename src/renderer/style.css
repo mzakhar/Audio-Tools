@@ -161,6 +161,7 @@ html, body {
    The knob column collapses to zero width on a module with no params (BUS). */
 .rack-panel.util {
   --util-col: 40px;
+  --util-jack-col: 28px;
   height: 106px; padding: 5px 8px; gap: 2px;
   display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto auto;
   justify-content: start; align-content: start;
@@ -176,12 +177,24 @@ html, body {
 .rack-panel.util .rack-params,
 .rack-panel.util .rack-jacks { display: flex; flex-direction: row; gap: 0; margin: 0; padding: 0; overflow: visible; }
 .rack-panel.util .rack-jacks-in { border-top: none; }
-.rack-panel.util .rack-params > *,
-.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+.rack-panel.util .rack-params > * { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+/* Jacks get their own narrower track: a 12px circle with a 6px caption does not
+   need a knob's column, and at the knob width VC's fourth jack wrapped onto a
+   second line in both rows. In and out still share the track, so an input jack
+   stays directly above its output. */
+.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-jack-col, var(--util-col)); width: auto; align-items: center; text-align: center; }
 /* Captions belong under their control on both rows — knobs render label-above
    by default, so flip the knob's own stack for a util panel only. */
 .rack-panel.util .knob { flex-direction: column-reverse; gap: 2px; }
 .rack-panel.util .rack-jack { width: 12px; height: 12px; }
+/* VC's outputs cascade left to right, and a bare row of jacks gives no hint
+   that D carries the mix. An arrow between them says so, the way the panel
+   silk-screen does. Purely a legend — the normal itself lives in the module. */
+.rack-panel.util.cascading .rack-jacks-out .rack-jack-slot { position: relative; }
+.rack-panel.util.cascading .rack-jacks-out .rack-jack-slot:not(:last-child)::after {
+  content: '▸'; position: absolute; right: -1px; top: 1px;
+  font-size: 8px; line-height: 1; color: var(--text-dim); pointer-events: none;
+}
 .rack-panel.util .rack-jack-slot em { font-size: 6px; }
 .rack-panel.util .knob-dial { width: 22px; height: 22px; }
 

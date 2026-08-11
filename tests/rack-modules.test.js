@@ -203,18 +203,43 @@ describe('shipped module registry', () => {
     const inst = vc.create(ctx, { channels: 1, params: paramDefaults('vc') })
     for (const port of ['a', 'b', 'c', 'd']) expect(inst.inputs[port].length).toBe(1)
     for (const port of ['outa', 'outb', 'outc', 'outd']) expect(inst.outputs[port].length).toBe(1)
-    expect(inst.outputs.mix.length).toBe(1)
+    // No MIX jack: D is the mix, because A cascades into B into C into D.
+    expect(inst.outputs.mix).toBeUndefined()
     inst.dispose()
   })
 
   it('VC drops and restores its normal cleanly and leaves no source running after dispose', () => {
     const vc = MODULES.vc
     const inst = vc.create(ctx, { channels: 1, params: paramDefaults('vc') })
-    inst.setInputPatched('a', true)
-    inst.setInputPatched('a', false)
+    inst.setPortPatched('a', true)
+    inst.setPortPatched('a', false)
     inst.dispose()
     const leaked = ctx.created.filter(n => n.start && n.started > 0 && n.stopped === 0)
     expect(leaked).toEqual([])
+  })
+
+  it('VC cascades each strip into the next, and a patched output lifts it back out', () => {
+    const vc = MODULES.vc
+    const inst = vc.create(ctx, { channels: 1, params: paramDefaults('vc') })
+    const sumA = inst.outputs.outa[0], sumB = inst.outputs.outb[0]
+    // Built cascading: A already feeds B.
+    expect(sumA.connect.mock.calls.some(([dst]) => dst === sumB)).toBe(true)
+
+    // Patching A's output takes A out of B's sub-mix...
+    inst.setPortPatched('outa', true)
+    expect(sumA.disconnect).toHaveBeenCalledWith(sumB)
+    // ...and unpatching puts it back, once.
+    sumA.connect.mockClear()
+    inst.setPortPatched('outa', false)
+    expect(sumA.connect.mock.calls.filter(([dst]) => dst === sumB)).toHaveLength(1)
+    inst.setPortPatched('outa', false)
+    expect(sumA.connect.mock.calls.filter(([dst]) => dst === sumB)).toHaveLength(1)
+
+    // D has nothing to its right, so patching it rewires nothing.
+    const before = sumA.disconnect.mock.calls.length
+    inst.setPortPatched('outd', true)
+    expect(sumA.disconnect.mock.calls.length).toBe(before)
+    inst.dispose()
   })
 
   it('BUS fans each of its two independent inputs out to its own four outputs', () => {
