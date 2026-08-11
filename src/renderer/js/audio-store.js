@@ -10,6 +10,7 @@ let _projectDirHandle = null
 const _buffers = new Map()  // fileKey → AudioBuffer
 const _lods    = new Map()  // fileKey → Object<number, Float32Array>
 const _pending = new Map()  // fileKey → Promise<AudioBuffer>  (dedup)
+const _requested = new Set() // fileKey → already asked for by getBufferOrLoad
 const _lodCallbacks = new Set()
 
 let _worker = null
@@ -106,6 +107,21 @@ const AudioStore = {
     return _buffers.get(fileKey) ?? null
   },
 
+  // Synchronous lookup for callers that cannot await — rack modules build their
+  // graph in a plain function call. A miss kicks off the decode once and returns
+  // null; the next call finds it. Failures are remembered so a missing file is
+  // not re-read on every frame.
+  getBufferOrLoad(fileKey) {
+    if (!fileKey) return null
+    const buffer = _buffers.get(fileKey)
+    if (buffer) return buffer
+    if (!_requested.has(fileKey)) {
+      _requested.add(fileKey)
+      this.loadBuffer(fileKey).catch(err => console.warn('[AudioStore] load failed for', fileKey, err?.message))
+    }
+    return null
+  },
+
   getLod(fileKey, level) {
     const lods = _lods.get(fileKey)
     if (!lods) return null
@@ -138,12 +154,14 @@ const AudioStore = {
     _buffers.delete(fileKey)
     _lods.delete(fileKey)
     _pending.delete(fileKey)
+    _requested.delete(fileKey)
   },
 
   reset() {
     _buffers.clear()
     _lods.clear()
     _pending.clear()
+    _requested.clear()
     _lodCallbacks.clear()
     _projectDirHandle = null
     if (_worker) {

@@ -6,6 +6,7 @@ import { paintKnob } from './knob.js'
 import { ModuleBrowser } from './module-browser.js'
 import { RackCables } from './rack-cables.js'
 import RackEngine from '../rack/rack-engine.js'
+import AudioStore from '../audio-store.js'
 import FileAdapter from '../io/FileAdapter.js'
 import { exportPatch, importPatch } from '../rack/patch-io.js'
 import { RackPoll } from '../rack/rack-poll.js'
@@ -222,7 +223,7 @@ export class RackView {
     if (this.engineHandle?.ctx === ctx) RackEngine.update(this.engineHandle, rack)
     else {
       this.unmountEngine()
-      this.engineHandle = RackEngine.mount(ctx, rack, { output: this.getMasterInput(), hasWorklet: this.hasWorklet(), poll: this.poll })
+      this.engineHandle = RackEngine.mount(ctx, rack, { output: this.getMasterInput(), hasWorklet: this.hasWorklet(), poll: this.poll, getBuffer: key => AudioStore.getBufferOrLoad(key) })
     }
   }
   unmountEngine() {
