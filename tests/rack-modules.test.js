@@ -111,6 +111,48 @@ describe('shipped module registry', () => {
     }
   })
 
+  // QUANT's IN jack used to be a landing pad nothing read, so a plain trigger
+  // quantized 0 and the jack was a trap — which is how Generative Euclid ended
+  // up with a quantizer stuck at one note.
+  describe('QUANT reads the pitch it is given', () => {
+    const build = () => {
+      const jobs = new Set()
+      const poll = { add: j => { jobs.add(j); return () => jobs.delete(j) } }
+      const inst = MODULES.quant.create(ctx, { channels: 1, params: paramDefaults('quant'), poll })
+      return { inst, runPoll: () => jobs.forEach(j => j()) }
+    }
+
+    it('prefers a value carried on the trigger event', () => {
+      const { inst } = build()
+      inst.onEvent('trig', { type: 'trig', time: 1, cv: 0.1 })
+      const held = ctx.created.filter(n => n.kind === 'const').at(-1)
+      expect(held.offset.setValueAtTime).toHaveBeenCalledWith(0.1, 1)
+    })
+
+    it('falls back to the IN jack when the event carries nothing', () => {
+      const { inst, runPoll } = build()
+      const analyser = inst.inputs.in[0]
+      analyser.getFloatTimeDomainData = buf => { buf[0] = 0.1 }
+      runPoll()
+      inst.onEvent('trig', { type: 'trig', time: 2 })
+      const held = ctx.created.filter(n => n.kind === 'const').at(-1)
+      expect(held.offset.setValueAtTime).toHaveBeenCalledWith(0.1, 2)
+    })
+  })
+
+  it('RND hands its drawn value to whatever it triggers', () => {
+    const emitted = []
+    const inst = MODULES.rnd.create(ctx, {
+      params: { ...paramDefaults('rnd'), range: 1, bipolar: 'off', probability: 1 },
+      emitEvent: (port, ev) => emitted.push([port, ev]),
+      random: () => 0.5
+    })
+    inst.onEvent('trig', { type: 'trig', time: 3 })
+    const gate = emitted.find(([port]) => port === 'gate')
+    expect(gate?.[1].cv).toBe(0.5)
+    inst.dispose()
+  })
+
   it('ships every Phase 6 module, with worklet-only DSP explicitly marked', () => {
     for (const type of ['fmop', 'drum', 'drive', 'fold', 'slew', 's&h', 'math', 'mult', 'sum', 'comp', 'reverb', 'chorus', 'ringmod', 'scope', 'cv-mon', 'tuner', 'delay', 'split', 'merge']) expect(MODULES[type], `missing module: ${type}`).toBeTruthy()
     // FOLD stopped being a placeholder in E4 — it is a real WaveShaper now.

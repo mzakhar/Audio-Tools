@@ -28,7 +28,10 @@ export default {
         const roll = random()
         const next = params.bipolar === 'on' ? (roll * 2 - 1) * params.range : roll * params.range
         value.offset.setValueAtTime(next, event.time)
-        if (random() < params.probability) emitEvent('gate', { type: 'trig', time: event.time, channel: 0 })
+        // The gate carries the value it was drawn with, the way TURING's PULSE
+        // does. RND -> QUANT is the point of this module, and reading the CV
+        // jack back at poll rate would always be a frame behind the trigger.
+        if (random() < params.probability) emitEvent('gate', { type: 'trig', time: event.time, channel: 0, cv: next })
       },
       dispose() { value.stop(); trig.disconnect(); value.disconnect(); cv.disconnect(); gate.disconnect() }
     }

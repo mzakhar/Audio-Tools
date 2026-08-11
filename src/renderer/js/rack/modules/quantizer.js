@@ -31,11 +31,24 @@ export default {
     { key: 'transpose', label: 'TRANSPOSE', min: -24, max: 24, step: 1, def: 0, fmt: 'st' }
   ],
 
-  create(ctx, { channels = 1, params, emitEvent = () => {} }) {
+  create(ctx, { channels = 1, params, emitEvent = () => {}, poll = null }) {
     const voices = Array.from({ length: channels }, () => {
-      const input = ctx.createGain(), trig = ctx.createGain(), value = ctx.createConstantSource(), out = ctx.createGain(), trigOut = ctx.createGain()
+      const input = ctx.createAnalyser(), trig = ctx.createGain(), value = ctx.createConstantSource(), out = ctx.createGain(), trigOut = ctx.createGain()
+      input.fftSize = 32
       value.offset.value = 0; value.connect(out); value.start()
-      return { input, trig, value, out, trigOut }
+      return { input, trig, value, out, trigOut, held: 0 }
+    })
+    // The IN jack used to be a landing pad nothing ever read: QUANT only
+    // quantized a pitch riding on the trigger event, so RND -> IN with a plain
+    // trigger produced a constant 0 and the jack was a trap. Sample it on the
+    // shared poll instead, the same way CHORD reads its V/OCT.
+    //
+    // ponytail: 30 Hz, so a CV that changes on the same event as the trigger is
+    // read as it was one frame ago. A source that carries its value on the event
+    // (TURING's PULSE, RND's GATE) is still preferred and stays sample-accurate.
+    const frame = new Float32Array(32)
+    const removePoll = poll?.add(() => {
+      for (const v of voices) { v.input.getFloatTimeDomainData?.(frame); v.held = frame[0] || 0 }
     })
     return {
       inputs: { in: voices.map(v => v.input), trig: voices.map(v => v.trig) },
@@ -44,11 +57,13 @@ export default {
       onEvent(portId, event) {
         if (portId !== 'trig' || (event.type !== 'trig' && event.type !== 'gate-on')) return
         const channel = Math.min(event.channel ?? 0, voices.length - 1)
-        const pitch = quantizePitchCv(event.pitch ?? event.cv ?? event.value ?? 0, params.scale, params.root, params.transpose)
+        const source = event.pitch ?? event.cv ?? event.value ?? voices[channel].held
+        const pitch = quantizePitchCv(source, params.scale, params.root, params.transpose)
         voices[channel].value.offset.setValueAtTime(pitch, event.time)
         emitEvent('trigOut', { ...event, pitch, channel })
       },
       dispose() {
+        removePoll?.()
         for (const v of voices) { v.value.stop(); v.input.disconnect(); v.trig.disconnect(); v.value.disconnect(); v.out.disconnect(); v.trigOut.disconnect() }
         voices.length = 0
       }
