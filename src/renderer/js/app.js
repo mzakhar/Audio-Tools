@@ -21,6 +21,7 @@ import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
 import ShortcutManager from './shortcuts.js'
+import { applyTheme, savedTheme } from './theme.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -524,6 +525,12 @@ function setProjectOpen(name) {
 }
 
 function initProjectBar() {
+  const themeSelect = document.getElementById('theme-select')
+  if (themeSelect) {
+    themeSelect.value = savedTheme()
+    themeSelect.addEventListener('change', () => applyTheme(themeSelect.value))
+  }
+
   document.getElementById('new-project-btn')?.addEventListener('click', async () => {
     await ensureAudio()
     const handle = await FileAdapter.createProjectFolder(getLastDir(DIR_KEY_PROJECT))
@@ -969,6 +976,7 @@ function initUndoRedo() { /* migrated to initShortcuts */ }
 
 // ─── Bootstrap ─────────────────────────────────────────────────────────────
 function boot() {
+  applyTheme(savedTheme())
   Keyboard.render('keyboard')
   renderDrumPads()
   Sequencer.init('seq-tracks')
