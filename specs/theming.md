@@ -2,7 +2,7 @@
 
 ## Done
 
-- Semantic renderer tokens remain in `style.css`; dark and light overrides use `html[data-theme]`.
+- Semantic renderer tokens remain in `style.css`; dark, light, and rainbow overrides use `html[data-theme]`.
 - Theme choice persists in `localStorage` and emits `themechange` for canvas or future UI consumers.
 - Runtime geometry and data colors stay inline CSS variables.
 

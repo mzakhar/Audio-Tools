@@ -24,4 +24,11 @@ describe('theme', () => {
     expect(applyTheme(savedTheme())).toBe('light')
     expect(document.documentElement.dataset.theme).toBe('light')
   })
+
+  it('applies and restores the rainbow theme', () => {
+    localStorage.setItem('synth_theme', 'rainbow')
+    expect(savedTheme()).toBe('rainbow')
+    expect(applyTheme(savedTheme())).toBe('rainbow')
+    expect(document.documentElement.dataset.theme).toBe('rainbow')
+  })
 })
