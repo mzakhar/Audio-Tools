@@ -580,10 +580,18 @@ function initProjectBar() {
   // Shared audio import helper — picks a file and adds it to targetTrackId (or creates a new track)
   async function importAudioToTrack(targetTrackId) {
     if (!AudioStore.getProjectDir()) return
-    const fileHandle = await pickAudioFile({
-      getLastDir: () => getLastDir(DIR_KEY_AUDIO),
-      setLastDir: dir => setLastDir(DIR_KEY_AUDIO, dir)
-    })
+    let fileHandle
+    try {
+      fileHandle = await pickAudioFile({
+        getLastDir: () => getLastDir(DIR_KEY_AUDIO),
+        setLastDir: dir => setLastDir(DIR_KEY_AUDIO, dir)
+      })
+    } catch (err) {
+      // A picker that cannot run at all (no secure context) must say so rather
+      // than leaving the button looking dead.
+      console.warn('Audio import unavailable:', err?.message || err)
+      return
+    }
     if (!fileHandle) return
     await ensureAudio()
     const fileKey = await AudioStore.importFile(fileHandle)

@@ -26,9 +26,11 @@ export default {
       return { trig, env, out, eoc }
     })
 
-    function fire(channel, time) {
+    // One envelope, scheduled. Returns when it ends so a caller can decide what
+    // to do next; it never arms a timer of its own.
+    function fireOnce(channel, time) {
       const v = voices[channel]
-      if (!v) return
+      if (!v) return null
       const p = v.env.offset
       p.cancelScheduledValues(time)
       p.setValueAtTime(p.value, time)
@@ -37,6 +39,12 @@ export default {
       else p.linearRampToValueAtTime(0, time + params.attack + params.decay)
       const end = time + params.attack + params.decay
       emitEvent('eoc', { type: 'trig', time: end, channel })
+      return end
+    }
+
+    function fire(channel, time) {
+      const end = fireOnce(channel, time)
+      if (end === null) return
       if (params.loop === 'on') {
         // ponytail: timer loop until the shared event scheduler owns looping modules.
         const timer = setTimeout(() => { loopTimers.delete(timer); fire(channel, Math.max(end, ctx.currentTime)) }, Math.max(0, (end - ctx.currentTime) * 1000))
@@ -48,10 +56,22 @@ export default {
     // envelope something else had triggered, so a patch that used AD as its own
     // free-running clock — the classic Krell patch — waited forever for a
     // trigger that was never coming.
+    // A render runs faster than wall clock, so the setTimeout chain would fire
+    // an unpredictable number of extra times mid-render and the same patch
+    // would bounce differently every take. Offline, lay the whole loop down up
+    // front instead — the same trick GRAIN uses.
+    const offlineSeconds = typeof ctx.startRendering === 'function' && ctx.length ? ctx.length / ctx.sampleRate : 0
     let looping = false
     function startLoop(time = ctx.currentTime) {
       if (looping || params.loop !== 'on') return
       looping = true
+      if (offlineSeconds > 0) {
+        const step = Math.max(0.001, params.attack + params.decay)
+        for (let ch = 0; ch < voices.length; ch++) {
+          for (let at = time; at < offlineSeconds; at += step) fireOnce(ch, at)
+        }
+        return
+      }
       for (let ch = 0; ch < voices.length; ch++) fire(ch, time)
     }
     function stopLoop() {

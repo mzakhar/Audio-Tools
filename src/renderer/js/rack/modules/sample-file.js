@@ -29,10 +29,12 @@ export function filePanel({ params, setParam, getInstance, addPoll }) {
       import('../../io/audio-picker.js')
     ])
     if (!AudioStore.getProjectDir()) { badge.textContent = 'no project'; return }
-    const handle = await pickAudioFile()
-    if (!handle) return
-    badge.textContent = ''
     try {
+      // Picking can fail outright — there is no file picker without a secure
+      // context — and the badge is the only place that can say so.
+      const handle = await pickAudioFile()
+      if (!handle) return
+      badge.textContent = ''
       setParam('fileKey', await AudioStore.importFile(handle))
       paint()
     } catch (err) {

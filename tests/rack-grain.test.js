@@ -103,7 +103,10 @@ describe('GRAIN', () => {
     const before = ctx.sources().length
     inst.onEvent('trig', { type: 'trig', time: 0 })   // re-seed so new grains read the CV
     const src = ctx.sources()[before]
-    expect(src.start.mock.calls[0][1]).toBeCloseTo(2, 6)   // halfway into a 4 s file
+    // POS scans the range of valid grain *starts*, not the whole buffer: a grain
+    // has to fit after its offset or it plays for zero seconds. Halfway through
+    // a 4 s file with an 80 ms grain at double speed is 0.5 * (4 - 0.16).
+    expect(src.start.mock.calls[0][1]).toBeCloseTo(1.92, 6)
     expect(src.playbackRate.value).toBeCloseTo(2, 6)       // 0.1 CV = one octave
     inst.dispose()
   })
@@ -173,6 +176,17 @@ describe('GRAIN', () => {
     expect(starts[0]).toBeGreaterThanOrEqual(0)
     expect(starts.at(-1)).toBeLessThan(2)
     expect(starts).toEqual([...starts].sort((a, b) => a - b))
+    inst.dispose()
+  })
+
+  // POS fully clockwise used to start every grain at the very end of the file,
+  // so each one had zero length and the top of the knob was silence.
+  it('still plays a full grain with POS at maximum', () => {
+    const inst = build({ position: 1, spray: 0, pitch: 0, size: 100 }, () => fakeBuffer(4))
+    const src = ctx.sources().at(-1)
+    const [, offset, length] = src.start.mock.calls[0]
+    expect(offset).toBeLessThan(4)
+    expect(length).toBeCloseTo(0.1, 6)
     inst.dispose()
   })
 

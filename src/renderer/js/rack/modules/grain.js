@@ -71,8 +71,12 @@ export default {
       const size = clamp(params.size, 10, 500) / 1000
       const position = clamp(params.position + cv.pos, 0, 1)
       const spray = clamp(params.spray, 0, 1)
-      const offset = clamp(position * duration + (random() * 2 - 1) * spray * duration, 0, duration)
       const rate = Math.pow(2, (params.pitch + cv.pitch * 120) / 12)
+      // Leave a grain's worth of file after the offset: clamping to `duration`
+      // meant POS fully clockwise started every grain at the very end with zero
+      // length, so the knob's top was silence instead of the tail of the file.
+      const latest = Math.max(0, duration - size * rate)
+      const offset = clamp(position * latest + (random() * 2 - 1) * spray * duration, 0, latest)
 
       const src = ctx.createBufferSource()
       src.buffer = buffer

@@ -165,4 +165,34 @@ describe('input suppression', () => {
     expect(fn).not.toHaveBeenCalled()
     sel.remove()
   })
+
+  // A rack knob is a range input, and turning one leaves it focused so the
+  // arrow keys can drive it. Treating that as "the user is typing" killed
+  // Space, Ctrl+Z and F1/F2/F3 for the rest of the session.
+  it('still fires while a range input (a rack knob) holds focus', () => {
+    const fn = vi.fn()
+    ShortcutManager.register({ key: 'z' }, fn)
+    const range = document.createElement('input')
+    range.type = 'range'
+    document.body.appendChild(range)
+    range.focus()
+    fire('z')
+    expect(fn).toHaveBeenCalled()
+    range.remove()
+  })
+
+  it('still declines while a text input holds focus', () => {
+    const fn = vi.fn()
+    ShortcutManager.register({ key: 'z' }, fn)
+    for (const type of ['text', 'number', 'search']) {
+      fn.mockClear()
+      const el = document.createElement('input')
+      el.type = type
+      document.body.appendChild(el)
+      el.focus()
+      fire('z')
+      expect(fn, `type=${type}`).not.toHaveBeenCalled()
+      el.remove()
+    }
+  })
 })

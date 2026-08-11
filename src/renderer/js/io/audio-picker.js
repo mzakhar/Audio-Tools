@@ -16,15 +16,22 @@ export async function pickAudioFile({ getLastDir, setLastDir } = {}) {
     if (cut > 0) setLastDir?.(path.substring(0, cut))
     return path
   }
+  // Secure-context only, so it is simply absent on the plain-http LAN deploy and
+  // in browsers that never shipped it. Say so instead of letting the TypeError
+  // be swallowed below and read as "the user cancelled".
+  if (typeof window.showOpenFilePicker !== 'function') {
+    throw new Error('File picking needs a secure context (https). Open the app over https to import audio.')
+  }
   try {
     const [handle] = await window.showOpenFilePicker({
       types: [{ description: 'Audio Files', accept: { 'audio/*': AUDIO_EXT.map(ext => `.${ext}`) } }]
     })
     return handle ?? null
-  } catch {
-    // The browser picker rejects with AbortError on cancel. Nothing else in here
-    // can throw, so a rejection means "no file", not a failure worth surfacing.
-    return null
+  } catch (err) {
+    // Cancelling is the only rejection that means "no file". Anything else is a
+    // real failure and has to reach the caller, or the button just does nothing.
+    if (err?.name === 'AbortError') return null
+    throw err
   }
 }
 

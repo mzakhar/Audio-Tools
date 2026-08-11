@@ -58,6 +58,10 @@ export function renderKnob(param, input) {
     // right/up clockwise — and ShortcutManager already stays out of the way of a
     // focused INPUT.
     input.focus()
+    // Marks the drag itself, not the focus. RackView.syncValues has to leave a
+    // knob alone while it is being turned, but a knob that merely holds focus
+    // still needs undo and preset loads to move it.
+    input.dataset.dragging = 'true'
     const span = Number(input.max) - Number(input.min), start = Number(input.value)
     const move = ev => {
       const raw = start + (e.clientY - ev.clientY) / DRAG_PX * span
@@ -70,6 +74,7 @@ export function renderKnob(param, input) {
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
+      delete input.dataset.dragging
       // Keep the reading up while the knob still has focus — the arrow keys are
       // live at that point and a label would hide what they are doing.
       if (document.activeElement === input) showValue(); else showLabel()

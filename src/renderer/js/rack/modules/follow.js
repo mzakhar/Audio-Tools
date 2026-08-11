@@ -50,8 +50,12 @@ export default {
       envSrc.offset.setTargetAtTime(target, now, tau)
       // Hysteresis so a signal sitting on the threshold does not chatter gates.
       const thresh = params.threshold
+      // Absolute floor, not a percentage: at THRESH 0 a relative 0.9 gives a
+      // close condition of `target < 0`, which an RMS can never satisfy — the
+      // gate would open once and never shut, holding a downstream ADSR forever.
+      const closeAt = Math.max(0.001, thresh * 0.9 - 0.005)
       if (!open && target > thresh) { open = true; emitEvent('gate', { type: 'gate-on', time: now, channel: 0 }) }
-      else if (open && target < thresh * 0.9) { open = false; emitEvent('gate', { type: 'gate-off', time: now, channel: 0 }) }
+      else if (open && target < closeAt) { open = false; emitEvent('gate', { type: 'gate-off', time: now, channel: 0 }) }
     })
 
     return {
@@ -61,6 +65,9 @@ export default {
       uiEnv() { return level },
       dispose() {
         removePoll?.()
+        // Close the gate on the way out, or whatever it was holding open stays
+        // open after FOLLOW is gone.
+        if (open) { open = false; emitEvent('gate', { type: 'gate-off', time: ctx.currentTime, channel: 0 }) }
         envSrc.stop()
         for (const node of [input, analyser, envSrc, env, gate]) node.disconnect()
       }

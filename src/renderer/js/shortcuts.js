@@ -42,10 +42,24 @@ function _matchesEvent(desc, e) {
   return true
 }
 
+// Controls that swallow ordinary typing. A range input is deliberately not one
+// of them: a focused rack knob used to kill Space, Ctrl+Z and F1/F2/F3 for the
+// rest of the session, because turning a knob leaves its hidden range input
+// focused so the arrow keys can drive it. Ranges only consume arrows, and
+// nothing here binds those.
+const TEXT_ENTRY_TYPES = new Set(['text', 'number', 'search', 'email', 'password', 'tel', 'url', 'date', 'time'])
+
+function _isTyping(el) {
+  if (!el) return false
+  if (el.isContentEditable) return true
+  const tag = el.tagName
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true
+  return tag === 'INPUT' && TEXT_ENTRY_TYPES.has((el.type || 'text').toLowerCase())
+}
+
 function _onKeyDown(e) {
   // Never intercept while the user is typing in a form field
-  const tag = document.activeElement?.tagName
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+  if (_isTyping(document.activeElement)) return
 
   // Collect all matching bindings (pianoroll-context ones take priority)
   let matched = null

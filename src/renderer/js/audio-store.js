@@ -99,6 +99,9 @@ const AudioStore = {
       return audioBuffer
     })()
 
+    // A rejected load must not stay in the dedup map, or every later attempt
+    // returns the same failed promise and the file can never be loaded again.
+    promise.catch(() => _pending.delete(fileKey))
     _pending.set(fileKey, promise)
     return promise
   },
@@ -117,7 +120,14 @@ const AudioStore = {
     if (buffer) return buffer
     if (!_requested.has(fileKey)) {
       _requested.add(fileKey)
-      this.loadBuffer(fileKey).catch(err => console.warn('[AudioStore] load failed for', fileKey, err?.message))
+      this.loadBuffer(fileKey).catch(err => {
+        // Forget the failure so the next call retries. A patch mounted before
+        // the project directory is set fails once; without this the key stays
+        // poisoned and the sampler is silent for the rest of the session.
+        _requested.delete(fileKey)
+        _pending.delete(fileKey)
+        console.warn('[AudioStore] load failed for', fileKey, err?.message)
+      })
     }
     return null
   },

@@ -111,7 +111,14 @@ export default {
         params[key] = value
         if (!shaping) return
         const now = ctx.currentTime || 0
-        for (const k of AXES) srcs[k].offset.cancelScheduledValues(now)
+        for (const k of AXES) {
+          // Hold where the ramp had actually reached. A plain cancel reverts the
+          // param to the last event before `now`, so nudging RATE mid-ramp
+          // snapped the CV — audible as a click on a filter cutoff.
+          const p = srcs[k].offset
+          if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now)
+          else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now) }
+        }
         nextTime = now
         fill(now)
       },

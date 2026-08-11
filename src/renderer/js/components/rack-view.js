@@ -214,7 +214,10 @@ export class RackView {
       if (!panel) continue
       for (const [key, value] of Object.entries(module.params || {})) {
         const input = panel.querySelector(`[data-param="${key}"]`)
-        if (!input || input === document.activeElement) continue
+        // Only a knob actually being dragged is off limits. Keying on focus
+        // instead froze every knob the user had last touched, since turning one
+        // leaves it focused for the arrow keys.
+        if (!input || input.dataset.dragging) continue
         if (input.type === 'checkbox') input.checked = !!value
         else if (String(input.value) !== String(value)) { input.value = value; paintKnob(input) }
       }
