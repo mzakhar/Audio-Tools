@@ -4,7 +4,7 @@ vi.mock('../src/renderer/js/rack/rack-engine.js', () => ({ default: engine }))
 vi.mock('../src/renderer/js/components/rack-cables.js', () => ({ RackCables: class { constructor(canvas) { this.canvas = canvas } draw() {} setCables() {} hitTest() { return null } } }))
 import { renderPanel, sideColumns } from '../src/renderer/js/components/rack-panel.js'
 import { ModuleBrowser } from '../src/renderer/js/components/module-browser.js'
-import { RackView, presetMenu } from '../src/renderer/js/components/rack-view.js'
+import { RackView, presetMenu, starter } from '../src/renderer/js/components/rack-view.js'
 import ProjectStore from '../src/renderer/js/store/ProjectStore.js'
 import MODULES from '../src/renderer/js/rack/modules/index.js'
 import { firstFreeSlot, tidyRack } from '../src/renderer/js/rack/rack-layout.js'
@@ -94,6 +94,35 @@ describe('rack panel', () => {
     expect(view.getEngineHandle()).toEqual({ ctx })
     view.destroy()
     expect(engine.unmount).toHaveBeenCalledWith({ ctx })
+  })
+})
+
+describe('rack id bootstrap', () => {
+  // Loading a preset before show() ever ran dispatched LoadRackPatch(null, …).
+  // The store filed it under the string "null", render() then bailed on its own
+  // falsy rackId, and the rack sat there with stale panels and no audio.
+  it('loading a preset before show() still lands in a real rack', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.load(starter, { tidy: true })
+    expect(view.rackId).toBeTruthy()
+    expect(String(view.rackId)).not.toBe('null')
+    expect(view.rack()).toBeTruthy()
+    expect(view.rack().modules.length).toBeGreaterThan(0)
+    expect(Object.keys(ProjectStore.getState().racks)).not.toContain('null')
+    view.destroy()
+  })
+
+  it('render adopts the store rack when its own id went stale', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.show()
+    const real = view.rackId
+    view.rackId = null                 // whatever knocked it loose
+    view.render()
+    expect(view.rackId).toBe(real)
+    expect(view.rack()).toBeTruthy()
+    view.destroy()
   })
 })
 

@@ -120,7 +120,19 @@ export class RackView {
     })
     this.unsubscribe = ProjectStore.subscribe(() => this.render())
   }
-  show() { this.container.style.display = 'grid'; this.poll.start(); if (!this.rackId) { const racks = ProjectStore.getState().racks; this.rackId = Object.keys(racks)[0] || 'starter-rack'; if (!racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId)); if (!ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter, { tidy: true }) } this.render() }
+  // Every entry point that dispatches against `this.rackId` has to go through
+  // here first. Loading a preset before show() ever ran dispatched
+  // LoadRackPatch(null, …), which the store happily filed under the string
+  // "null" — and from then on render() bailed on its own falsy rackId, leaving
+  // stale panels on screen, no engine, and no sound.
+  ensureRack() {
+    const racks = ProjectStore.getState().racks
+    if (this.rackId && racks[this.rackId]) return this.rackId
+    this.rackId = Object.keys(racks)[0] || 'starter-rack'
+    if (!ProjectStore.getState().racks[this.rackId]) ProjectStore.dispatch(AddRack('Starter rack', this.rackId))
+    return this.rackId
+  }
+  show() { this.container.style.display = 'grid'; this.poll.start(); const fresh = !this.rackId; this.ensureRack(); if (fresh && !ProjectStore.getState().racks[this.rackId].modules.length) this.load(starter, { tidy: true }); this.render() }
   hide() { this.container.style.display = 'none'; this.poll.stop() }
   destroy() { this.unsubscribe?.(); this.poll.stop(); this.poll.clear(); this.unmountEngine() }
   getEngineHandle() { return this.engineHandle }
@@ -152,11 +164,15 @@ export class RackView {
   // off for IMPORT, where the file carries a layout the user arranged themselves.
   load(json, { tidy = false } = {}) {
     const { rack, warnings } = importPatch(json, MODULES)
-    ProjectStore.dispatch(LoadRackPatch(this.rackId, tidy ? tidyRack(rack, MODULES) : rack))
+    ProjectStore.dispatch(LoadRackPatch(this.ensureRack(), tidy ? tidyRack(rack, MODULES) : rack))
     warnings.forEach(warning => console.warn(warning))
   }
   async save(name) { try { await FileAdapter.exportRackPatch(exportPatch(this.rack()), name || `${this.rack()?.name || 'patch'}.synthrack`) } catch (e) { if (e.name !== 'AbortError') console.warn('Rack export failed', e) } }
   render() {
+    // Adopt whatever rack the store has rather than giving up: this runs inside
+    // a store notification, so it must never dispatch, but a view that returns
+    // here forever is a rack that silently stops responding.
+    if (!this.rackId || !this.rack()) this.rackId = Object.keys(ProjectStore.getState().racks)[0] || this.rackId
     if (!this.rackId) return
     const rack = this.rack(); if (!rack) { this.unmountEngine(); return }
     const count = this.container.querySelector('.rack-count'); if (count) { const warning = rack.modules.length > 96 || rack.cables.length > 128; count.textContent = `${rack.modules.length}M ${rack.cables.length}C`; count.classList.toggle('warning', warning) }
