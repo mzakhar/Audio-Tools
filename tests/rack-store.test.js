@@ -29,7 +29,7 @@ describe('rack store', () => {
     it('defaults to an empty racks map at the current version', () => {
       expect(ProjectStore.getState().racks).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(3)
+      expect(CURRENT_VERSION).toBe(4)
     })
   })
 
@@ -192,6 +192,26 @@ describe('rack store', () => {
   })
 
   describe('migrate', () => {
+    // VC lost its MIX jack when its channels started cascading. The engine drops
+    // a cable to a port that no longer exists without a word, so a saved patch
+    // would have gone quiet with nothing to explain it.
+    it('moves a saved VC MIX cable onto the D output', () => {
+      const old = {
+        version: 3, bpm: 120, tracks: [], mixer: { channels: [], master: {} }, patterns: {},
+        racks: { r1: {
+          id: 'r1', modules: [{ id: 'vc1', type: 'vc' }, { id: 'o', type: 'out' }],
+          cables: [
+            { id: 'c1', from: { moduleId: 'vc1', port: 'mix' }, to: { moduleId: 'o', port: 'in' } },
+            { id: 'c2', from: { moduleId: 'vc1', port: 'outa' }, to: { moduleId: 'o', port: 'in' } }
+          ]
+        } }
+      }
+      const next = migrate(old)
+      expect(next.version).toBe(CURRENT_VERSION)
+      expect(next.racks.r1.cables[0].from.port).toBe('outd')
+      expect(next.racks.r1.cables[1].from.port).toBe('outa')   // untouched
+    })
+
     it('adds an empty racks map to a v1 project', () => {
       const old = { version: 1, bpm: 128, tracks: [], mixer: { channels: [], master: {} }, patterns: {} }
       const next = migrate(old)

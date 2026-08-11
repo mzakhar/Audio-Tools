@@ -54,7 +54,8 @@ function makeRegistry() {
       const setParam = vi.fn()
       return {
         inputs: { in: nodes }, outputs: { out: nodes },
-        params, setParam, dispose: vi.fn(() => nodes.forEach(n => { n.stop(); n.disconnect() }))
+        params, setParam, setPortPatched: vi.fn(),
+        dispose: vi.fn(() => nodes.forEach(n => { n.stop(); n.disconnect() }))
       }
     })
   }
@@ -67,7 +68,7 @@ function makeRegistry() {
       const g = ctx.createGain()
       return {
         inputs: { in: [g], cv: [g.gain] }, outputs: {}, output: g,
-        setParam: vi.fn(), setInputPatched: vi.fn(), dispose: vi.fn(() => g.disconnect())
+        setParam: vi.fn(), setPortPatched: vi.fn(), dispose: vi.fn(() => g.disconnect())
       }
     })
   }
@@ -359,13 +360,13 @@ describe('RackEngine', () => {
     })
   })
 
-  describe('normalled inputs', () => {
+  describe('normalled ports', () => {
     it('tells a module which of its inputs a cable landed on', () => {
       const handle = mount(rack(
         [mod('m-1', 'src'), mod('m-2', 'dst')],
         [cable('c-1', 'm-1', 'out', 'm-2', 'cv')]
       ))
-      const calls = RackEngine.getInstance(handle, 'm-2').setInputPatched.mock.calls
+      const calls = RackEngine.getInstance(handle, 'm-2').setPortPatched.mock.calls
       expect(calls).toContainEqual(['cv', true])
       expect(calls).toContainEqual(['in', false])
     })
@@ -374,10 +375,23 @@ describe('RackEngine', () => {
       const patched = rack([mod('m-1', 'src'), mod('m-2', 'dst')], [cable('c-1', 'm-1', 'out', 'm-2', 'cv')])
       const handle = mount(patched)
       const inst = RackEngine.getInstance(handle, 'm-2')
-      inst.setInputPatched.mockClear()
+      inst.setPortPatched.mockClear()
 
       RackEngine.update(handle, rack([mod('m-1', 'src'), mod('m-2', 'dst')], []))
-      expect(inst.setInputPatched.mock.calls).toContainEqual(['cv', false])
+      expect(inst.setPortPatched.mock.calls).toContainEqual(['cv', false])
+    })
+
+    // VC's channels cascade into each other, and inserting a plug into an output
+    // is what lifts a channel out of the sub-mix to its right — so outputs have
+    // to be reported too, not just inputs.
+    it('reports outputs as well as inputs', () => {
+      const handle = mount(rack(
+        [mod('m-1', 'src'), mod('m-2', 'dst')],
+        [cable('c-1', 'm-1', 'out', 'm-2', 'cv')]
+      ))
+      const src = RackEngine.getInstance(handle, 'm-1')
+      expect(src.setPortPatched.mock.calls).toContainEqual(['out', true])
+      expect(src.setPortPatched.mock.calls).toContainEqual(['in', false])
     })
   })
 

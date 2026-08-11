@@ -63,6 +63,7 @@ const TimelinePlayer = {
       .filter(({ rack }) => rack)
       .map(({ track, rack }) => RackEngine.mount(ctx, rack, {
         output: mixerEngine ? mixerEngine.getOutput(track.mixerChannelId) : AudioEngine.getMasterInput(),
+        getBuffer: fileKey => audioStore?.getBufferOrLoad?.(fileKey) ?? null,
         onParam: (target, value) => {
           const [channelId, param] = target.split('.')
           if (param === 'volume') mixerEngine?.setVolume(channelId, value)
@@ -188,7 +189,12 @@ const TimelinePlayer = {
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05
 
-    const rackHandles = Object.values(racks).map(rack => RackEngine.mount(offline, rack, { output: offline.destination }))
+    // Bounce reads only what is already decoded: kicking off a load mid-render
+    // would finish after the render did, and silently change take to take.
+    const rackHandles = Object.values(racks).map(rack => RackEngine.mount(offline, rack, {
+      output: offline.destination,
+      getBuffer: fileKey => audioStore?.getBuffer?.(fileKey) ?? null
+    }))
     tracks.forEach(track => {
       if (track.type === 'midi') {
         const playNote = instrumentFor(track, { palettes: null, ctx: offline, output: offline.destination, rackHandles })

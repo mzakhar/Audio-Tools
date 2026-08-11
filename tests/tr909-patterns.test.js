@@ -19,7 +19,7 @@ describe('tr-909 pattern bars', () => {
     it('defaults to an empty patterns map at version 3', () => {
       expect(ProjectStore.getState().patterns).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(3)
+      expect(CURRENT_VERSION).toBe(4)
     })
   })
 
@@ -164,7 +164,7 @@ describe('tr-909 pattern bars', () => {
         racks: { r1: { id: 'r1', name: 'Rack', modules: [], cables: [] } }
       }
       const next = migrate(v2)
-      expect(next.version).toBe(3)
+      expect(next.version).toBe(CURRENT_VERSION)
       expect(next.patterns).toEqual({})
       expect(next.tracks).toEqual(v2.tracks)
       expect(next.racks).toEqual(v2.racks)

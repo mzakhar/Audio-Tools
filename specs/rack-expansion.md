@@ -216,9 +216,20 @@ Toolbar work: read `category` and `rack.name` from each preset, render `<optgrou
 
 ## 7. Phasing
 
-**Status:** E1 and E2 are in on `mzakhar/rack-expansion-e1-e2` — eleven modules, eight presets, suite at 773 tests. E3–E5 not started.
+**Status:** all five phases are in — eighteen modules, twelve presets, suite at 839 tests. E1/E2 merged; E3–E5 on `mzakhar/rack-expansion-e3-e5`.
 
-Landed alongside them, beyond what the plan called for:
+Landed in E3–E5, beyond what the plan called for:
+
+- `opts.getBuffer` is injected like `ctx` and `random`. `AudioStore.getBufferOrLoad` reads synchronously, kicks off the decode once on a miss and remembers failures. Bounce deliberately uses plain `getBuffer`: a load started mid-render finishes after the render and would change take to take.
+- A rack used as a **mixer insert** gets the null default — `effect-chain.js` would have to import the store, dragging `AudioEngine` and a Worker into its tests. A sampler belongs on an instrument rack.
+- `GRAIN` lays its whole cloud down at mount when the context is an `OfflineAudioContext`. A `setTimeout` grain clock never fires during a render, so a bounce came out silent; grains now retire against the time being scheduled rather than `ctx.currentTime`, which is the only reading that works in both.
+- `opts.scheduler` was never wired. `GRAIN` imports `LookaheadScheduler` directly and passes `steps: 1`, because the default `Infinity` grows `stepTimes` forever at 100 grains a second.
+- One audio file picker, two callers: `io/audio-picker.js`, extracted out of `app.js`. Cancelling now returns null instead of rejecting with `AbortError`.
+- `FOLD` stopped being a worklet placeholder. Folding amount *is* input drive, so AMT lands on a pre-gain `AudioParam` and modulates at true audio rate. Ports and params are unchanged, so saved patches round-trip; it now makes sound and appears in the browser on the LAN deploy.
+- `SAMPLR` and `GRAIN` load `AudioStore` and the picker dynamically inside the click handler, so importing the module registry never drags in the decoder or the waveform worker.
+- `MARBLE` stores raw 0–1 draws rather than volts, so SPREAD/BIAS/STEPS reshape a locked loop instead of rewriting it.
+
+Landed in E1/E2, beyond what the plan called for:
 
 - The event bus now drops a dispatch past depth 64. Cycles are the user's to patch and dispatch is synchronous, so `AD` EOC into its own TRIG — the obvious Krell move — was a stack overflow. `krell.synthrack.json` uses `ad` in `loop` mode instead, which was always the safer clock.
 - `GRIDS` and `GRID16` both grew an `accentThresh` param; the spec gave them an ACC jack with no rule for when it fires.
@@ -250,7 +261,8 @@ Acceptance across all phases:
 
 | Item | Why |
 |---|---|
-| Sample-rate reduction in `bits`, audio-rate `s&h` / `slew`, audio-rate `comp` | Genuinely need per-sample processing. They stay worklet-tier placeholders until async worklet loading exists in the factory contract. |
+| Sample-rate reduction in `bits`, audio-rate `s&h` / `slew`, audio-rate `comp` | Genuinely need per-sample processing. Those three stay worklet-tier placeholders until async worklet loading exists in the factory contract. `fold` left that list in E4: drive into a fixed curve is audio-rate native, so it never needed to be there. |
+| `GRAIN` position/density modulated at audio rate, and grain-accurate bounce timing | The offline pre-roll reads the knobs once at mount, so an automated cloud bounces as a static one. Audio-rate grain modulation is a worklet either way. |
 | Beat-repeat / stutter buffer | Needs live audio capture into a ring buffer — worklet. |
 | A pattern *bank* / song mode inside `grid16` | The arrangement view already owns song structure; duplicating it in a module is how two sources of truth start. |
 | Widening `algo` to 16 steps | Would reshape its saved flat 64-cell buffer. `grid16` covers the need without a migration. |

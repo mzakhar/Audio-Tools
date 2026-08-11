@@ -101,7 +101,27 @@ export default {
     return {
       inputs: { rate: [rateIn], rst: [rst] },
       outputs: Object.fromEntries(AXES.map(k => [k, [outs[k]]])),
-      setParam(key, value) { params[key] = value },
+      // Changing the shape has to throw away what is already scheduled. At
+      // 0.01 Hz a single segment is a 100-second ramp, so without this a rate
+      // or mode change sat on the old trajectory until it finished — and a
+      // preset swap that reuses a DRIFT by id inherited the previous patch's
+      // ramp, which is how a drone came up silent behind a parked filter.
+      setParam(key, value) {
+        const shaping = ['rate', 'mode', 'depth', 'bipolar'].includes(key) && params[key] !== value
+        params[key] = value
+        if (!shaping) return
+        const now = ctx.currentTime || 0
+        for (const k of AXES) {
+          // Hold where the ramp had actually reached. A plain cancel reverts the
+          // param to the last event before `now`, so nudging RATE mid-ramp
+          // snapped the CV — audible as a click on a filter cutoff.
+          const p = srcs[k].offset
+          if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now)
+          else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now) }
+        }
+        nextTime = now
+        fill(now)
+      },
       onEvent(portId, event) {
         if (portId !== 'rst' || event.type === 'gate-off') return
         const time = event.time ?? ctx.currentTime

@@ -10,6 +10,7 @@ import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
 import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack } from './store/ProjectStore.js'
 import FileAdapter from './io/FileAdapter.js'
+import { pickAudioFile } from './io/audio-picker.js'
 import AudioStore from './audio-store.js'
 import { ArrangementView } from './components/arrangement-view.js'
 import { MixerStrip } from './components/mixer-strip.js'
@@ -580,24 +581,18 @@ function initProjectBar() {
   async function importAudioToTrack(targetTrackId) {
     if (!AudioStore.getProjectDir()) return
     let fileHandle
-    if (window.electronFS) {
-      const audioDialogOpts = {
-        properties: ['openFile'],
-        filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'flac', 'ogg', 'aiff'] }]
-      }
-      const lastAudioDir = getLastDir(DIR_KEY_AUDIO)
-      if (lastAudioDir) audioDialogOpts.defaultPath = lastAudioDir
-      const result = await window.electronFS.showOpenDialog(audioDialogOpts)
-      if (result.canceled || !result.filePaths.length) return
-      fileHandle = result.filePaths[0]
-      // Save the directory containing the selected file
-      const lastSlash = Math.max(fileHandle.lastIndexOf('/'), fileHandle.lastIndexOf('\\'))
-      if (lastSlash > 0) setLastDir(DIR_KEY_AUDIO, fileHandle.substring(0, lastSlash))
-    } else {
-      [fileHandle] = await window.showOpenFilePicker({
-        types: [{ description: 'Audio Files', accept: { 'audio/*': ['.wav', '.mp3', '.flac', '.ogg'] } }]
+    try {
+      fileHandle = await pickAudioFile({
+        getLastDir: () => getLastDir(DIR_KEY_AUDIO),
+        setLastDir: dir => setLastDir(DIR_KEY_AUDIO, dir)
       })
+    } catch (err) {
+      // A picker that cannot run at all (no secure context) must say so rather
+      // than leaving the button looking dead.
+      console.warn('Audio import unavailable:', err?.message || err)
+      return
     }
+    if (!fileHandle) return
     await ensureAudio()
     const fileKey = await AudioStore.importFile(fileHandle)
     const state = ProjectStore.getState()

@@ -175,4 +175,40 @@ describe('DRIFT module', () => {
       if (node.kind === 'const') expect(node.stopped).toBe(1)
     }
   })
+
+  // At 0.01 Hz one segment is a 100-second ramp. Without cancelling, a rate or
+  // mode change rode the old trajectory to its end — and because the engine
+  // reuses a module across a preset swap when the id matches, Chaos Drone came
+  // up behind a filter parked by the ramp the previous patch had scheduled.
+  describe('reshaping cancels what is already scheduled', () => {
+    const build = (params = {}) => {
+      const ctx = makeCtx(5)
+      const poll = fakePoll()
+      const inst = drift.create(ctx, { params: { rate: 0.01, depth: 1, mode: 'smooth', bipolar: 'off', ...params }, poll, ctxTime: 5 })
+      const sources = ctx.created.filter(n => n.kind === 'const')
+      for (const s of sources) { s.offset.cancelScheduledValues.mockClear(); s.offset.linearRampToValueAtTime.mockClear(); s.offset.setValueAtTime.mockClear() }
+      return { ctx, inst, sources }
+    }
+
+    for (const key of ['rate', 'mode', 'depth', 'bipolar']) {
+      it(`cancels and refills when ${key} changes`, () => {
+        const { inst, sources } = build()
+        const next = { rate: 5, mode: 'walk', depth: 0.2, bipolar: 'on' }[key]
+        inst.setParam(key, next)
+        for (const s of sources) {
+          expect(s.offset.cancelScheduledValues).toHaveBeenCalled()
+          const scheduled = s.offset.linearRampToValueAtTime.mock.calls.length + s.offset.setValueAtTime.mock.calls.length
+          expect(scheduled).toBeGreaterThan(0)
+        }
+        inst.dispose()
+      })
+    }
+
+    it('leaves the schedule alone when the value does not actually change', () => {
+      const { inst, sources } = build()
+      inst.setParam('rate', 0.01)
+      for (const s of sources) expect(s.offset.cancelScheduledValues).not.toHaveBeenCalled()
+      inst.dispose()
+    })
+  })
 })

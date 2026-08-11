@@ -57,6 +57,7 @@ function createModule(handle, mod, channels) {
     onParam: handle.onParam,
     poll: handle.poll,
     random: handle.random,
+    getBuffer: handle.getBuffer,
     emitEvent: (port, event) => RackEngine.emitEvent(handle, mod.id, port, event)
   })
   if (def.terminal && inst.output && handle.output) inst.output.connect(handle.output)
@@ -140,16 +141,22 @@ function disconnectCable(handle, cableId) {
   handle.cables.delete(cableId)
 }
 
-// A normalled input — VCA's CV resting at unity so an unpatched VCA still
-// passes audio — has to drop its normal the moment a cable lands on it, or the
-// patched signal adds to unity instead of replacing it. Only the engine knows
-// the cables, so the engine tells the module; the module just owns the switch.
+// A normalled port — VCA's CV resting at unity so an unpatched VCA still passes
+// audio — has to drop its normal the moment a cable lands on it, or the patched
+// signal adds to unity instead of replacing it. Only the engine knows the
+// cables, so the engine tells the module; the module just owns the switch.
+//
+// Outputs are reported too: VC's channels cascade into each other, and on the
+// hardware inserting a plug into an output is exactly what lifts that channel
+// out of the sub-mix to its right.
 function syncNormals(handle) {
   for (const [id, entry] of handle.mods) {
-    if (!entry.inst.setInputPatched) continue
+    if (!entry.inst.setPortPatched) continue
     for (const port of entry.def?.ports || []) {
-      if (port.dir !== 'in') continue
-      entry.inst.setInputPatched(port.id, handle.rack.cables.some(c => c.to.moduleId === id && c.to.port === port.id))
+      const patched = port.dir === 'in'
+        ? handle.rack.cables.some(c => c.to.moduleId === id && c.to.port === port.id)
+        : handle.rack.cables.some(c => c.from.moduleId === id && c.from.port === port.id)
+      entry.inst.setPortPatched(port.id, patched)
     }
   }
 }
@@ -163,10 +170,11 @@ const MAX_EVENT_DEPTH = 64
 let emitDepth = 0
 
 const RackEngine = {
-  // `random` is injected rather than reached for: stochastic modules become
-  // testable with a scripted sequence, and an offline bounce can pass a seeded
-  // PRNG to render the same take twice.
-  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true, onParam = null, poll = null, random = Math.random } = {}) {
+  // `random` and `getBuffer` are injected rather than reached for: stochastic
+  // modules become testable with a scripted sequence, an offline bounce can pass
+  // a seeded PRNG to render the same take twice, and a sampler can read audio
+  // without the engine importing the store.
+  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true, onParam = null, poll = null, random = Math.random, getBuffer = () => null } = {}) {
     const handle = {
       ctx,
       output,
@@ -175,6 +183,7 @@ const RackEngine = {
       onParam,
       poll,
       random,
+      getBuffer,
       rack: JSON.parse(JSON.stringify(rackState)),
       mods: new Map(),
       cables: new Map(),

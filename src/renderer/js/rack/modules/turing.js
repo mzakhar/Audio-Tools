@@ -10,7 +10,9 @@ export default {
   type: 'turing',
   name: 'TURING',
   group: 'mod',
-  hp: 8,
+  // 20 HP: the register readout is the point of this module, and at 8 the knob
+  // column left it nothing to draw in. Two rows of eight LEDs want real width.
+  hp: 20,
   tier: 'native',
   poly: false,
   ports: [

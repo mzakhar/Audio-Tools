@@ -7,7 +7,7 @@ const CHANS = [['bd', 'dBd'], ['sd', 'dSd'], ['hh', 'dHh']]
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v) || 0
 
 export default {
-  type: 'grids', name: 'GRIDS', group: 'seq', hp: 12, tier: 'native', poly: false,
+  type: 'grids', name: 'GRIDS', group: 'seq', hp: 16, tier: 'native', poly: false,
   ports: [
     { id: 'clk', dir: 'in', kind: 'gate', label: 'CLK' },
     { id: 'rst', dir: 'in', kind: 'gate', label: 'RST' },
@@ -20,8 +20,10 @@ export default {
     { id: 'acc', dir: 'out', kind: 'gate', label: 'ACC' }
   ],
   params: [
-    { key: 'x', label: 'X', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '' },
-    { key: 'y', label: 'Y', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '' },
+    // Hidden from the generic renderer: the XY pad below is their control, and a
+    // knob beside it would be a second grip on the same value.
+    { key: 'x', label: 'X', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '', hidden: true },
+    { key: 'y', label: 'Y', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '', hidden: true },
     { key: 'dBd', label: 'BD', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '' },
     { key: 'dSd', label: 'SD', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '' },
     { key: 'dHh', label: 'HH', min: 0, max: 1, step: 0.01, def: 0.5, fmt: '' },

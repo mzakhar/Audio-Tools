@@ -18,7 +18,11 @@ export default {
   type: 'chord',
   name: 'CHORD',
   group: 'util',
-  hp: 8,
+  // 12 HP: at 8 the five output jacks wrapped to a second row and ate the space
+  // the SCALE and LOCK selects needed. Five controls still only fit stacked if
+  // they wrap two-up, hence compactParams.
+  hp: 12,
+  compactParams: true,
   tier: 'native',
   poly: false,
   ports: [

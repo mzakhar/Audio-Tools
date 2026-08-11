@@ -4,6 +4,23 @@
 
 const SWEEP = 270 // degrees of travel, centred on 12 o'clock
 const DRAG_PX = 120 // pixels of vertical drag for the full range
+const MAX_DECIMALS = 3
+
+
+// How many decimals this control can actually express. Reading it off the step
+// is what keeps `Math.round(raw / step) * step` from surfacing as
+// 0.30000000000000004 in the caption — and off the stored value too.
+export function decimalsFor(step) {
+  const text = String(step ?? 1)
+  const dot = text.indexOf('.')
+  return dot < 0 ? 0 : Math.min(MAX_DECIMALS, text.length - dot - 1)
+}
+
+// Snap to the step's precision. Number() drops the trailing zeros toFixed adds,
+// so 0.50 reads as 0.5 and 3.00 as 3.
+export function snap(value, step) {
+  return Number(Number(value).toFixed(decimalsFor(step)))
+}
 
 // Pure: value -> indicator angle in degrees.
 export function knobAngle(value, min, max) {
@@ -29,22 +46,46 @@ export function renderKnob(param, input) {
   el.append(cap, dial, input)
   paintKnob(input)
 
+  const step = Number(input.step) || 1
+  const showValue = () => { cap.textContent = String(snap(input.value, step)) }
+  const showLabel = () => { cap.textContent = param.label }
+
   // Vertical relative drag, not the input's own absolute hit-position behaviour.
   dial.addEventListener('pointerdown', e => {
     e.preventDefault(); e.stopPropagation()
-    const span = Number(input.max) - Number(input.min), start = Number(input.value), step = Number(input.step) || 1
+    // Focus on grab: the range input underneath is the real control, so once it
+    // has focus the arrow keys drive the knob for free — left/down anticlockwise,
+    // right/up clockwise — and ShortcutManager already stays out of the way of a
+    // focused INPUT.
+    input.focus()
+    // Marks the drag itself, not the focus. RackView.syncValues has to leave a
+    // knob alone while it is being turned, but a knob that merely holds focus
+    // still needs undo and preset loads to move it.
+    input.dataset.dragging = 'true'
+    const span = Number(input.max) - Number(input.min), start = Number(input.value)
     const move = ev => {
       const raw = start + (e.clientY - ev.clientY) / DRAG_PX * span
-      const next = Math.min(Number(input.max), Math.max(Number(input.min), Math.round(raw / step) * step))
+      const next = snap(Math.min(Number(input.max), Math.max(Number(input.min), Math.round(raw / step) * step)), step)
       if (next === Number(input.value)) return
       input.value = next
       paintKnob(input)
-      cap.textContent = String(next)
+      showValue()
       input.dispatchEvent(new Event('input', { bubbles: true }))
     }
-    const up = () => { window.removeEventListener('pointermove', move); cap.textContent = param.label }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      delete input.dataset.dragging
+      // Keep the reading up while the knob still has focus — the arrow keys are
+      // live at that point and a label would hide what they are doing.
+      if (document.activeElement === input) showValue(); else showLabel()
+    }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up, { once: true })
   })
+
+  // Arrow keys land here as a plain input event, and so does an external change.
+  input.addEventListener('input', () => { paintKnob(input); if (document.activeElement === input) showValue() })
+  input.addEventListener('focus', showValue)
+  input.addEventListener('blur', showLabel)
   return el
 }

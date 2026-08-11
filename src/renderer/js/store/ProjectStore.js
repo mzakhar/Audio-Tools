@@ -12,7 +12,7 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
-export const CURRENT_VERSION = 3
+export const CURRENT_VERSION = 4
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -44,6 +44,19 @@ export function migrate(projectJson) {
   if ((next.version ?? 1) < 3) {
     if (!next.patterns) next.patterns = {}
     next.version = 3
+  }
+  if ((next.version ?? 1) < 4) {
+    // VC lost its MIX jack when its channels started cascading: D carries the
+    // mix now. A saved patch still holds cables from `vc.mix`, and the engine
+    // drops a cable to a port that no longer exists without a word — the patch
+    // would just quietly stop passing signal. Move them to D.
+    for (const rack of Object.values(next.racks || {})) {
+      const vcIds = new Set((rack.modules || []).filter(m => m.type === 'vc').map(m => m.id))
+      for (const cable of rack.cables || []) {
+        if (vcIds.has(cable.from?.moduleId) && cable.from.port === 'mix') cable.from.port = 'outd'
+      }
+    }
+    next.version = 4
   }
   for (const track of next.tracks || []) {
     if (track.type === 'midi' && !track.instrument) {

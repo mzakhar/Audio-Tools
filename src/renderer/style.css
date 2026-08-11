@@ -161,6 +161,7 @@ html, body {
    The knob column collapses to zero width on a module with no params (BUS). */
 .rack-panel.util {
   --util-col: 40px;
+  --util-jack-col: 28px;
   height: 106px; padding: 5px 8px; gap: 2px;
   display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto auto;
   justify-content: start; align-content: start;
@@ -176,12 +177,24 @@ html, body {
 .rack-panel.util .rack-params,
 .rack-panel.util .rack-jacks { display: flex; flex-direction: row; gap: 0; margin: 0; padding: 0; overflow: visible; }
 .rack-panel.util .rack-jacks-in { border-top: none; }
-.rack-panel.util .rack-params > *,
-.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+.rack-panel.util .rack-params > * { flex: 0 0 var(--util-col); width: auto; align-items: center; text-align: center; }
+/* Jacks get their own narrower track: a 12px circle with a 6px caption does not
+   need a knob's column, and at the knob width VC's fourth jack wrapped onto a
+   second line in both rows. In and out still share the track, so an input jack
+   stays directly above its output. */
+.rack-panel.util .rack-jack-slot { flex: 0 0 var(--util-jack-col, var(--util-col)); width: auto; align-items: center; text-align: center; }
 /* Captions belong under their control on both rows — knobs render label-above
    by default, so flip the knob's own stack for a util panel only. */
 .rack-panel.util .knob { flex-direction: column-reverse; gap: 2px; }
 .rack-panel.util .rack-jack { width: 12px; height: 12px; }
+/* VC's outputs cascade left to right, and a bare row of jacks gives no hint
+   that D carries the mix. An arrow between them says so, the way the panel
+   silk-screen does. Purely a legend — the normal itself lives in the module. */
+.rack-panel.util.cascading .rack-jacks-out .rack-jack-slot { position: relative; }
+.rack-panel.util.cascading .rack-jacks-out .rack-jack-slot:not(:last-child)::after {
+  content: '▸'; position: absolute; right: -1px; top: 1px;
+  font-size: 8px; line-height: 1; color: var(--text-dim); pointer-events: none;
+}
 .rack-panel.util .rack-jack-slot em { font-size: 6px; }
 .rack-panel.util .knob-dial { width: 22px; height: 22px; }
 
@@ -200,7 +213,16 @@ html, body {
 }
 /* Focusable and keyboard-operable, just not painted. */
 #rack-view .rack-panel .knob input[type=range] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
-.knob:focus-within .knob-dial { border-color: var(--accent); }
+/* A focused control is the one the arrow keys will move, so it has to be
+   obvious which one that is. */
+.knob:focus-within .knob-dial { border-color: var(--accent); box-shadow: 0 0 0 2px #0d1114, 0 0 6px 1px var(--accent); }
+/* Plain sliders are focusable and arrow-key operable on their own; they just
+   had no focus ring. The knob's own input is 1px and invisible, so it is
+   excluded — an outline on it would draw a stray dot. */
+#rack-view .rack-panel label:not(.knob) > input[type=range]:focus-visible,
+#rack-view .rack-panel label:not(.knob) > input[type=range]:focus {
+  outline: 1px solid var(--accent); outline-offset: 3px;
+}
 .rack-panel header {
   flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
   padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;
@@ -225,6 +247,14 @@ html, body {
 
 .rack-params-compact { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px 6px; overflow: visible; }
 .rack-params-compact label { flex: 1 1 64px; margin: 0; }
+/* Knobs keep their own width instead of splitting the row: left to grow, eight
+   of them made four rows of two and pushed GRAIN's jacks off the panel. */
+.rack-params-compact .knob { flex: 0 0 52px; }
+/* An inline panel stacks controls and its drawn row down the panel, so the knob
+   block is the one part that can grow past 216px. Let it take the slack and
+   scroll instead: jack rows stay on the panel whatever a module declares, so a
+   new module with one knob too many degrades instead of spilling. */
+.rack-panel-inline .rack-params-compact { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 /* A drawing panel whose controls include knobs stands them in a column down the
    right, with the display taking the rest of the width. Stacked across the top
@@ -238,15 +268,24 @@ html, body {
   align-content: start;
 }
 .rack-panel-side > header { grid-column: 1 / -1; }
+/* A grid, not a column: past three knobs a single column runs off the bottom of
+   the panel, so it wraps into as many columns as it takes (renderPanel sets
+   --side-cols and widens --side-col to match). */
 .rack-panel-side > .rack-params {
   grid-column: 2; grid-row: 2;
-  flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 5px;
+  display: grid; grid-template-columns: repeat(var(--side-cols, 1), minmax(0, 1fr));
+  align-items: start; justify-items: center; gap: 5px 6px;
+  overflow: visible;
 }
 .rack-panel-side > .rack-scope,
 .rack-panel-side > .rack-meter { grid-column: 1; grid-row: 2; margin-top: 0; }
 .rack-panel-side > .rack-jacks { grid-column: 1 / -1; }
 .rack-panel-side .knob { width: 100%; gap: 1px; }
 .rack-panel-side .rack-params label { width: 100%; margin: 0; text-align: center; }
+/* Side-column controls are secondary to the display they sit beside, so their
+   dials are smaller — at full size three rows do not clear the jack block. */
+.rack-panel-side .knob-dial { width: 24px; height: 24px; }
+.rack-panel-side .knob-dial::after { height: 9px; transform-origin: 50% 9px; }
 
 /* One row of 8 steps for the lane the selector points at — eight stacked rows
    was unreadable at 20 HP, and only one lane is ever being edited. */
@@ -286,13 +325,50 @@ html, body {
 
 /* TURING — the register itself is the display. Two rows of eight so sixteen
    bits fit an 8 HP panel; the head bit is the first one. */
-.turing-leds { margin-top: 4px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+/* Sized by its grid row, not by height:100% — MARBLE reuses this class and a
+   forced full height pushed its readout 62px past the panel. */
+.turing-leds { margin-top: 4px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; align-content: center; align-self: center; }
 .turing-led {
   aspect-ratio: 1; border-radius: 50%; background: #1b1e22;
   box-shadow: inset 0 0 3px #0006; transition: background 70ms linear;
 }
 .turing-led.on { background: var(--accent); box-shadow: 0 0 5px 1px var(--accent); }
 .turing-led:first-child { outline: 1px solid #59616c; outline-offset: 1px; }
+
+/* MARBLE reads the same but stands its loop up: sixteen slots in two short
+   columns down the panel cost ~40px of width where a row of eight cost 180. */
+.marble-display { display: flex; gap: 8px; align-self: center; align-items: center; }
+.marble-steps {
+  display: grid; grid-template-rows: repeat(8, 1fr); grid-auto-flow: column;
+  gap: 3px 4px;
+}
+.marble-steps .turing-led { width: 7px; height: 7px; aspect-ratio: auto; }
+/* The activity lamps are captioned. Three bare dots under the loop read as
+   decoration, and a reader cannot tell they are the T outputs firing. */
+.marble-lamps { display: flex; flex-direction: column; gap: 6px; }
+.marble-lamp { display: flex; align-items: center; gap: 4px; }
+.marble-lamp .turing-led { width: 8px; height: 8px; aspect-ratio: auto; flex: 0 0 auto; }
+.marble-lamp em { font-size: 7px; font-style: normal; letter-spacing: .4px; color: var(--text-dim); }
+
+/* SAMPLR and GRAIN both name a file the patch only stores as a key. One row,
+   shared by both panels: the button is the current basename, the badge says why
+   there is no sound yet. */
+.rack-file { margin-top: 4px; display: flex; gap: 4px; align-items: center; width: 100%; min-width: 0; }
+.rack-file-btn {
+  flex: 1; min-width: 0; height: 18px; padding: 0 4px; cursor: pointer;
+  font: inherit; font-size: 10px; line-height: 1;
+  color: var(--text-dim); background: #1b1e22; border: 1px solid #3d444c; border-radius: 2px;
+  text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.rack-file-btn:hover { color: var(--accent); border-color: var(--accent); }
+/* Empty most of the time — :empty collapses it so the button keeps the full row. */
+.rack-file-badge { flex: 0 0 auto; font-size: 9px; color: #e0a33a; }
+.rack-file-badge:empty { display: none; }
+
+/* DYN — a compressor you cannot see working is one you set by guesswork, so the
+   panel carries a gain-reduction bar. Full scale is 24 dB down. */
+.dyn-gr { margin-top: 4px; height: 6px; width: 100%; background: #15181c; border: 1px solid #3d444c; border-radius: 2px; overflow: hidden; }
+.dyn-gr-fill { display: block; height: 100%; width: 0; background: var(--accent); transition: width 70ms linear; }
 
 /* GRIDS — X and Y are one gesture, so they get one pad instead of two knobs.
    The explicit size matters: a zero-size rect makes the pointer maths no-op. */

@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 const engine = vi.hoisted(() => ({ mount: vi.fn(() => ({ ctx: null })), update: vi.fn(), unmount: vi.fn() }))
 vi.mock('../src/renderer/js/rack/rack-engine.js', () => ({ default: engine }))
 vi.mock('../src/renderer/js/components/rack-cables.js', () => ({ RackCables: class { constructor(canvas) { this.canvas = canvas } draw() {} setCables() {} hitTest() { return null } } }))
-import { renderPanel } from '../src/renderer/js/components/rack-panel.js'
+import { renderPanel, sideColumns } from '../src/renderer/js/components/rack-panel.js'
 import { ModuleBrowser } from '../src/renderer/js/components/module-browser.js'
-import { RackView, presetMenu } from '../src/renderer/js/components/rack-view.js'
+import { RackView, presetMenu, starter } from '../src/renderer/js/components/rack-view.js'
 import ProjectStore from '../src/renderer/js/store/ProjectStore.js'
 import MODULES from '../src/renderer/js/rack/modules/index.js'
 import { firstFreeSlot, tidyRack } from '../src/renderer/js/rack/rack-layout.js'
@@ -26,7 +26,7 @@ describe('rack panel', () => {
     new ModuleBrowser(root, { hasWorklet: () => false, onPick: pick })
     root.querySelector('button').click()
     expect(pick).toHaveBeenCalled()
-    expect(root.textContent).not.toContain('FOLD')
+    expect(root.textContent).not.toContain('SLEW')
   })
 
   it('orders a patch by port direction, whichever jack it started from', () => {
@@ -89,11 +89,62 @@ describe('rack panel', () => {
     const view = new RackView(root, { getAudioContext: () => ctx, getMasterInput: () => output })
     view.show(); view.render()
     expect(engine.mount).toHaveBeenCalledTimes(1)
-    expect(engine.mount).toHaveBeenCalledWith(ctx, expect.anything(), { output, hasWorklet: false, poll: expect.anything() })
+    expect(engine.mount).toHaveBeenCalledWith(ctx, expect.anything(), { output, hasWorklet: false, poll: expect.anything(), getBuffer: expect.any(Function) })
     expect(engine.update).toHaveBeenCalled()
     expect(view.getEngineHandle()).toEqual({ ctx })
     view.destroy()
     expect(engine.unmount).toHaveBeenCalledWith({ ctx })
+  })
+})
+
+describe('rack id bootstrap', () => {
+  // Loading a preset before show() ever ran dispatched LoadRackPatch(null, …).
+  // The store filed it under the string "null", render() then bailed on its own
+  // falsy rackId, and the rack sat there with stale panels and no audio.
+  it('loading a preset before show() still lands in a real rack', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.load(starter, { tidy: true })
+    expect(view.rackId).toBeTruthy()
+    expect(String(view.rackId)).not.toBe('null')
+    expect(view.rack()).toBeTruthy()
+    expect(view.rack().modules.length).toBeGreaterThan(0)
+    expect(Object.keys(ProjectStore.getState().racks)).not.toContain('null')
+    view.destroy()
+  })
+
+  it('render adopts the store rack when its own id went stale', () => {
+    ProjectStore.reset()
+    const view = new RackView(document.createElement('div'), {})
+    view.show()
+    const real = view.rackId
+    view.rackId = null                 // whatever knocked it loose
+    view.render()
+    expect(view.rackId).toBe(real)
+    expect(view.rack()).toBeTruthy()
+    view.destroy()
+  })
+})
+
+describe('side knob column', () => {
+  it('wraps past three cells so a column cannot run off the panel', () => {
+    expect(sideColumns(3, 20)).toBe(1)
+    expect(sideColumns(4, 20)).toBe(2)
+    expect(sideColumns(7, 24)).toBe(3)
+  })
+
+  // The bug this exists to stop: TURING at 8 HP asked for two 58px columns,
+  // which came to exactly the panel width and left its LED readout 0px wide.
+  it('never lets the knob column starve the display', () => {
+    expect(sideColumns(4, 8)).toBe(1)
+    expect(sideColumns(9, 8)).toBe(1)
+    expect(sideColumns(9, 12)).toBe(1)
+    expect(sideColumns(4, 20)).toBe(2)   // room for two once the panel is wide
+  })
+
+  it('always gives at least one column, however narrow the panel claims to be', () => {
+    expect(sideColumns(5, 2)).toBe(1)
+    expect(sideColumns(0, 20)).toBe(1)
   })
 })
 
