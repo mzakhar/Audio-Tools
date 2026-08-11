@@ -200,7 +200,16 @@ html, body {
 }
 /* Focusable and keyboard-operable, just not painted. */
 #rack-view .rack-panel .knob input[type=range] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
-.knob:focus-within .knob-dial { border-color: var(--accent); }
+/* A focused control is the one the arrow keys will move, so it has to be
+   obvious which one that is. */
+.knob:focus-within .knob-dial { border-color: var(--accent); box-shadow: 0 0 0 2px #0d1114, 0 0 6px 1px var(--accent); }
+/* Plain sliders are focusable and arrow-key operable on their own; they just
+   had no focus ring. The knob's own input is 1px and invisible, so it is
+   excluded — an outline on it would draw a stray dot. */
+#rack-view .rack-panel label:not(.knob) > input[type=range]:focus-visible,
+#rack-view .rack-panel label:not(.knob) > input[type=range]:focus {
+  outline: 1px solid var(--accent); outline-offset: 3px;
+}
 .rack-panel header {
   flex: 0 0 auto; color: var(--text-bright); font-weight: bold; letter-spacing: .5px;
   padding-bottom: 4px; border-bottom: 1px solid #ffffff1a;
