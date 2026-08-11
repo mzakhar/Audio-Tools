@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src blob: 'self' http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'none';">
   <title>SYNTH</title>
+  <script src="/theme-init.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -45,6 +46,11 @@
       <button id="add-midi-track-btn" disabled>+ MIDI</button>
       <button id="bounce-btn" disabled>BOUNCE</button>
       <span class="project-bar-sep" aria-hidden="true"></span>
+      <label class="theme-control" for="theme-select">THEME</label>
+      <select id="theme-select" aria-label="Theme">
+        <option value="dark">DARK</option>
+        <option value="light">LIGHT</option>
+      </select>
       <span id="midi-status" class="midi-status" aria-live="polite" aria-atomic="true">MIDI OFF</span>
       <button id="midi-enable-btn" class="midi-btn">ENABLE MIDI</button>
       <select id="midi-device-select" class="midi-select" aria-label="MIDI input device" style="display:none">
