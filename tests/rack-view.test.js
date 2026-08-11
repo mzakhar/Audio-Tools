@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 const engine = vi.hoisted(() => ({ mount: vi.fn(() => ({ ctx: null })), update: vi.fn(), unmount: vi.fn() }))
 vi.mock('../src/renderer/js/rack/rack-engine.js', () => ({ default: engine }))
 vi.mock('../src/renderer/js/components/rack-cables.js', () => ({ RackCables: class { constructor(canvas) { this.canvas = canvas } draw() {} setCables() {} hitTest() { return null } } }))
-import { renderPanel } from '../src/renderer/js/components/rack-panel.js'
+import { renderPanel, sideColumns } from '../src/renderer/js/components/rack-panel.js'
 import { ModuleBrowser } from '../src/renderer/js/components/module-browser.js'
 import { RackView, presetMenu } from '../src/renderer/js/components/rack-view.js'
 import ProjectStore from '../src/renderer/js/store/ProjectStore.js'
@@ -94,6 +94,28 @@ describe('rack panel', () => {
     expect(view.getEngineHandle()).toEqual({ ctx })
     view.destroy()
     expect(engine.unmount).toHaveBeenCalledWith({ ctx })
+  })
+})
+
+describe('side knob column', () => {
+  it('wraps past three cells so a column cannot run off the panel', () => {
+    expect(sideColumns(3, 20)).toBe(1)
+    expect(sideColumns(4, 20)).toBe(2)
+    expect(sideColumns(7, 24)).toBe(3)
+  })
+
+  // The bug this exists to stop: TURING at 8 HP asked for two 58px columns,
+  // which came to exactly the panel width and left its LED readout 0px wide.
+  it('never lets the knob column starve the display', () => {
+    expect(sideColumns(4, 8)).toBe(1)
+    expect(sideColumns(9, 8)).toBe(1)
+    expect(sideColumns(9, 12)).toBe(1)
+    expect(sideColumns(4, 20)).toBe(2)   // room for two once the panel is wide
+  })
+
+  it('always gives at least one column, however narrow the panel claims to be', () => {
+    expect(sideColumns(5, 2)).toBe(1)
+    expect(sideColumns(0, 20)).toBe(1)
   })
 })
 

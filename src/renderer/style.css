@@ -312,7 +312,9 @@ html, body {
 
 /* TURING — the register itself is the display. Two rows of eight so sixteen
    bits fit an 8 HP panel; the head bit is the first one. */
-.turing-leds { margin-top: 4px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+/* Sized by its grid row, not by height:100% — MARBLE reuses this class and a
+   forced full height pushed its readout 62px past the panel. */
+.turing-leds { margin-top: 4px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; align-content: center; align-self: center; }
 .turing-led {
   aspect-ratio: 1; border-radius: 50%; background: #1b1e22;
   box-shadow: inset 0 0 3px #0006; transition: background 70ms linear;

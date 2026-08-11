@@ -6,6 +6,19 @@ import { renderKnob } from './knob.js'
 const SIDE_ROWS = 3
 const SIDE_COL_W = 58
 const SIDE_GAP = 6
+// The display is why the panel draws at all, so the knob column is never allowed
+// to squeeze it below this. TURING at 8 HP lost its LED readout entirely to a
+// two-column knob track that happened to be exactly as wide as the panel.
+const MIN_DISPLAY_W = 96
+const PANEL_PAD = 12
+
+// How many knob columns this panel can afford without starving its display.
+export function sideColumns(cells, hp, rows = SIDE_ROWS) {
+  const wanted = Math.max(1, Math.ceil(cells / rows))
+  const budget = hp * 16 - MIN_DISPLAY_W - PANEL_PAD - SIDE_GAP
+  const affordable = Math.max(1, Math.floor(budget / (SIDE_COL_W + SIDE_GAP)))
+  return Math.min(wanted, affordable)
+}
 
 export function renderPanel(module, { onParam, onJack, onEvent, getParams, getInstance, addPoll } = {}) {
   const def = getModule(module.type)
@@ -89,7 +102,7 @@ export function renderPanel(module, { onParam, onJack, onEvent, getParams, getIn
       // Every cell counts, not just the knobs: a select or a checkbox takes a
       // row in the same grid, and leaving them out of the maths is what pushed
       // TURING's BIPOLAR and CHORD's SCALE off the bottom.
-      const cols = Math.max(1, Math.ceil(body.children.length / SIDE_ROWS))
+      const cols = sideColumns(body.children.length, def.hp || 8)
       el.style.setProperty('--side-cols', cols)
       el.style.setProperty('--side-col', `${cols * SIDE_COL_W + (cols - 1) * SIDE_GAP}px`)
     }

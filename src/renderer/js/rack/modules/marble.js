@@ -19,7 +19,9 @@ export default {
   type: 'marble',
   name: 'MARBLE',
   group: 'mod',
-  hp: 16,
+  // 24 HP: nine controls need three knob columns, which left 50px of display at
+  // 16. The hardware this follows is 18 HP with a smaller control set.
+  hp: 24,
   tier: 'native',
   poly: false,
   ports: [

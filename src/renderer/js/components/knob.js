@@ -6,6 +6,7 @@ const SWEEP = 270 // degrees of travel, centred on 12 o'clock
 const DRAG_PX = 120 // pixels of vertical drag for the full range
 const MAX_DECIMALS = 3
 
+
 // How many decimals this control can actually express. Reading it off the step
 // is what keeps `Math.round(raw / step) * step` from surfacing as
 // 0.30000000000000004 in the caption — and off the stored value too.
