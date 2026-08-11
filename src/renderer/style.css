@@ -294,6 +294,26 @@ html, body {
 .turing-led.on { background: var(--accent); box-shadow: 0 0 5px 1px var(--accent); }
 .turing-led:first-child { outline: 1px solid #59616c; outline-offset: 1px; }
 
+/* SAMPLR and GRAIN both name a file the patch only stores as a key. One row,
+   shared by both panels: the button is the current basename, the badge says why
+   there is no sound yet. */
+.rack-file { margin-top: 4px; display: flex; gap: 4px; align-items: center; width: 100%; min-width: 0; }
+.rack-file-btn {
+  flex: 1; min-width: 0; height: 18px; padding: 0 4px; cursor: pointer;
+  font: inherit; font-size: 10px; line-height: 1;
+  color: var(--text-dim); background: #1b1e22; border: 1px solid #3d444c; border-radius: 2px;
+  text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.rack-file-btn:hover { color: var(--accent); border-color: var(--accent); }
+/* Empty most of the time — :empty collapses it so the button keeps the full row. */
+.rack-file-badge { flex: 0 0 auto; font-size: 9px; color: #e0a33a; }
+.rack-file-badge:empty { display: none; }
+
+/* DYN — a compressor you cannot see working is one you set by guesswork, so the
+   panel carries a gain-reduction bar. Full scale is 24 dB down. */
+.dyn-gr { margin-top: 4px; height: 6px; width: 100%; background: #15181c; border: 1px solid #3d444c; border-radius: 2px; overflow: hidden; }
+.dyn-gr-fill { display: block; height: 100%; width: 0; background: var(--accent); transition: width 70ms linear; }
+
 /* GRIDS — X and Y are one gesture, so they get one pad instead of two knobs.
    The explicit size matters: a zero-size rect makes the pointer maths no-op. */
 .grids-xy {

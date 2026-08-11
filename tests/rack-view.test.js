@@ -26,7 +26,7 @@ describe('rack panel', () => {
     new ModuleBrowser(root, { hasWorklet: () => false, onPick: pick })
     root.querySelector('button').click()
     expect(pick).toHaveBeenCalled()
-    expect(root.textContent).not.toContain('FOLD')
+    expect(root.textContent).not.toContain('SLEW')
   })
 
   it('orders a patch by port direction, whichever jack it started from', () => {

@@ -46,6 +46,7 @@ function makeCtx() {
     createBiquadFilter: () => node('biquad', { type: 'lowpass', frequency: param(), detune: param(), Q: param(), gain: param() }),
     createWaveShaper: () => node('shaper', { curve: null, oversample: 'none' }),
     createConvolver: () => node('convolver', { buffer: null }),
+    createDynamicsCompressor: () => node('comp', { threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), reduction: 0 }),
     createAnalyser: () => node('analyser', { fftSize: 2048 }),
     createChannelMerger: () => node('merger'),
     createChannelSplitter: () => node('splitter'),
@@ -112,7 +113,9 @@ describe('shipped module registry', () => {
 
   it('ships every Phase 6 module, with worklet-only DSP explicitly marked', () => {
     for (const type of ['fmop', 'drum', 'drive', 'fold', 'slew', 's&h', 'math', 'mult', 'sum', 'comp', 'reverb', 'chorus', 'ringmod', 'scope', 'cv-mon', 'tuner', 'delay', 'split', 'merge']) expect(MODULES[type], `missing module: ${type}`).toBeTruthy()
-    for (const type of ['fold', 'slew', 's&h', 'comp']) expect(MODULES[type].tier).toBe('worklet')
+    // FOLD stopped being a placeholder in E4 — it is a real WaveShaper now.
+    for (const type of ['slew', 's&h', 'comp']) expect(MODULES[type].tier).toBe('worklet')
+    expect(MODULES.fold.tier).toBe('native')
   })
 
   it('every module builds, exposes each declared port, and disposes clean', () => {

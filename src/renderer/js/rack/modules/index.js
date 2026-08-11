@@ -64,8 +64,17 @@ import turing from './turing.js'
 import drift from './drift.js'
 import chord from './chord.js'
 import arp from './arp.js'
+// E3 — sampling (specs/rack-expansion.md §5)
+import sampler from './sampler.js'
+import grain from './grain.js'
+// E4 — FX and de-placeholdering (specs/rack-expansion.md §5)
+import bits from './bits.js'
+import follow from './follow.js'
+import dyn from './dyn.js'
+// E5 — Marbles-lite (specs/rack-expansion.md §4)
+import marble from './marble.js'
 
-const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, meter, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus, grids, grid16, burst, prob, tshift, duck, clkmul, turing, drift, chord, arp]
+const MODULE_LIST = [vco, noise, vcf, adsr, lfo, vca, mix, att, out, clock, seq8, clkdiv, ad, perc4, rnd, euclid, algo, quant, midiIn, keys, audioIn, paramOut, fmop, drum, fold, slew, sh, comp, scope, meter, cvMon, tuner, delay, drive, math, mult, sum, reverb, chorus, ringmod, split, merge, vc, bus, grids, grid16, burst, prob, tshift, duck, clkmul, turing, drift, chord, arp, sampler, grain, bits, follow, dyn, marble]
 
 export const MODULES = Object.fromEntries(MODULE_LIST.map(m => [m.type, m]))
 
