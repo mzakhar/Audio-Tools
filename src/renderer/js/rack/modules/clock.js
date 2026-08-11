@@ -20,7 +20,9 @@ export default {
     { id: 'reset', dir: 'out', kind: 'gate', label: 'RESET' }
   ],
   params: [
-    { key: 'bpm', label: 'BPM', min: 20, max: 300, step: 1, def: 120, fmt: 'BPM' },
+    // One tick per beat, so a 16th-note pattern runs at a quarter of this —
+    // 480 is what a sequencer needs to reach fast step rates, not a tempo.
+    { key: 'bpm', label: 'BPM', min: 20, max: 480, step: 1, def: 120, fmt: 'BPM' },
     { key: 'source', label: 'SOURCE', options: ['internal', 'transport'], def: 'internal' },
     { key: 'swing', label: 'SWING', min: 0, max: 0.75, step: 0.01, def: 0, fmt: '' },
     { key: 'pulseWidth', label: 'WIDTH', min: 0.05, max: 0.9, step: 0.01, def: 0.5, fmt: '' }

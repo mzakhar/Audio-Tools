@@ -13,7 +13,7 @@ export default {
     { key: 'loop', label: 'LOOP', options: ['off', 'on'], def: 'off' }
   ],
 
-  create(ctx, { channels = 1, params, emitEvent = () => {} }) {
+  create(ctx, { channels = 1, params, emitEvent = () => {}, ctxTime = 0 }) {
     const loopTimers = new Set()
     const voices = Array.from({ length: channels }, () => {
       const trig = ctx.createGain()
@@ -44,18 +44,38 @@ export default {
       }
     }
 
+    // A looping envelope has to start itself. `loop` only ever continued an
+    // envelope something else had triggered, so a patch that used AD as its own
+    // free-running clock — the classic Krell patch — waited forever for a
+    // trigger that was never coming.
+    let looping = false
+    function startLoop(time = ctx.currentTime) {
+      if (looping || params.loop !== 'on') return
+      looping = true
+      for (let ch = 0; ch < voices.length; ch++) fire(ch, time)
+    }
+    function stopLoop() {
+      looping = false
+      for (const timer of loopTimers) clearTimeout(timer)
+      loopTimers.clear()
+    }
+    startLoop(ctxTime || ctx.currentTime)
+
     return {
       inputs: { trig: voices.map(v => v.trig) },
       outputs: { env: voices.map(v => v.out), eoc: voices.map(v => v.eoc) },
-      setParam(key, value) { params[key] = value },
+      setParam(key, value) {
+        params[key] = value
+        if (key !== 'loop') return
+        if (value === 'on') startLoop(); else stopLoop()
+      },
       onEvent(portId, event) {
         if (portId === 'trig' && (event.type === 'trig' || event.type === 'gate-on')) {
           fire(Math.min(event.channel ?? 0, voices.length - 1), event.time)
         }
       },
       dispose() {
-        for (const timer of loopTimers) clearTimeout(timer)
-        loopTimers.clear()
+        stopLoop()
         for (const v of voices) {
           v.env.stop(); v.trig.disconnect(); v.env.disconnect(); v.out.disconnect(); v.eoc.disconnect()
         }
