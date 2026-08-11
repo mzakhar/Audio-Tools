@@ -56,6 +56,7 @@ function createModule(handle, mod, channels) {
     ctxTime: handle.ctx.currentTime,
     onParam: handle.onParam,
     poll: handle.poll,
+    random: handle.random,
     emitEvent: (port, event) => RackEngine.emitEvent(handle, mod.id, port, event)
   })
   if (def.terminal && inst.output && handle.output) inst.output.connect(handle.output)
@@ -156,7 +157,10 @@ function syncNormals(handle) {
 // ─── Public API ────────────────────────────────────────────────────────────
 
 const RackEngine = {
-  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true, onParam = null, poll = null } = {}) {
+  // `random` is injected rather than reached for: stochastic modules become
+  // testable with a scripted sequence, and an offline bounce can pass a seeded
+  // PRNG to render the same take twice.
+  mount(ctx, rackState, { output = null, registry = MODULES, hasWorklet = true, onParam = null, poll = null, random = Math.random } = {}) {
     const handle = {
       ctx,
       output,
@@ -164,6 +168,7 @@ const RackEngine = {
       hasWorklet,
       onParam,
       poll,
+      random,
       rack: JSON.parse(JSON.stringify(rackState)),
       mods: new Map(),
       cables: new Map(),

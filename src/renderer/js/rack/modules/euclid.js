@@ -17,7 +17,7 @@ export default {
     { key: 'probability', label: 'PROB', min: 0, max: 1, step: 0.01, def: 1, fmt: '' }
   ],
 
-  create(ctx, { params, emitEvent = () => {} }) {
+  create(ctx, { params, emitEvent = () => {}, random = Math.random }) {
     const clk = ctx.createGain(), rst = ctx.createGain(), fill = ctx.createGain()
     const out = ctx.createGain(), inv = ctx.createGain()
     let step = 0
@@ -28,7 +28,7 @@ export default {
       onEvent(portId, event) {
         if (portId === 'rst') { step = 0; return }
         if (portId !== 'clk' || (event.type !== 'trig' && event.type !== 'gate-on')) return
-        const hit = pattern()[step++ % Math.max(1, params.steps)] && Math.random() < params.probability
+        const hit = pattern()[step++ % Math.max(1, params.steps)] && random() < params.probability
         emitEvent(hit ? 'out' : 'inv', { type: 'trig', time: event.time, channel: 0 })
       },
       dispose() { clk.disconnect(); rst.disconnect(); fill.disconnect(); out.disconnect(); inv.disconnect() }

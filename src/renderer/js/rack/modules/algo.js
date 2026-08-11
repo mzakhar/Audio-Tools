@@ -42,7 +42,7 @@ export default {
     { key: 'gate', label: 'GATE', options: ['trig', 'gate'], def: 'trig' }
   ],
 
-  create(ctx, { params = {}, emitEvent = () => {} } = {}) {
+  create(ctx, { params = {}, emitEvent = () => {}, random = Math.random } = {}) {
     params = { pattern: defaultPattern(), mode: 'loop', order: 'fwd', gate: 'trig', ...params }
     const clk = ctx.createGain()
     const rst = ctx.createGain()
@@ -76,7 +76,7 @@ export default {
         if (stopped) return
         const time = event.time ?? ctx.currentTime
         const width = event.pulseWidth ?? 0.05
-        step = params.order === 'rand' ? Math.floor(Math.random() * STEPS) : (step + 1) % STEPS
+        step = params.order === 'rand' ? Math.floor(random() * STEPS) : (step + 1) % STEPS
         // Append in schedule order (so uiStep can scan for the last one reached)
         // and trim from the front, never below one full bar of lookbehind.
         scheduled.push({ step, time })
