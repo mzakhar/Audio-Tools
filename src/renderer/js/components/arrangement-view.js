@@ -12,7 +12,7 @@ import {
   visibleBeatRange
 } from '../utils/timeline-math.js'
 
-import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip } from '../store/ProjectStore.js'
+import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
 
 // Layout constants
@@ -499,7 +499,20 @@ export class ArrangementView {
       soloBtn.className = 'solo-btn'
       soloBtn.textContent = 'S'
 
-      div.append(name, muteBtn, soloBtn)
+      const midiChSel = document.createElement('select')
+      midiChSel.className = 'track-midi-ch'
+      const omniOpt = document.createElement('option')
+      omniOpt.value = ''
+      omniOpt.textContent = 'Omni'
+      midiChSel.appendChild(omniOpt)
+      for (let ch = 0; ch < 16; ch++) {
+        const opt = document.createElement('option')
+        opt.value = String(ch)
+        opt.textContent = String(ch + 1)
+        midiChSel.appendChild(opt)
+      }
+
+      div.append(name, muteBtn, soloBtn, midiChSel)
       this._headerList.appendChild(div)
     }
 
@@ -537,6 +550,12 @@ export class ArrangementView {
         }))
       }
 
+      const midiChSel = item.querySelector('.track-midi-ch')
+      midiChSel.style.display = track.type === 'midi' ? '' : 'none'
+      midiChSel.value = track.midiChannel ?? ''
+      midiChSel.onchange = () => this._store.dispatch(
+        SetTrackMidiChannel(track.id, midiChSel.value === '' ? null : Number(midiChSel.value))
+      )
     })
   }
 
