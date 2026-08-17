@@ -53,6 +53,17 @@ rack/modules/*.js       one definition per module: ports, params, create(ctx, op
 utils/cv.js             PURE 1 V/oct math — 0.1 CV = 1 octave, 0.0 = C4
 ```
 
+External MIDI integration is specced in `specs/midi-bridge.md`. Phases 1–3 are
+in: `midi/midi-message.js` parses raw bytes into typed events (channel nibble
+kept, 0-indexed), `midi/midi-routing.js` maps a channel to the tracks that
+claim it, `midi/live-instrument.js` plays a track live (palette voices, or a
+lazily mounted rack driven through its `midi-in` module). `MidiController`
+dispatches one `midi-event` on `document`; `app.js` routes it. Clock in
+(phase 4) and MIDI out (phase 5) are not started — build them only when
+something on the other end needs them.
+
+Web MIDI is secure-context only, so none of it works on the LAN http route.
+
 Phase 4 integration:
 
 - MIDI tracks use `instrument: { type: 'palette', paletteKey }` or
