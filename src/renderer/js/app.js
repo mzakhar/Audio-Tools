@@ -843,7 +843,7 @@ function initMidi() {
   // back to the plain keyboard behaviour when no MIDI tracks exist at all.
   document.addEventListener('midi-event', (e) => {
     const detail = e.detail
-    if (detail.kind !== 'note-on' && detail.kind !== 'note-off') return
+    if (detail.kind !== 'note-on' && detail.kind !== 'note-off' && detail.kind !== 'cc' && detail.kind !== 'pitch-bend') return
     ensureAudio()
     const ctx = AudioEngine.getContext()
     if (!ctx) return
@@ -862,7 +862,8 @@ function initMidi() {
     const ids = routeChannel(midiTracks, detail.channel, _midiTargetTrackId)
 
     if (ids.length === 0 && midiTracks.length === 0) {
-      // No MIDI tracks at all — plain keyboard behaviour.
+      // No MIDI tracks at all — plain keyboard behaviour, notes only.
+      if (detail.kind !== 'note-on' && detail.kind !== 'note-off') return
       const note = detail.pitch
       if (detail.kind === 'note-on') {
         if (activeVoices[note]) return
@@ -914,7 +915,12 @@ function initMidi() {
 
       try {
         if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity)
-        else entry.inst.noteOff(detail.pitch)
+        else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch)
+        // ponytail: only CC1 mapped. Add a CC-learn map when a second controller matters.
+        else if (detail.kind === 'cc') {
+          if (detail.controller === 1) entry.inst.send({ type: 'mod', value: detail.value / 127 })
+        }
+        else entry.inst.send({ type: 'pitch-bend', value: detail.value })
       } catch (err) {}
     }
   })
