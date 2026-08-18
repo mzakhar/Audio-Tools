@@ -1,5 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import midiIn, { allocateVoice } from '../src/renderer/js/rack/modules/midi-in.js'
+
+function makeCtx() {
+  const param = () => ({ value: 0, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn() })
+  return {
+    currentTime: 0,
+    createConstantSource: () => ({
+      offset: param(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn()
+    })
+  }
+}
 
 describe('MIDI IN allocation', () => {
   it('rotates through voices and steals at the cursor', () => {
@@ -25,5 +39,23 @@ describe('MIDI IN allocation', () => {
 
   it('is registered as the polyphonic native source', () => {
     expect(midiIn.polySource({ params: { voices: 3 } })).toBe(3)
+  })
+})
+
+describe('MIDI IN mod + pitch bend', () => {
+  it('writes a mod event to every mod output', () => {
+    const inst = midiIn.create(makeCtx(), { channels: 3, params: {} })
+    inst.onEvent('note', { type: 'mod', value: 0.5, time: 0 })
+    for (const node of inst.outputs.mod) {
+      expect(node.offset.setValueAtTime).toHaveBeenCalledWith(0.5, 0)
+    }
+  })
+
+  it('scales pitch bend by bendRange / 24', () => {
+    const inst = midiIn.create(makeCtx(), { channels: 2, params: { bendRange: 2 } })
+    inst.onEvent('note', { type: 'pitch-bend', value: 1, time: 0 })
+    for (const node of inst.outputs.pb) {
+      expect(node.offset.setValueAtTime).toHaveBeenCalledWith(2 / 24, 0)
+    }
   })
 })

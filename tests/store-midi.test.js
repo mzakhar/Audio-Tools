@@ -4,7 +4,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import ProjectStore, {
   AddTrack, AddClip,
-  AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity
+  AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity,
+  SetTrackMidiChannel, SetTrackInstrument, AddRack
 } from '../src/renderer/js/store/ProjectStore.js'
 
 function makeNote(overrides = {}) {
@@ -106,6 +107,60 @@ describe('SetMidiNoteVelocity', () => {
     expect(ProjectStore.getState().tracks[0].clips[0].notes[0].velocity).toBe(1)
     ProjectStore.dispatch(SetMidiNoteVelocity(trackId, clipId, 'n1', -0.5))
     expect(ProjectStore.getState().tracks[0].clips[0].notes[0].velocity).toBe(0.01)
+  })
+})
+
+describe('SetTrackMidiChannel', () => {
+  it('sets the channel', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackMidiChannel(trackId, 3))
+    expect(ProjectStore.getState().tracks[0].midiChannel).toBe(3)
+  })
+
+  it('null removes the field', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackMidiChannel(trackId, 3))
+    ProjectStore.dispatch(SetTrackMidiChannel(trackId, null))
+    expect(ProjectStore.getState().tracks[0].midiChannel).toBeUndefined()
+    expect('midiChannel' in ProjectStore.getState().tracks[0]).toBe(false)
+  })
+
+  it('no-ops for an unknown track id', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    ProjectStore.dispatch(SetTrackMidiChannel('ghost', 3))
+    expect(ProjectStore.getState().tracks[0].midiChannel).toBeUndefined()
+  })
+})
+
+describe('SetTrackInstrument', () => {
+  it('sets a palette instrument', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey: 'fm' }))
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'fm' })
+  })
+
+  it('sets a rack instrument when the rack exists', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(AddRack('My Rack', 'rack1'))
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'rack', rackId: 'rack1' }))
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'rack', rackId: 'rack1' })
+  })
+
+  it('ignores a rackId that is not in state.racks', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'rack', rackId: 'ghost' }))
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
+  })
+
+  it('no-ops for an unknown track id', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    ProjectStore.dispatch(SetTrackInstrument('ghost', { type: 'palette', paletteKey: 'fm' }))
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
   })
 })
 
