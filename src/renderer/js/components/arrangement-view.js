@@ -12,8 +12,9 @@ import {
   visibleBeatRange
 } from '../utils/timeline-math.js'
 
-import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel } from '../store/ProjectStore.js'
+import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel, SetTrackInstrument } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
+import Palettes from '../palettes.js'
 
 // Layout constants
 const TRACK_HEADER_W = 160  // px — left sidebar with track names
@@ -512,7 +513,10 @@ export class ArrangementView {
         midiChSel.appendChild(opt)
       }
 
-      div.append(name, muteBtn, soloBtn, midiChSel)
+      const instrumentSel = document.createElement('select')
+      instrumentSel.className = 'track-instrument'
+
+      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel)
       this._headerList.appendChild(div)
     }
 
@@ -556,6 +560,34 @@ export class ArrangementView {
       midiChSel.onchange = () => this._store.dispatch(
         SetTrackMidiChannel(track.id, midiChSel.value === '' ? null : Number(midiChSel.value))
       )
+
+      const instrumentSel = item.querySelector('.track-instrument')
+      instrumentSel.style.display = track.type === 'midi' ? '' : 'none'
+      instrumentSel.innerHTML = ''
+      // tr909 is the 909 editor's own transport, not a playable voice — its
+      // createVoice is a silent stub (palettes.js:389), so keep it out.
+      for (const key of Object.keys(Palettes).filter(k => k !== 'tr909')) {
+        const opt = document.createElement('option')
+        opt.value = `p:${key}`
+        opt.textContent = Palettes[key].name || key
+        instrumentSel.appendChild(opt)
+      }
+      for (const rack of Object.values(state.racks || {})) {
+        const opt = document.createElement('option')
+        opt.value = `r:${rack.id}`
+        opt.textContent = rack.name || rack.id
+        instrumentSel.appendChild(opt)
+      }
+      const instrument = track.instrument
+      instrumentSel.value = instrument && instrument.type === 'rack'
+        ? `r:${instrument.rackId}`
+        : `p:${(instrument && instrument.paletteKey) || track.paletteKey || 'classic'}`
+      instrumentSel.onchange = () => {
+        const [kind, id] = instrumentSel.value.split(':')
+        this._store.dispatch(SetTrackInstrument(track.id,
+          kind === 'r' ? { type: 'rack', rackId: id } : { type: 'palette', paletteKey: id }
+        ))
+      }
     })
   }
 
