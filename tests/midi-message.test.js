@@ -80,7 +80,7 @@ describe('unhandled', () => {
     expect(parseMidiMessage([0xa0, 60, 100])).toBe(null)
   })
 
-  it('returns null for program change', () => {
-    expect(parseMidiMessage([0xc0, 5])).toBe(null)
+  it('parses a program change', () => {
+    expect(parseMidiMessage([0xcf, 5])).toEqual({ kind: 'program-change', channel: 15, program: 5 })
   })
 })

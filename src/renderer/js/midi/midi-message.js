@@ -24,6 +24,10 @@ export function parseMidiMessage(bytes) {
     return { kind: 'cc', channel, controller: data1, value: data2 }
   }
 
+  if (type === 0xc0) {
+    return { kind: 'program-change', channel, program: data1 }
+  }
+
   if (type === 0xe0) {
     const raw = (data2 << 7) | data1
     const value = raw === 8192 ? 0 : raw < 8192 ? (raw - 8192) / 8192 : (raw - 8192) / 8191
