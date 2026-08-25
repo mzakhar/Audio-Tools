@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, resolve, dirname, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
+import { importSf2Pack, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -143,4 +144,19 @@ ipcMain.handle('fs:readAudioBytes', async (_event, dirPath, relPath) => {
   const fullPath = assertPathWithin(resolve(resolvedDir, relPath), resolvedDir)
   const buf = await readFile(fullPath)
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+})
+
+ipcMain.handle('instrumentPacks:list', () => listInstrumentPacks(app.getPath('userData')))
+
+ipcMain.handle('instrumentPacks:importSf2', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog({
+    filters: [{ name: 'SoundFont 2', extensions: ['sf2'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || !filePaths[0]) return null
+  return importSf2Pack(app.getPath('userData'), filePaths[0])
+})
+
+ipcMain.handle('instrumentPacks:readSample', (_event, packId, version, sampleId) => {
+  return readInstrumentSample(app.getPath('userData'), packId, version, sampleId)
 })

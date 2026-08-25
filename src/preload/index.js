@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('electronFS', {
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:showOpen', options),
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:showSave', options),
   readAudioBytes: (dirPath, relPath) => ipcRenderer.invoke('fs:readAudioBytes', dirPath, relPath),
+  listInstrumentPacks: () => ipcRenderer.invoke('instrumentPacks:list'),
+  importSf2Pack: () => ipcRenderer.invoke('instrumentPacks:importSf2'),
+  readInstrumentSample: (packId, version, sampleId) => ipcRenderer.invoke('instrumentPacks:readSample', packId, version, sampleId),
 })
