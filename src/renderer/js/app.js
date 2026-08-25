@@ -8,7 +8,7 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrumentProgram } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { liveInstrumentFor } from './midi/live-instrument.js'
@@ -25,6 +25,9 @@ import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
 import ShortcutManager from './shortcuts.js'
 import { applyTheme, savedTheme } from './theme.js'
+import { applyChannelMidi } from './instruments/channel-program.js'
+import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
+import { createSampleStore } from './instruments/sample-store.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -36,6 +39,28 @@ let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
 const activeVoices = {} // midi note → voice object
 const _liveInstruments = new Map() // trackId → { sig, inst }
+let _packCatalog = []
+let _channelPrograms = null
+const _sampleStores = new WeakMap()
+
+function packFor(packId, version) {
+  return _packCatalog.find(pack => pack.id === packId && pack.version === version) || null
+}
+
+function sampleStoreFor(pack, ctx) {
+  if (!window.electronFS?.readInstrumentSample) return null
+  let stores = _sampleStores.get(ctx)
+  if (!stores) _sampleStores.set(ctx, stores = new Map())
+  const key = `${pack.id}@${pack.version}`
+  if (!stores.has(key)) stores.set(key, createSampleStore({ ctx, load: sampleId => window.electronFS.readInstrumentSample(pack.id, pack.version, sampleId) }))
+  return stores.get(key)
+}
+
+async function refreshPackCatalog() {
+  if (!window.electronFS?.listInstrumentPacks) return
+  _packCatalog = (await window.electronFS.listInstrumentPacks()).map(entry => compilePackManifest(entry.manifest))
+  _arrangementView?.render()
+}
 
 /** Tear down every live MIDI instrument — the old project's tracks are gone. */
 function disposeLiveInstruments() {
@@ -337,6 +362,8 @@ function initGlobalHeader() {
         mixerEngine: MixerEngine,
         palettes: Palettes,
         racks: ProjectStore.getState().racks,
+        packFor,
+        sampleStoreFor,
         rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
       })
     } else {
@@ -654,6 +681,16 @@ function initProjectBar() {
     importAudioToTrack(_selectedArrangeTrackId)
   })
 
+  document.getElementById('import-pack-btn')?.addEventListener('click', async () => {
+    if (!window.electronFS?.importSf2Pack) return
+    try {
+      const pack = await window.electronFS.importSf2Pack()
+      if (pack) await refreshPackCatalog()
+    } catch (error) {
+      alert(`Could not import SoundFont:\n${error.message}`)
+    }
+  })
+
   document.addEventListener('add-sample-to-track', (e) => {
     importAudioToTrack(e.detail.trackId)
   })
@@ -673,6 +710,8 @@ function initProjectBar() {
       audioStore: AudioStore,
       durationBeats,
       racks: state.racks,
+      packFor,
+      sampleStoreFor,
       sampleRate: state.sampleRate
     })
     await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
@@ -843,6 +882,25 @@ function initMidi() {
   // back to the plain keyboard behaviour when no MIDI tracks exist at all.
   document.addEventListener('midi-event', (e) => {
     const detail = e.detail
+    if (detail.kind === 'program-change' || (detail.kind === 'cc' && (detail.controller === 0 || detail.controller === 32))) {
+      const result = applyChannelMidi(_channelPrograms, detail)
+      _channelPrograms = result.stateByChannel
+      if (!result.change) return
+      const state = ProjectStore.getState()
+      for (const trackId of routeChannel(state.tracks.filter(track => track.type === 'midi'), detail.channel, _midiTargetTrackId)) {
+        const track = state.tracks.find(candidate => candidate.id === trackId)
+        if (track?.instrument?.type !== 'pack' || track.instrument.programFollow === 'pinned') continue
+        const pack = packFor(track.instrument.packId, track.instrument.packVersion)
+        const resolved = pack && resolvePatch(pack, result.change, { channel: detail.channel })
+        ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, {
+          ...(resolved?.selection || { packId: track.instrument.packId, packVersion: track.instrument.packVersion, patchId: track.instrument.patchId }),
+          ...result.change,
+          patchId: resolved?.patch?.id || track.instrument.patchId,
+          unresolved: !resolved?.patch
+        }))
+      }
+      return
+    }
     if (detail.kind !== 'note-on' && detail.kind !== 'note-off' && detail.kind !== 'cc' && detail.kind !== 'pitch-bend') return
     ensureAudio()
     const ctx = AudioEngine.getContext()
@@ -898,6 +956,8 @@ function initMidi() {
           ctx,
           output,
           racks: state.racks,
+          packFor,
+          sampleStoreFor,
           mountRack: rack => RackEngine.mount(ctx, rack, {
             output,
             getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
@@ -1084,7 +1144,8 @@ function boot() {
   if (container) {
     _arrangementView = new ArrangementView(container, {
       store: ProjectStore,
-      audioStore: AudioStore
+      audioStore: AudioStore,
+      packCatalog: () => _packCatalog
     })
   }
   const rackContainer = document.getElementById('rack-view')
@@ -1096,6 +1157,7 @@ function boot() {
 
   // Subscribe store to keep mixer in sync
   ProjectStore.subscribe(state => syncMixerStrips(state))
+  refreshPackCatalog().catch(error => console.warn('Could not load instrument packs:', error))
 }
 
 if (document.readyState === 'loading') {

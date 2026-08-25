@@ -7,6 +7,7 @@ import RackEngine from '../rack/rack-engine.js'
 import { RackClock } from '../rack/rack-clock.js'
 import { beatsToSeconds } from '../utils/timeline-math.js'
 import { audioBufferToWAV } from '../utils/wav-encoder.js'
+import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
@@ -25,8 +26,22 @@ export function rackInstrument(handle, moduleId) {
   }
 }
 
-function instrumentFor(track, { palettes, ctx, output, rackHandles }) {
+function instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+  if (instrument.type === 'pack') {
+    const pack = packFor?.(instrument.packId, instrument.packVersion)
+    const patch = pack?.byId?.get(instrument.patchId)
+    const sampleStore = patch && sampleStoreFor?.(pack, ctx)
+    if (!sampleStore) return null
+    const instance = sampleInstrumentFor(patch, { ctx, output, sampleStore })
+    packInstruments?.push(instance)
+    return (note, time, stopTime) => {
+      instance.noteOn(note.pitch, (note.velocity ?? 0.8) * 127, time)
+      const delay = Math.max(0, (stopTime - ctx.currentTime) * 1000)
+      if (typeof ctx.startRendering === 'function') instance.noteOff(note.pitch, stopTime)
+      else setTimeout(() => instance.noteOff(note.pitch), delay)
+    }
+  }
   if (instrument.type === 'rack') {
     const handle = rackHandles.find(entry => entry.rack.id === instrument.rackId)
     const moduleId = handle && [...handle.mods].find(([, entry]) => entry.def?.type === 'midi-in')?.[0]
@@ -46,8 +61,9 @@ const TimelinePlayer = {
   _rackClock: null,
   _rackClockTimer: null,
   _instrumentRackHandles: [],
+  _packInstruments: [],
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {} }) {
+  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, packFor, sampleStoreFor }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -58,6 +74,7 @@ const TimelinePlayer = {
     this._isPlaying = true
     this._sources = []
     this._midiTimeouts = []
+    this._packInstruments = []
     this._instrumentRackHandles = tracks
       .filter(track => track.type === 'midi' && track.instrument?.type === 'rack')
       .map(track => ({ track, rack: racks[track.instrument.rackId] }))
@@ -91,7 +108,7 @@ const TimelinePlayer = {
       if (track.type === 'midi') {
         const channelId = track.mixerChannelId
         const output = mixerEngine ? mixerEngine.getOutput(channelId) : AudioEngine.getMasterInput()
-        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles })
+        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments: this._packInstruments })
         if (!playNote) return
 
         track.clips.forEach(clip => {
@@ -171,6 +188,8 @@ const TimelinePlayer = {
     this._rackClock = null
     this._instrumentRackHandles.forEach(handle => RackEngine.unmount(handle))
     this._instrumentRackHandles = []
+    this._packInstruments.forEach(instrument => instrument.dispose())
+    this._packInstruments = []
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []
     this._midiTimeouts.forEach(id => clearTimeout(id))
@@ -185,7 +204,7 @@ const TimelinePlayer = {
     return this._startBeat + (elapsed / (60 / bpm))
   },
 
-  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {} }) {
+  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, packFor, sampleStoreFor }) {
     const totalSeconds = beatsToSeconds(durationBeats, bpm)
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05
@@ -196,9 +215,19 @@ const TimelinePlayer = {
       output: offline.destination,
       getBuffer: fileKey => audioStore?.getBuffer?.(fileKey) ?? null
     }))
+    const packInstruments = []
+    const missing = []
+    for (const track of tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'pack')) {
+      const pack = packFor?.(track.instrument.packId, track.instrument.packVersion)
+      const patch = pack?.byId?.get(track.instrument.patchId)
+      const store = patch && sampleStoreFor?.(pack, offline)
+      if (!store) { missing.push(`${track.instrument.packId}@${track.instrument.packVersion}:${track.instrument.patchId}`); continue }
+      try { await store.preload((patch.zones || []).map(zone => zone.sampleId)) } catch (error) { missing.push(error.message) }
+    }
+    if (missing.length) throw new Error(`Missing pack samples: ${missing.join(', ')}`)
     tracks.forEach(track => {
       if (track.type === 'midi') {
-        const playNote = instrumentFor(track, { palettes: null, ctx: offline, output: offline.destination, rackHandles })
+        const playNote = instrumentFor(track, { palettes: null, ctx: offline, output: offline.destination, rackHandles, packFor, sampleStoreFor, packInstruments })
         for (const clip of track.clips) for (const note of clip.notes || []) {
           if (clip.type !== 'midi') continue
           const at = startTime + beatsToSeconds(clip.startBeat + note.startBeat, bpm)
@@ -225,6 +254,7 @@ const TimelinePlayer = {
 
     const rendered = await offline.startRendering()
     rackHandles.forEach(handle => RackEngine.unmount(handle))
+    packInstruments.forEach(instrument => instrument.dispose())
     return audioBufferToWAV(rendered)
   }
 }

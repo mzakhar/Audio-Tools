@@ -671,7 +671,7 @@ export class ArrangementView {
         const selection = packSelectionFromValue(instrumentSel.value)
         this._store.dispatch(SetTrackInstrument(track.id,
           selection
-            ? { type: 'pack', ...selection, programFollow: 'pinned' }
+            ? { type: 'pack', ...selection, programFollow: 'midi' }
             : instrumentSel.value.startsWith('r:')
               ? { type: 'rack', rackId: instrumentSel.value.slice(2) }
               : { type: 'palette', paletteKey: instrumentSel.value.slice(2) }

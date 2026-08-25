@@ -24,6 +24,7 @@ export function createSampleStore({ load, ctx, maxBytes = DEFAULT_MAX_BYTES } = 
   }
 
   return {
+    peek(sampleId) { return cache.get(sampleId)?.buffer || null },
     get(sampleId) {
       if (cache.has(sampleId)) {
         const entry = cache.get(sampleId)

@@ -11,24 +11,26 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
   const pending = new Map()
   let disposed = false
 
-  const stop = (pitch) => {
+  const stop = (pitch, time = ctx.currentTime) => {
     pending.delete(pitch)
     const voice = voices.get(pitch)
     if (!voice) return
     voices.delete(pitch)
-    try { voice.source.stop(ctx.currentTime) } catch { /* already stopped */ }
-    voice.source.disconnect()
-    voice.gain.disconnect()
+    try { voice.source.stop(time) } catch { /* already stopped */ }
+    if (time <= ctx.currentTime) {
+      voice.source.disconnect()
+      voice.gain.disconnect()
+    }
   }
 
-  const start = (pitch, velocity, zone, buffer, token) => {
+  const start = (pitch, velocity, zone, buffer, token, time) => {
     if (disposed || pending.get(pitch) !== token) return
     pending.delete(pitch)
     const source = ctx.createBufferSource()
     const gain = ctx.createGain()
     source.buffer = buffer
     source.playbackRate.value = Math.pow(2, (pitch - zone.rootKey) / 12)
-    gain.gain.setValueAtTime((zone.gain ?? 1) * Math.max(0, Math.min(127, velocity)) / 127, ctx.currentTime)
+    gain.gain.setValueAtTime((zone.gain ?? 1) * Math.max(0, Math.min(127, velocity)) / 127, time)
     if (Number.isFinite(zone.loopStart) && Number.isFinite(zone.loopEnd) && zone.loopEnd > zone.loopStart) {
       source.loop = true
       source.loopStart = zone.loopStart
@@ -39,22 +41,23 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
     const voice = { source, gain }
     voices.set(pitch, voice)
     source.onended = () => {
-      if (voices.get(pitch) !== voice) return
-      voices.delete(pitch)
+      if (voices.get(pitch) === voice) voices.delete(pitch)
       source.disconnect()
       gain.disconnect()
     }
-    source.start(ctx.currentTime)
+    source.start(time)
   }
 
   return {
-    noteOn(pitch, velocity = 127) {
+    noteOn(pitch, velocity = 127, time = ctx.currentTime) {
       stop(pitch)
       const zone = zoneFor(patch, pitch, velocity)
       if (!zone || disposed) return
       const token = {}
       pending.set(pitch, token)
-      Promise.resolve(sampleStore.get(zone.sampleId)).then(buffer => start(pitch, velocity, zone, buffer, token)).catch(() => {
+      const cached = sampleStore.peek?.(zone.sampleId)
+      if (cached) return start(pitch, velocity, zone, cached, token, time)
+      Promise.resolve(sampleStore.get(zone.sampleId)).then(buffer => start(pitch, velocity, zone, buffer, token, time)).catch(() => {
         if (pending.get(pitch) === token) pending.delete(pitch)
       })
     },

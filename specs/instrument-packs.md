@@ -15,6 +15,13 @@ Load large playable instrument libraries without making Synth startup, project l
 | 4 — Project persistence and UI | in progress — persistence done | `9bb65f1` |
 | 5 — Pack manager and `.sf2` import | in progress — converter core done | `7b547a2` |
 
+## Progress — 2026-08-25
+
+- Electron imports selected local PCM `.sf2`, validates pack files, then atomically publishes under user-data `instrument-packs/`. Renderer has list/import/sample-byte IPC only.
+- Pack patches appear in track selectors. Missing selections remain saved, labeled, and silent. Bank Select/Program Change routes only MIDI-following pack tracks; channel 10 prefers GM percussion.
+- Samples decode on first use into bounded LRU cache. Timeline and offline bounce use packs; bounce preloads required samples and reports missing identifiers.
+- Deferred: home-server catalog, remote download, zip install, enable/disable/remove UI. No static HTTPS catalog source, signed artifact, or zip extractor exists here; adding one would invent distribution/trust policy. Local `.sf2` remains first path.
+
 ## Product decisions
 
 - MIDI channels remain zero-indexed internally. MIDI channel 10 is `channel: 9`.
