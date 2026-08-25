@@ -19,7 +19,7 @@ describe('tr-909 pattern bars', () => {
     it('defaults to an empty patterns map at version 3', () => {
       expect(ProjectStore.getState().patterns).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(4)
+      expect(CURRENT_VERSION).toBe(5)
     })
   })
 

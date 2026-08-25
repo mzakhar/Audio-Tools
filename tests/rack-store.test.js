@@ -29,7 +29,7 @@ describe('rack store', () => {
     it('defaults to an empty racks map at the current version', () => {
       expect(ProjectStore.getState().racks).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(4)
+      expect(CURRENT_VERSION).toBe(5)
     })
   })
 
