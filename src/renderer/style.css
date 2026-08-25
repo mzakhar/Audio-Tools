@@ -1610,6 +1610,18 @@ button { font-family: var(--font-mono); }
   border: 1px solid var(--border);
   color: var(--text-dim);
 }
+.track-header-item .track-instrument-status {
+  display: none;
+}
+.track-header-item .track-instrument-status.missing {
+  display: block;
+  color: #ff6b6b;
+  font-size: 9px;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* ── Arrangement scrollbars ──────────────────────────────────────────────── */
 .arr-scrollbar {
   position: absolute;

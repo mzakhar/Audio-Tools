@@ -16,6 +16,55 @@ import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveCli
 import AudioStore from '../audio-store.js'
 import Palettes from '../palettes.js'
 
+function catalogPacks(catalog) {
+  const packs = typeof catalog === 'function' ? catalog() : catalog
+  return Array.isArray(packs) ? packs : []
+}
+
+function manifestOf(pack) {
+  return pack?.manifest || pack
+}
+
+export function packOptionValue(packId, packVersion, patchId) {
+  return `pack:${JSON.stringify([packId, packVersion, patchId])}`
+}
+
+function packSelectionFromValue(value) {
+  if (!value.startsWith('pack:')) return null
+  try {
+    const [packId, packVersion, patchId] = JSON.parse(value.slice(5))
+    return typeof packId === 'string' && typeof packVersion === 'string' && typeof patchId === 'string'
+      ? { packId, packVersion, patchId }
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function packPatchOptions(catalog) {
+  return catalogPacks(catalog).flatMap(pack => {
+    const manifest = manifestOf(pack)
+    if (!manifest?.id || !manifest?.version || !Array.isArray(manifest.patches)) return []
+    return manifest.patches
+      .filter(patch => patch?.id && patch?.name)
+      .map(patch => ({
+        value: packOptionValue(manifest.id, manifest.version, patch.id),
+        label: `${manifest.name || manifest.id} — ${patch.name}`,
+        selection: { packId: manifest.id, packVersion: manifest.version, patchId: patch.id },
+      }))
+  })
+}
+
+export function packInstrumentLabel(instrument, catalog) {
+  if (instrument?.type !== 'pack') return ''
+  const match = packPatchOptions(catalog).find(option =>
+    option.selection.packId === instrument.packId &&
+    option.selection.packVersion === instrument.packVersion &&
+    option.selection.patchId === instrument.patchId
+  )
+  return match?.label || `Missing pack: ${instrument.packId || 'unknown'}@${instrument.packVersion || '?'} — ${instrument.patchId || 'unknown'}`
+}
+
 // Layout constants
 const TRACK_HEADER_W = 160  // px — left sidebar with track names
 const RULER_H        = 32   // px — top ruler bar
@@ -93,9 +142,10 @@ export function hitTestClip(clip, mouseX, trackY, ppb, scrollLeft, trackHeaderW,
 }
 
 export class ArrangementView {
-  constructor(container, { store, audioStore }) {
+  constructor(container, { store, audioStore, packCatalog } = {}) {
     this._store = store || ProjectStore
     this._audioStore = audioStore || AudioStore
+    this._packCatalog = packCatalog || (() => [])
     this._container = container
 
     this._ppb = DEFAULT_PPB
@@ -516,7 +566,10 @@ export class ArrangementView {
       const instrumentSel = document.createElement('select')
       instrumentSel.className = 'track-instrument'
 
-      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel)
+      const instrumentStatus = document.createElement('span')
+      instrumentStatus.className = 'track-instrument-status'
+
+      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel, instrumentStatus)
       this._headerList.appendChild(div)
     }
 
@@ -567,7 +620,11 @@ export class ArrangementView {
       // list when the rack set actually changed — otherwise an open dropdown
       // would be torn out from under the pointer 60 times a second.
       const racks = Object.values(state.racks || {})
-      const optionsKey = racks.map(r => `${r.id}:${r.name}`).join('|')
+      const packOptions = packPatchOptions(this._packCatalog)
+      const optionsKey = [
+        racks.map(r => `${r.id}:${r.name}`).join('|'),
+        packOptions.map(option => `${option.value}:${option.label}`).join('|')
+      ].join('||')
       if (instrumentSel.dataset.optionsKey !== optionsKey) {
         instrumentSel.dataset.optionsKey = optionsKey
         instrumentSel.innerHTML = ''
@@ -585,15 +642,39 @@ export class ArrangementView {
           opt.textContent = rack.name || rack.id
           instrumentSel.appendChild(opt)
         }
+        for (const option of packOptions) {
+          const opt = document.createElement('option')
+          opt.value = option.value
+          opt.textContent = option.label
+          instrumentSel.appendChild(opt)
+        }
       }
       const instrument = track.instrument
-      instrumentSel.value = instrument && instrument.type === 'rack'
+      const selectedValue = instrument && instrument.type === 'pack'
+        ? packOptionValue(instrument.packId, instrument.packVersion, instrument.patchId)
+        : instrument && instrument.type === 'rack'
         ? `r:${instrument.rackId}`
         : `p:${(instrument && instrument.paletteKey) || track.paletteKey || 'classic'}`
+      if (instrument?.type === 'pack' && !Array.from(instrumentSel.options).some(option => option.value === selectedValue)) {
+        const missing = document.createElement('option')
+        missing.value = selectedValue
+        missing.textContent = packInstrumentLabel(instrument, this._packCatalog)
+        instrumentSel.appendChild(missing)
+      }
+      instrumentSel.value = selectedValue
+      const instrumentStatus = item.querySelector('.track-instrument-status')
+      const instrumentLabel = packInstrumentLabel(instrument, this._packCatalog)
+      instrumentStatus.textContent = instrument?.type === 'pack' ? instrumentLabel : ''
+      instrumentStatus.className = 'track-instrument-status' + (instrumentLabel.startsWith('Missing pack:') ? ' missing' : '')
+      instrumentStatus.title = instrumentLabel
       instrumentSel.onchange = () => {
-        const [kind, id] = instrumentSel.value.split(':')
+        const selection = packSelectionFromValue(instrumentSel.value)
         this._store.dispatch(SetTrackInstrument(track.id,
-          kind === 'r' ? { type: 'rack', rackId: id } : { type: 'palette', paletteKey: id }
+          selection
+            ? { type: 'pack', ...selection, programFollow: 'pinned' }
+            : instrumentSel.value.startsWith('r:')
+              ? { type: 'rack', rackId: instrumentSel.value.slice(2) }
+              : { type: 'palette', paletteKey: instrumentSel.value.slice(2) }
         ))
       }
     })
