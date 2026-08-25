@@ -549,6 +549,13 @@ export function RemoveRack(rackId) {
     execute(state) {
       const next = JSON.parse(JSON.stringify(state))
       if (next.racks) delete next.racks[rackId]
+      // A track pointing at a deleted rack is a silent track with a blank
+      // instrument select and no way back — put it on a palette instead.
+      for (const track of next.tracks || []) {
+        if (track.instrument?.type === 'rack' && track.instrument.rackId === rackId) {
+          track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+        }
+      }
       return next
     },
     undo(state) { return state }

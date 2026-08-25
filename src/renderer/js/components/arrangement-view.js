@@ -563,20 +563,28 @@ export class ArrangementView {
 
       const instrumentSel = item.querySelector('.track-instrument')
       instrumentSel.style.display = track.type === 'midi' ? '' : 'none'
-      instrumentSel.innerHTML = ''
-      // tr909 is the 909 editor's own transport, not a playable voice — its
-      // createVoice is a silent stub (palettes.js:389), so keep it out.
-      for (const key of Object.keys(Palettes).filter(k => k !== 'tr909')) {
-        const opt = document.createElement('option')
-        opt.value = `p:${key}`
-        opt.textContent = Palettes[key].name || key
-        instrumentSel.appendChild(opt)
-      }
-      for (const rack of Object.values(state.racks || {})) {
-        const opt = document.createElement('option')
-        opt.value = `r:${rack.id}`
-        opt.textContent = rack.name || rack.id
-        instrumentSel.appendChild(opt)
+      // render() runs every frame during playback, so only rebuild the option
+      // list when the rack set actually changed — otherwise an open dropdown
+      // would be torn out from under the pointer 60 times a second.
+      const racks = Object.values(state.racks || {})
+      const optionsKey = racks.map(r => `${r.id}:${r.name}`).join('|')
+      if (instrumentSel.dataset.optionsKey !== optionsKey) {
+        instrumentSel.dataset.optionsKey = optionsKey
+        instrumentSel.innerHTML = ''
+        // tr909 is the 909 editor's own transport, not a playable voice — its
+        // createVoice is a silent stub (palettes.js:389), so keep it out.
+        for (const key of Object.keys(Palettes).filter(k => k !== 'tr909')) {
+          const opt = document.createElement('option')
+          opt.value = `p:${key}`
+          opt.textContent = Palettes[key].name || key
+          instrumentSel.appendChild(opt)
+        }
+        for (const rack of racks) {
+          const opt = document.createElement('option')
+          opt.value = `r:${rack.id}`
+          opt.textContent = rack.name || rack.id
+          instrumentSel.appendChild(opt)
+        }
       }
       const instrument = track.instrument
       instrumentSel.value = instrument && instrument.type === 'rack'

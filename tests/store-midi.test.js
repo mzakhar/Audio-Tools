@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import ProjectStore, {
   AddTrack, AddClip,
   AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity,
-  SetTrackMidiChannel, SetTrackInstrument, AddRack
+  SetTrackMidiChannel, SetTrackInstrument, AddRack, RemoveRack
 } from '../src/renderer/js/store/ProjectStore.js'
 
 function makeNote(overrides = {}) {
@@ -171,5 +171,18 @@ describe('undo/redo with MIDI commands', () => {
     expect(ProjectStore.getState().tracks[0].clips[0].notes).toHaveLength(1)
     ProjectStore.undo()
     expect(ProjectStore.getState().tracks[0].clips[0].notes).toHaveLength(0)
+  })
+})
+
+describe('RemoveRack with a track on it', () => {
+  it('drops the track back to a palette so it is not left silent', () => {
+    ProjectStore.dispatch(AddRack('Rack A', 'rack-a'))
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks.at(-1).id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'rack', rackId: 'rack-a' }))
+    expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'rack', rackId: 'rack-a' })
+
+    ProjectStore.dispatch(RemoveRack('rack-a'))
+    expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
   })
 })
