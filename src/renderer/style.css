@@ -1596,6 +1596,20 @@ button { font-family: var(--font-mono); }
   border-color: var(--accent);
   color: var(--accent);
 }
+.track-header-item .track-midi-ch {
+  width: 52px;
+  font-size: 9px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.track-header-item .track-instrument {
+  width: 90px;
+  font-size: 9px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
 /* ── Arrangement scrollbars ──────────────────────────────────────────────── */
 .arr-scrollbar {
   position: absolute;

@@ -105,6 +105,40 @@ export function AddTrack(type = 'audio', name = 'Track') {
   }
 }
 
+export function SetTrackMidiChannel(trackId, channel) {
+  return {
+    label: `Set track MIDI channel`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track) return next
+      if (typeof channel === 'number' && channel >= 0 && channel <= 15) track.midiChannel = channel
+      else delete track.midiChannel
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function SetTrackInstrument(trackId, instrument) {
+  return {
+    label: `Set track instrument`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track || !instrument) return next
+      if (instrument.type === 'rack' && !(next.racks || {})[instrument.rackId]) return state
+      track.instrument = { ...instrument }
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
 export function RemoveTrack(trackId) {
   return {
     label: `Remove track`,
@@ -515,6 +549,13 @@ export function RemoveRack(rackId) {
     execute(state) {
       const next = JSON.parse(JSON.stringify(state))
       if (next.racks) delete next.racks[rackId]
+      // A track pointing at a deleted rack is a silent track with a blank
+      // instrument select and no way back — put it on a palette instead.
+      for (const track of next.tracks || []) {
+        if (track.instrument?.type === 'rack' && track.instrument.rackId === rackId) {
+          track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+        }
+      }
       return next
     },
     undo(state) { return state }

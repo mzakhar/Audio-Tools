@@ -4,6 +4,7 @@
  * live note routing (fires CustomEvents on document), and
  * punch-in recording to produce MidiClip note arrays.
  */
+import { parseMidiMessage } from './midi-message.js'
 
 let _noteIdCounter = 0
 function genNoteId() { return `mn-${++_noteIdCounter}-${Date.now()}` }
@@ -103,13 +104,13 @@ const MidiController = {
   },
 
   _onMidiMessage(e) {
-    const [status, data1, data2] = e.data
-    const type     = status & 0xf0
-    const pitch    = data1
-    const velocity = data2
+    const parsed = parseMidiMessage(e.data)
+    if (!parsed) return
 
-    // Note On (velocity > 0)
-    if (type === 0x90 && velocity > 0) {
+    document.dispatchEvent(new CustomEvent('midi-event', { detail: { ...parsed, time: e.timeStamp } }))
+
+    if (parsed.kind === 'note-on') {
+      const { pitch, velocity } = parsed
       document.dispatchEvent(new CustomEvent('midi-note-on', { detail: { pitch, velocity } }))
       if (this._recording) {
         const startBeat = this._perfToBeat(performance.now())
@@ -118,8 +119,8 @@ const MidiController = {
       return
     }
 
-    // Note Off  (or Note On vel=0)
-    if (type === 0x80 || (type === 0x90 && velocity === 0)) {
+    if (parsed.kind === 'note-off') {
+      const { pitch } = parsed
       document.dispatchEvent(new CustomEvent('midi-note-off', { detail: { pitch } }))
       if (this._recording && this._pendingNotes[pitch]) {
         const p = this._pendingNotes[pitch]

@@ -9,6 +9,9 @@ import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
 import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack } from './store/ProjectStore.js'
+import RackEngine from './rack/rack-engine.js'
+import { routeChannel } from './midi/midi-routing.js'
+import { liveInstrumentFor } from './midi/live-instrument.js'
 import FileAdapter from './io/FileAdapter.js'
 import { pickAudioFile } from './io/audio-picker.js'
 import AudioStore from './audio-store.js'
@@ -32,6 +35,15 @@ function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
 const activeVoices = {} // midi note → voice object
+const _liveInstruments = new Map() // trackId → { sig, inst }
+
+/** Tear down every live MIDI instrument — the old project's tracks are gone. */
+function disposeLiveInstruments() {
+  for (const entry of _liveInstruments.values()) {
+    try { entry.inst.dispose() } catch (err) {}
+  }
+  _liveInstruments.clear()
+}
 
 let _arrangementView = null
 let _pianoRoll = null
@@ -536,6 +548,7 @@ function initProjectBar() {
     const handle = await FileAdapter.createProjectFolder(getLastDir(DIR_KEY_PROJECT))
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
+    disposeLiveInstruments()
     ProjectStore.reset()
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -561,6 +574,7 @@ function initProjectBar() {
       alert(`Could not open project:\n${e.message}`)
       return
     }
+    disposeLiveInstruments()
     ProjectStore.load(state)
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -825,25 +839,89 @@ function initMidi() {
     switchMode('arrange')
   })
 
-  // Route live MIDI note events → synth voices (same as keyboard)
-  document.addEventListener('midi-note-on', (e) => {
+  // Route live MIDI note events → track instruments (routeChannel), falling
+  // back to the plain keyboard behaviour when no MIDI tracks exist at all.
+  document.addEventListener('midi-event', (e) => {
+    const detail = e.detail
+    if (detail.kind !== 'note-on' && detail.kind !== 'note-off' && detail.kind !== 'cc' && detail.kind !== 'pitch-bend') return
     ensureAudio()
     const ctx = AudioEngine.getContext()
     if (!ctx) return
-    const note = e.detail.pitch
-    if (activeVoices[note]) return
-    const freq = 440 * Math.pow(2, (note - 69) / 12)
-    try {
-      const voice = currentPalette.createVoice(ctx, AudioEngine.getMasterInput(), freq, e.detail.velocity / 127, ctx.currentTime)
-      activeVoices[note] = voice
-    } catch (err) {}
-  })
-  document.addEventListener('midi-note-off', (e) => {
-    const note = e.detail.pitch
-    if (activeVoices[note]) {
-      const ctx = AudioEngine.getContext()
-      try { activeVoices[note].stop(ctx ? ctx.currentTime : 0) } catch (err) {}
-      delete activeVoices[note]
+
+    const state = ProjectStore.getState()
+    const midiTracks = state.tracks.filter(t => t.type === 'midi')
+
+    // Prune instruments for tracks that no longer exist.
+    for (const [trackId, entry] of [..._liveInstruments]) {
+      if (!state.tracks.some(t => t.id === trackId)) {
+        entry.inst.dispose()
+        _liveInstruments.delete(trackId)
+      }
+    }
+
+    const ids = routeChannel(midiTracks, detail.channel, _midiTargetTrackId)
+
+    if (ids.length === 0 && midiTracks.length === 0) {
+      // No MIDI tracks at all — plain keyboard behaviour, notes only.
+      if (detail.kind !== 'note-on' && detail.kind !== 'note-off') return
+      const note = detail.pitch
+      if (detail.kind === 'note-on') {
+        if (activeVoices[note]) return
+        const freq = 440 * Math.pow(2, (note - 69) / 12)
+        try {
+          const voice = currentPalette.createVoice(ctx, AudioEngine.getMasterInput(), freq, detail.velocity / 127, ctx.currentTime)
+          activeVoices[note] = voice
+        } catch (err) {}
+      } else {
+        if (activeVoices[note]) {
+          try { activeVoices[note].stop(ctx.currentTime) } catch (err) {}
+          delete activeVoices[note]
+        }
+      }
+      return
+    }
+
+    for (const trackId of ids) {
+      const track = state.tracks.find(t => t.id === trackId)
+      if (!track) continue
+
+      const sig = JSON.stringify(track.instrument ?? null)
+      let entry = _liveInstruments.get(trackId)
+      if (entry && entry.sig !== sig) {
+        entry.inst.dispose()
+        entry = null
+      }
+      if (!entry) {
+        const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
+        const inst = liveInstrumentFor(track, {
+          palettes: Palettes,
+          ctx,
+          output,
+          racks: state.racks,
+          mountRack: rack => RackEngine.mount(ctx, rack, {
+            output,
+            getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
+            onParam: (target, value) => {
+              const [channelId, param] = target.split('.')
+              if (param === 'volume') MixerEngine.setVolume(channelId, value)
+              else if (param === 'pan') MixerEngine.setPan(channelId, value)
+            }
+          })
+        })
+        if (!inst) continue
+        entry = { sig, inst }
+        _liveInstruments.set(trackId, entry)
+      }
+
+      try {
+        if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity)
+        else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch)
+        // ponytail: only CC1 mapped. Add a CC-learn map when a second controller matters.
+        else if (detail.kind === 'cc') {
+          if (detail.controller === 1) entry.inst.send({ type: 'mod', value: detail.value / 127 })
+        }
+        else entry.inst.send({ type: 'pitch-bend', value: detail.value })
+      } catch (err) {}
     }
   })
 

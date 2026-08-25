@@ -1,0 +1,33 @@
+import { describe, it, expect } from 'vitest'
+import { routeChannel } from '../src/renderer/js/midi/midi-routing.js'
+
+function track(id, midiChannel) {
+  return midiChannel === undefined ? { id } : { id, midiChannel }
+}
+
+describe('routeChannel', () => {
+  it('returns all tracks declared on the channel', () => {
+    const tracks = [track('a', 0), track('b', 0), track('c', 1)]
+    expect(routeChannel(tracks, 0, null)).toEqual(['a', 'b'])
+  })
+
+  it('channel 0 counts as declared', () => {
+    const tracks = [track('a', 0)]
+    expect(routeChannel(tracks, 5, 'armed')).toEqual([])
+  })
+
+  it('falls back to armed track when nothing declares a channel', () => {
+    const tracks = [track('a'), track('b')]
+    expect(routeChannel(tracks, 3, 'armed')).toEqual(['armed'])
+  })
+
+  it('omni fallback with no armed track returns empty', () => {
+    const tracks = [track('a'), track('b')]
+    expect(routeChannel(tracks, 3, null)).toEqual([])
+  })
+
+  it('returns empty when a routing map exists but channel is unmapped', () => {
+    const tracks = [track('a', 0), track('b')]
+    expect(routeChannel(tracks, 5, 'armed')).toEqual([])
+  })
+})

@@ -12,8 +12,9 @@ import {
   visibleBeatRange
 } from '../utils/timeline-math.js'
 
-import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip } from '../store/ProjectStore.js'
+import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel, SetTrackInstrument } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
+import Palettes from '../palettes.js'
 
 // Layout constants
 const TRACK_HEADER_W = 160  // px — left sidebar with track names
@@ -499,7 +500,23 @@ export class ArrangementView {
       soloBtn.className = 'solo-btn'
       soloBtn.textContent = 'S'
 
-      div.append(name, muteBtn, soloBtn)
+      const midiChSel = document.createElement('select')
+      midiChSel.className = 'track-midi-ch'
+      const omniOpt = document.createElement('option')
+      omniOpt.value = ''
+      omniOpt.textContent = 'Omni'
+      midiChSel.appendChild(omniOpt)
+      for (let ch = 0; ch < 16; ch++) {
+        const opt = document.createElement('option')
+        opt.value = String(ch)
+        opt.textContent = String(ch + 1)
+        midiChSel.appendChild(opt)
+      }
+
+      const instrumentSel = document.createElement('select')
+      instrumentSel.className = 'track-instrument'
+
+      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel)
       this._headerList.appendChild(div)
     }
 
@@ -537,6 +554,48 @@ export class ArrangementView {
         }))
       }
 
+      const midiChSel = item.querySelector('.track-midi-ch')
+      midiChSel.style.display = track.type === 'midi' ? '' : 'none'
+      midiChSel.value = track.midiChannel ?? ''
+      midiChSel.onchange = () => this._store.dispatch(
+        SetTrackMidiChannel(track.id, midiChSel.value === '' ? null : Number(midiChSel.value))
+      )
+
+      const instrumentSel = item.querySelector('.track-instrument')
+      instrumentSel.style.display = track.type === 'midi' ? '' : 'none'
+      // render() runs every frame during playback, so only rebuild the option
+      // list when the rack set actually changed — otherwise an open dropdown
+      // would be torn out from under the pointer 60 times a second.
+      const racks = Object.values(state.racks || {})
+      const optionsKey = racks.map(r => `${r.id}:${r.name}`).join('|')
+      if (instrumentSel.dataset.optionsKey !== optionsKey) {
+        instrumentSel.dataset.optionsKey = optionsKey
+        instrumentSel.innerHTML = ''
+        // tr909 is the 909 editor's own transport, not a playable voice — its
+        // createVoice is a silent stub (palettes.js:389), so keep it out.
+        for (const key of Object.keys(Palettes).filter(k => k !== 'tr909')) {
+          const opt = document.createElement('option')
+          opt.value = `p:${key}`
+          opt.textContent = Palettes[key].name || key
+          instrumentSel.appendChild(opt)
+        }
+        for (const rack of racks) {
+          const opt = document.createElement('option')
+          opt.value = `r:${rack.id}`
+          opt.textContent = rack.name || rack.id
+          instrumentSel.appendChild(opt)
+        }
+      }
+      const instrument = track.instrument
+      instrumentSel.value = instrument && instrument.type === 'rack'
+        ? `r:${instrument.rackId}`
+        : `p:${(instrument && instrument.paletteKey) || track.paletteKey || 'classic'}`
+      instrumentSel.onchange = () => {
+        const [kind, id] = instrumentSel.value.split(':')
+        this._store.dispatch(SetTrackInstrument(track.id,
+          kind === 'r' ? { type: 'rack', rackId: id } : { type: 'palette', paletteKey: id }
+        ))
+      }
     })
   }
 
