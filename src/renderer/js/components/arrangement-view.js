@@ -569,7 +569,10 @@ export class ArrangementView {
       const instrumentStatus = document.createElement('span')
       instrumentStatus.className = 'track-instrument-status'
 
-      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel, instrumentStatus)
+      const instrumentChip = document.createElement('button')
+      instrumentChip.className = 'track-instrument-chip'
+
+      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel, instrumentStatus, instrumentChip)
       this._headerList.appendChild(div)
     }
 
@@ -667,6 +670,14 @@ export class ArrangementView {
       instrumentStatus.textContent = instrument?.type === 'pack' ? instrumentLabel : ''
       instrumentStatus.className = 'track-instrument-status' + (instrumentLabel.startsWith('Missing pack:') ? ' missing' : '')
       instrumentStatus.title = instrumentLabel
+      const instrumentChip = item.querySelector('.track-instrument-chip')
+      instrumentChip.textContent = instrument?.type === 'pack'
+        ? instrumentLabel
+        : instrument?.type === 'rack'
+          ? `Rack: ${instrument.rackId}`
+          : Palettes[(instrument && instrument.paletteKey) || track.paletteKey || 'classic']?.name || 'Internal Synth'
+      instrumentChip.title = 'Open instrument controls'
+      instrumentChip.onclick = () => document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
       instrumentSel.onchange = () => {
         const selection = packSelectionFromValue(instrumentSel.value)
         this._store.dispatch(SetTrackInstrument(track.id,

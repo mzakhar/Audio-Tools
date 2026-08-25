@@ -23,6 +23,7 @@ import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
+import { InstrumentInspector } from './components/instrument-inspector.js'
 import ShortcutManager from './shortcuts.js'
 import { applyTheme, savedTheme } from './theme.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
@@ -56,10 +57,23 @@ function sampleStoreFor(pack, ctx) {
   return stores.get(key)
 }
 
+async function auditionTrack(track) {
+  await ensureAudio()
+  const ctx = AudioEngine.getContext()
+  if (!track || !ctx) return
+  const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
+  const instrument = liveInstrumentFor(track, { palettes: Palettes, ctx, output, racks: ProjectStore.getState().racks, packFor, sampleStoreFor, mountRack: rack => RackEngine.mount(ctx, rack, { output }) })
+  if (!instrument) throw new Error('Selected instrument is unavailable')
+  await instrument.preload?.()
+  instrument.noteOn(60, 100)
+  setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
+}
+
 async function refreshPackCatalog() {
   if (!window.electronFS?.listInstrumentPacks) return
   _packCatalog = (await window.electronFS.listInstrumentPacks()).map(entry => compilePackManifest(entry.manifest))
   _arrangementView?.render()
+  _instrumentInspector?.render()
 }
 
 /** Tear down every live MIDI instrument — the old project's tracks are gone. */
@@ -74,6 +88,7 @@ let _arrangementView = null
 let _pianoRoll = null
 let _tr909View = null
 let _rackView = null
+let _instrumentInspector = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
 let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack'
 let _selectedArrangeTrackId = null
@@ -1148,6 +1163,8 @@ function boot() {
       packCatalog: () => _packCatalog
     })
   }
+  const inspector = document.getElementById('instrument-inspector')
+  if (inspector) _instrumentInspector = new InstrumentInspector(inspector, { store: ProjectStore, packCatalog: () => _packCatalog, audition: auditionTrack })
   const rackContainer = document.getElementById('rack-view')
   if (rackContainer) _rackView = new RackView(rackContainer, {
     hasWorklet: () => AudioEngine.hasWorklet(),

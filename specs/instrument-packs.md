@@ -17,6 +17,7 @@ Load large playable instrument libraries without making Synth startup, project l
 
 ## Progress — 2026-08-25
 
+- Selected MIDI tracks now use a dedicated Instrument inspector: unified Internal Synth / Pack / Rack source picker, MIDI channel, explicit bank/program selectors, incoming-program follow toggle, and C4 audition. Track headers retain only a compact source summary.
 - Electron imports selected local PCM `.sf2`, validates pack files, then atomically publishes under user-data `instrument-packs/`. Renderer has list/import/sample-byte IPC only.
 - Pack patches appear in track selectors. Missing selections remain saved, labeled, and silent. Bank Select/Program Change routes only MIDI-following pack tracks; channel 10 prefers GM percussion.
 - Samples decode on first use into bounded LRU cache. Timeline and offline bounce use packs; bounce preloads required samples and reports missing identifiers.
