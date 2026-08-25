@@ -12,7 +12,7 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
-export const CURRENT_VERSION = 4
+export const CURRENT_VERSION = 5
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -57,6 +57,14 @@ export function migrate(projectJson) {
       }
     }
     next.version = 4
+  }
+  if ((next.version ?? 1) < 5) {
+    for (const track of next.tracks || []) {
+      if (track.instrument?.type === 'pack' && !track.instrument.programFollow) {
+        track.instrument.programFollow = 'midi'
+      }
+    }
+    next.version = 5
   }
   for (const track of next.tracks || []) {
     if (track.type === 'midi' && !track.instrument) {
@@ -136,6 +144,33 @@ export function SetTrackInstrument(trackId, instrument) {
     undo(state) {
       return state
     }
+  }
+}
+
+/** Apply a resolved MIDI Program Change to one routed MIDI track. */
+export function SetTrackInstrumentProgram(trackId, selection) {
+  return {
+    label: 'MIDI program change',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (!track || track.type !== 'midi' || !selection?.packId || !selection?.packVersion || !selection?.patchId) return next
+      if (track.instrument?.programFollow === 'pinned') return next
+      track.instrument = {
+        type: 'pack',
+        packId: selection.packId,
+        packVersion: selection.packVersion,
+        patchId: selection.patchId,
+        programFollow: 'midi',
+        received: {
+          bankMsb: selection.bankMsb,
+          bankLsb: selection.bankLsb,
+          program: selection.program
+        }
+      }
+      return next
+    },
+    undo(state) { return state }
   }
 }
 
