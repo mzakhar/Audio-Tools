@@ -54,7 +54,7 @@ export function encodePcmWav(samples, sampleRate) {
 }
 
 /** Parse only standard PCM SF2 data. Throws before returning partial output. */
-export function importSf2(input, { id, version = '1.0.0' } = {}) {
+export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'LicenseRef-Imported', noticeFile: 'NOTICE.txt' } } = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.byteLength < 12) fail('file is too short')
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -117,10 +117,19 @@ export function importSf2(input, { id, version = '1.0.0' } = {}) {
         zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: (g.get(51) ?? 0) * 100 + (g.get(52) ?? 0) + sample.pitchCorrection, gain: -((g.get(48) ?? 0) / 100), ...(loop ? { loopStart: sample.loopStart - sample.start, loopEnd: sample.loopEnd - sample.start } : {}) })
       }
     }
-    if (zones.length) patches.push({ id: `sf2-${p}`, address: { bankMsb: 0, bankLsb: view.getUint16(at + 22, true) === 128 ? 0 : view.getUint16(at + 22, true), program: view.getUint16(at + 20, true) }, name: name(view, at, 20) || `Preset ${p}`, kind: 'sample', zones })
+    if (zones.length) {
+      const bank = view.getUint16(at + 22, true)
+      patches.push({
+        id: `sf2-${p}`,
+        address: { bankMsb: 0, bankLsb: bank === 128 ? 0 : bank, program: view.getUint16(at + 20, true) },
+        ...(bank === 128 ? { channelProfile: 'gm-percussion' } : {}),
+        name: name(view, at, 20) || `Preset ${p}`,
+        kind: 'sample', zones
+      })
+    }
   }
   if (!patches.length) fail('no playable PCM preset zones')
   const sourceName = infoChunks.INAM ? name(view, infoChunks.INAM.data, infoChunks.INAM.size) : 'Imported SoundFont'
   const packId = idFor(id || sourceName, 'imported-sf2')
-  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, source: { format: 'sf2', name: sourceName }, patches }, samples: [...emitted.values()].map(({ id: sampleId, wav }) => ({ id: sampleId, wav })) }
+  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, patches }, samples: [...emitted.values()].map(({ id: sampleId, wav }) => ({ id: sampleId, wav })) }
 }

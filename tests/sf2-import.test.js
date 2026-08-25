@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodePcmWav, importSf2 } from '../src/main/sf2-import.js'
+import { validatePackManifest } from '../src/renderer/js/instruments/pack-registry.js'
 
 const fourCC = (value) => [...value].map(c => c.charCodeAt(0))
 const u16 = value => [value & 255, value >>> 8]
@@ -37,6 +38,7 @@ describe('SF2 importer', () => {
     expect(String.fromCharCode(...new Uint8Array(result.samples[0].wav, 0, 4))).toBe('RIFF')
     expect(wav.getUint32(40, true)).toBe(8)
     expect(new Int16Array(result.samples[0].wav, 44)).toEqual(new Int16Array([100, -200, 300, -400]))
+    expect(validatePackManifest(result.manifest)).toEqual({ ok: true, errors: [] })
   })
 
   it('rejects truncated and structurally invalid files', () => {
