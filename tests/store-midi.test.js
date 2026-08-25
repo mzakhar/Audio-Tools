@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import ProjectStore, {
   AddTrack, AddClip,
   AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity,
-  SetTrackMidiChannel, SetTrackInstrument, AddRack, RemoveRack
+  SetTrackMidiChannel, SetTrackInstrument, SetTrackInstrumentProgram, AddRack, RemoveRack
 } from '../src/renderer/js/store/ProjectStore.js'
 
 function makeNote(overrides = {}) {
@@ -161,6 +161,28 @@ describe('SetTrackInstrument', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
     ProjectStore.dispatch(SetTrackInstrument('ghost', { type: 'palette', paletteKey: 'fm' }))
     expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
+  })
+})
+
+describe('SetTrackInstrumentProgram', () => {
+  const selection = { packId: 'gm', packVersion: '1.0.0', patchId: 'piano', bankMsb: 0, bankLsb: 0, program: 0 }
+
+  it('stores the resolved pack patch and received address', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, selection))
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({
+      type: 'pack', packId: 'gm', packVersion: '1.0.0', patchId: 'piano', programFollow: 'midi',
+      received: { bankMsb: 0, bankLsb: 0, program: 0 }
+    })
+  })
+
+  it('keeps a pinned instrument', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey: 'fm', programFollow: 'pinned' }))
+    ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, selection))
+    expect(ProjectStore.getState().tracks[0].instrument.paletteKey).toBe('fm')
   })
 })
 
