@@ -51,6 +51,10 @@ export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRa
     }
   }
 
+  // Pack playback is added with the pack sample store. Never substitute a
+  // palette here: an unavailable selected pack must stay silent and visible.
+  if (instrument.type !== 'palette') return null
+
   const palette = palettes?.[instrument.paletteKey || track.paletteKey || 'classic']
   if (!palette) return null
 

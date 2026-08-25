@@ -32,6 +32,7 @@ function instrumentFor(track, { palettes, ctx, output, rackHandles }) {
     const moduleId = handle && [...handle.mods].find(([, entry]) => entry.def?.type === 'midi-in')?.[0]
     return moduleId ? rackInstrument(handle, moduleId) : null
   }
+  if (instrument.type !== 'palette') return null
   const palette = palettes?.[instrument.paletteKey || track.paletteKey || 'classic']
   return palette ? paletteInstrument(palette, ctx, output) : null
 }

@@ -92,6 +92,13 @@ describe('TimelinePlayer.play', () => {
     expect(TimelinePlayer._sources.length).toBe(0)
   })
 
+  it('does not substitute a palette for an unavailable pack instrument', () => {
+    const tracks = [{ type: 'midi', mixerChannelId: 'ch-1', instrument: { type: 'pack', packId: 'missing' }, clips: [
+      { type: 'midi', startBeat: 0, notes: [{ pitch: 60, startBeat: 0, duration: 1, velocity: 1 }] }
+    ] }]
+    expect(() => TimelinePlayer.play({ beat: 0, bpm: 120, tracks, palettes: {}, mixerEngine: makeMixerEngine() })).not.toThrow()
+  })
+
   it('schedules a clip that starts at beat 0', () => {
     const buf = makeAudioBuf(44100 * 2)  // 2 second buffer
     const tracks = [{ type: 'audio', mixerChannelId: 'ch-1', clips: [
