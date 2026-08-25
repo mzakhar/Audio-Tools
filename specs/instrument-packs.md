@@ -8,12 +8,12 @@ Load large playable instrument libraries without making Synth startup, project l
 
 | Phase | State | Commit |
 |---|---|---|
-| 0 — Contracts and parser | not started | |
-| 1 — Pack manifest and GM starter pack | not started | |
+| 0 — Contracts and parser | done | `91ac5e8` |
+| 1 — Pack manifest and GM starter pack | in progress — registry done | `adedcd4` |
 | 2 — Lazy sample instrument | not started | |
 | 3 — Channel program state and routing | not started | |
-| 4 — Project persistence and UI | not started | |
-| 5 — Pack manager and `.sf2` import | not started | |
+| 4 — Project persistence and UI | in progress — persistence done | `9bb65f1` |
+| 5 — Pack manager and `.sf2` import | in progress — converter core done | `7b547a2` |
 
 ## Product decisions
 
