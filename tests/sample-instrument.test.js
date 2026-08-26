@@ -87,4 +87,16 @@ describe('sample instrument', () => {
     await Promise.resolve()
     expect(onStatus).toHaveBeenLastCalledWith({ state: 'started', sampleId: 'sample', pitch: 60, gain: 0.5, duration: 1 })
   })
+
+  it('converts legacy SoundFont loop frames to Web Audio seconds', async () => {
+    const { ctx, sources, output } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', loopStart: 44100, loopEnd: 88200 }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 3, sampleRate: 44100 })) }
+    })
+    inst.noteOn(60)
+    await Promise.resolve()
+    expect(sources[0].loop).toBe(true)
+    expect(sources[0].loopStart).toBe(1)
+    expect(sources[0].loopEnd).toBe(2)
+  })
 })

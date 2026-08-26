@@ -115,7 +115,7 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
         if (rootKey > 127) fail('invalid root key')
         const loop = (g.get(54) ?? 0) & 1
         const attenuation = g.get(48) ?? 0 // SoundFont centibels.
-        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: (g.get(51) ?? 0) * 100 + (g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(loop ? { loopStart: sample.loopStart - sample.start, loopEnd: sample.loopEnd - sample.start } : {}) })
+        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: (g.get(51) ?? 0) * 100 + (g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(loop ? { loopStart: (sample.loopStart - sample.start) / sample.rate, loopEnd: (sample.loopEnd - sample.start) / sample.rate } : {}) })
       }
     }
     if (zones.length) {

@@ -35,10 +35,14 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     // as unity so existing local packs become audible after this fix.
     const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
     gain.gain.setValueAtTime(zoneGain * Math.max(0, Math.min(127, velocity)) / 127, time)
-    if (Number.isFinite(zone.loopStart) && Number.isFinite(zone.loopEnd) && zone.loopEnd > zone.loopStart) {
+    // SF2 loop offsets are sample frames; Web Audio loop points are seconds.
+    // Accept already-converted packs and repair early installed packs here.
+    const loopStart = zone.loopStart > buffer.duration ? zone.loopStart / buffer.sampleRate : zone.loopStart
+    const loopEnd = zone.loopEnd > buffer.duration ? zone.loopEnd / buffer.sampleRate : zone.loopEnd
+    if (Number.isFinite(loopStart) && Number.isFinite(loopEnd) && loopEnd > loopStart && loopEnd <= buffer.duration) {
       source.loop = true
-      source.loopStart = zone.loopStart
-      source.loopEnd = zone.loopEnd
+      source.loopStart = loopStart
+      source.loopEnd = loopEnd
     }
     const analyser = ctx.createAnalyser?.()
     if (analyser) {
