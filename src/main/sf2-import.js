@@ -10,6 +10,7 @@ const text = (view, off, len) => {
 const name = (view, off, len) => text(view, off, len).replace(/\0.*$/, '').trim()
 const fail = message => { throw new Error(`Invalid SF2: ${message}`) }
 const idFor = (value, fallback) => (value || fallback).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || fallback
+const signed16 = value => value > 0x7fff ? value - 0x10000 : value
 
 function chunks(view, start, end) {
   const found = []
@@ -115,7 +116,7 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
         if (rootKey > 127) fail('invalid root key')
         const loop = (g.get(54) ?? 0) & 1
         const attenuation = g.get(48) ?? 0 // SoundFont centibels.
-        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: (g.get(51) ?? 0) * 100 + (g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(loop ? { loopStart: (sample.loopStart - sample.start) / sample.rate, loopEnd: (sample.loopEnd - sample.start) / sample.rate } : {}) })
+        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: signed16(g.get(51) ?? 0) * 100 + signed16(g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(loop ? { loopStart: (sample.loopStart - sample.start) / sample.rate, loopEnd: (sample.loopEnd - sample.start) / sample.rate } : {}) })
       }
     }
     if (zones.length) {

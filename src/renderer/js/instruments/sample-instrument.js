@@ -12,7 +12,11 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
   let disposed = false
 
   const stop = (pitch, time = ctx.currentTime) => {
-    pending.delete(pitch)
+    const pendingVoice = pending.get(pitch)
+    if (pendingVoice) {
+      pendingVoice.released = true
+      return
+    }
     const voice = voices.get(pitch)
     if (!voice) return
     voices.delete(pitch)
@@ -25,12 +29,14 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
   }
 
   const start = (pitch, velocity, zone, buffer, token, time) => {
-    if (disposed || pending.get(pitch) !== token) return
+    const pendingVoice = pending.get(pitch)
+    if (disposed || pendingVoice?.token !== token) return
     pending.delete(pitch)
     const source = ctx.createBufferSource()
     const gain = ctx.createGain()
     source.buffer = buffer
-    source.playbackRate.value = Math.pow(2, (pitch - zone.rootKey) / 12)
+    const tune = Number.isFinite(zone.tune) && Math.abs(zone.tune) <= 2400 ? zone.tune : 0
+    source.playbackRate.value = Math.pow(2, (pitch - zone.rootKey - tune / 100) / 12)
     // Earlier SF2 imports stored attenuation as zero/negative gain. Treat it
     // as unity so existing local packs become audible after this fix.
     const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
@@ -60,6 +66,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       analyser?.disconnect()
     }
     source.start(time)
+    if (pendingVoice.released) source.stop(Math.max(time, ctx.currentTime) + 0.08)
     onStatus({ state: 'started', sampleId: zone.sampleId, pitch, gain: zoneGain, duration: buffer.duration })
     // Visible signal probe remains in the active source route, otherwise
     // Web Audio may skip rendering its passive analyser branch.
@@ -80,12 +87,12 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       const zone = zoneFor(patch, pitch, velocity)
       if (!zone || disposed) return
       const token = {}
-      pending.set(pitch, token)
+      pending.set(pitch, { token, released: false })
       onStatus({ state: 'loading', sampleId: zone.sampleId, pitch })
       const cached = sampleStore.peek?.(zone.sampleId)
       if (cached) return start(pitch, velocity, zone, cached, token, time)
       Promise.resolve(sampleStore.get(zone.sampleId)).then(buffer => start(pitch, velocity, zone, buffer, token, time)).catch(error => {
-        if (pending.get(pitch) === token) pending.delete(pitch)
+        if (pending.get(pitch)?.token === token) pending.delete(pitch)
         onStatus({ state: 'error', sampleId: zone.sampleId, pitch, error: error?.message || 'Sample load failed' })
       })
     },

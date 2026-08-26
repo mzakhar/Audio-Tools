@@ -37,7 +37,7 @@ describe('sample instrument', () => {
     expect(sources[0].start).toHaveBeenCalledWith(3)
   })
 
-  it('cancels a note released before its sample resolves', async () => {
+  it('plays a brief release when a first note resolves after key-up', async () => {
     const { ctx, sources, output } = setup()
     let done
     const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: () => new Promise(resolve => { done = resolve }) } })
@@ -45,7 +45,9 @@ describe('sample instrument', () => {
     inst.noteOff(60)
     done({})
     await Promise.resolve(); await Promise.resolve()
-    expect(sources).toHaveLength(0)
+    expect(sources).toHaveLength(1)
+    expect(sources[0].start).toHaveBeenCalledWith(3)
+    expect(sources[0].stop).toHaveBeenCalledWith(3.08)
   })
 
   it('stops and disconnects a started voice', async () => {
