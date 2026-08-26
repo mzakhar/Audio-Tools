@@ -29,7 +29,7 @@ export function trackInstrumentLabel(instrument, packs) {
 }
 
 export class InstrumentInspector {
-  constructor(container, { store, packCatalog, audition, auditionPack, auditionRawPack, selectPreview }) {
+  constructor(container, { store, packCatalog, audition, auditionPack, auditionRawPack, selectPreview, preloadPack }) {
     this.container = container
     this.store = store
     this.packCatalog = packCatalog
@@ -37,6 +37,7 @@ export class InstrumentInspector {
     this.auditionPack = auditionPack
     this.auditionRawPack = auditionRawPack
     this.selectPreview = selectPreview
+    this.preloadPack = preloadPack
     this.trackId = null
     this.diagnostic = ''
     this.preview = null
@@ -179,11 +180,14 @@ export class InstrumentInspector {
     const packSelect = document.createElement('select')
     for (const pack of packs) option(packSelect, `${pack.id}@${pack.version}`, `${manifestOf(pack).name} · ${pack.version}`)
     packSelect.value = `${instrument.packId}@${instrument.packVersion}`
-    const choose = (chosenPack, patch) => this.store.dispatch(SetTrackInstrument(track.id, {
+    const choose = (chosenPack, patch) => {
+      this.store.dispatch(SetTrackInstrument(track.id, {
       type: 'pack', packId: chosenPack.id, packVersion: chosenPack.version, patchId: patch.id,
       programFollow: follow.checked ? 'midi' : 'pinned',
       received: { bankMsb: patch.address.bankMsb, bankLsb: patch.address.bankLsb, program: patch.address.program }
-    }))
+      }))
+      this.preloadPack?.(chosenPack, patch)
+    }
     const pack = packFor(packs, instrument.packId, instrument.packVersion)
     const manifest = manifestOf(pack)
     if (!manifest) {

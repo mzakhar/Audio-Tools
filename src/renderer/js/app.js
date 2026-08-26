@@ -45,6 +45,7 @@ const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
 let _previewPack = null
+let _previewInstrument = null
 const _sampleStores = new WeakMap()
 
 function packFor(packId, version) {
@@ -62,6 +63,25 @@ function sampleStoreFor(pack, ctx) {
 
 function sampleStatus(trackId, status) {
   document.dispatchEvent(new CustomEvent('instrument-sample-status', { detail: { trackId, status } }))
+}
+
+async function warmPack(pack, patch) {
+  await ensureAudio()
+  const ctx = AudioEngine.getContext(), store = pack && ctx && sampleStoreFor(pack, ctx)
+  const zone = patch?.zones?.find(item => 60 >= item.keyLo && 60 <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
+  if (store && zone) await store.preload([zone.sampleId])
+}
+
+function previewInstrumentFor(ctx) {
+  const pack = _previewPack && packFor(_previewPack.packId, _previewPack.packVersion)
+  const patch = pack?.byId?.get(_previewPack.patchId)
+  if (!pack || !patch) return null
+  const signature = `${pack.id}@${pack.version}:${patch.id}`
+  if (_previewInstrument?.ctx === ctx && _previewInstrument.signature === signature) return _previewInstrument.instrument
+  _previewInstrument?.instrument.dispose()
+  const instrument = sampleInstrumentFor(patch, { ctx, output: AudioEngine.getMasterInput(), sampleStore: sampleStoreFor(pack, ctx) })
+  _previewInstrument = { ctx, signature, instrument }
+  return instrument
 }
 
 async function auditionTrack(track) {
@@ -434,7 +454,7 @@ function initGlobalHeader() {
 }
 
 // ─── Note events (from Keyboard) ───────────────────────────────────────────
-document.addEventListener('note-on', (e) => {
+document.addEventListener('note-on', async (e) => {
   const state = ProjectStore.getState()
   const midiTracks = state.tracks.filter(track => track.type === 'midi')
   const target = midiTracks.find(track => track.id === _midiTargetTrackId) || (midiTracks.length === 1 ? midiTracks[0] : null)
@@ -444,10 +464,15 @@ document.addEventListener('note-on', (e) => {
     document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-on', channel, pitch: e.detail.note, velocity: 108 } }))
     return
   }
-  ensureAudio()
+  await ensureAudio()
   const ctx = AudioEngine.getContext()
   if (!ctx) return
   const note = e.detail.note
+  const preview = previewInstrumentFor(ctx)
+  if (preview) {
+    preview.noteOn(note, 108)
+    return
+  }
   if (activeVoices[note]) return
 
   const freq = 440 * Math.pow(2, (note - 69) / 12)
@@ -463,6 +488,10 @@ document.addEventListener('note-off', (e) => {
     const channel = computerKeyTracks.get(note)
     computerKeyTracks.delete(note)
     document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
+    return
+  }
+  if (_previewInstrument) {
+    _previewInstrument.instrument.noteOff(note)
     return
   }
   if (activeVoices[note]) {
@@ -950,7 +979,7 @@ function initMidi() {
 
   // Route live MIDI note events → track instruments (routeChannel), falling
   // back to the plain keyboard behaviour when no MIDI tracks exist at all.
-  document.addEventListener('midi-event', (e) => {
+  document.addEventListener('midi-event', async (e) => {
     const detail = e.detail
     if (detail.kind === 'program-change' || (detail.kind === 'cc' && (detail.controller === 0 || detail.controller === 32))) {
       const result = applyChannelMidi(_channelPrograms, detail)
@@ -972,7 +1001,7 @@ function initMidi() {
       return
     }
     if (detail.kind !== 'note-on' && detail.kind !== 'note-off' && detail.kind !== 'cc' && detail.kind !== 'pitch-bend') return
-    ensureAudio()
+    await ensureAudio()
     const ctx = AudioEngine.getContext()
     if (!ctx) return
 
@@ -993,6 +1022,12 @@ function initMidi() {
       // No MIDI tracks at all — plain keyboard behaviour, notes only.
       if (detail.kind !== 'note-on' && detail.kind !== 'note-off') return
       const note = detail.pitch
+      const preview = previewInstrumentFor(ctx)
+      if (preview) {
+        if (detail.kind === 'note-on') preview.noteOn(note, detail.velocity)
+        else preview.noteOff(note)
+        return
+      }
       if (detail.kind === 'note-on') {
         if (activeVoices[note]) return
         const freq = 440 * Math.pow(2, (note - 69) / 12)
@@ -1226,7 +1261,14 @@ function boot() {
     audition: auditionTrack,
     auditionPack,
     auditionRawPack,
-    selectPreview: selection => { _previewPack = selection }
+    selectPreview: selection => {
+      _previewPack = selection
+      _previewInstrument?.instrument.dispose()
+      _previewInstrument = null
+      const pack = packFor(selection.packId, selection.packVersion)
+      warmPack(pack, pack?.byId?.get(selection.patchId)).catch(() => {})
+    },
+    preloadPack: (pack, patch) => warmPack(pack, patch).catch(() => {})
   })
   const rackContainer = document.getElementById('rack-view')
   if (rackContainer) _rackView = new RackView(rackContainer, {
