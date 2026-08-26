@@ -20,6 +20,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     if (time <= ctx.currentTime) {
       voice.source.disconnect()
       voice.gain.disconnect()
+      voice.analyser?.disconnect()
     }
   }
 
@@ -39,29 +40,31 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       source.loopStart = zone.loopStart
       source.loopEnd = zone.loopEnd
     }
+    const analyser = ctx.createAnalyser?.()
+    if (analyser) {
+      analyser.fftSize = 256
+      gain.connect(analyser)
+      analyser.connect(output)
+    } else gain.connect(output)
     source.connect(gain)
-    gain.connect(output)
-    const voice = { source, gain }
+    const voice = { source, gain, analyser }
     voices.set(pitch, voice)
     source.onended = () => {
       if (voices.get(pitch) === voice) voices.delete(pitch)
       source.disconnect()
       gain.disconnect()
+      analyser?.disconnect()
     }
     source.start(time)
     onStatus({ state: 'started', sampleId: zone.sampleId, pitch, gain: zoneGain, duration: buffer.duration })
-    // Temporary, visible signal probe: this samples the track output without
-    // changing its route to the master bus.
-    if (ctx.createAnalyser) {
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 256
-      output.connect(analyser)
+    // Visible signal probe remains in the active source route, otherwise
+    // Web Audio may skip rendering its passive analyser branch.
+    if (analyser) {
       setTimeout(() => {
         const data = new Float32Array(analyser.fftSize)
         analyser.getFloatTimeDomainData(data)
         let peak = 0
         for (const value of data) peak = Math.max(peak, Math.abs(value))
-        analyser.disconnect()
         onStatus({ state: 'track-signal', sampleId: zone.sampleId, peak })
       }, 100)
     }
