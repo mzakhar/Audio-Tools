@@ -101,4 +101,14 @@ describe('sample instrument', () => {
     expect(sources[0].loopStart).toBe(1)
     expect(sources[0].loopEnd).toBe(2)
   })
+
+  it('does not repeat tiny SoundFont loops without an SF2 envelope', async () => {
+    const { ctx, sources, output } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', loopStart: 0.6, loopEnd: 0.606 }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 3, sampleRate: 44100 })) }
+    })
+    inst.noteOn(60)
+    await Promise.resolve()
+    expect(sources[0].loop).toBeUndefined()
+  })
 })

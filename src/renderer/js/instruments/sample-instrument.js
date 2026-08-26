@@ -45,7 +45,9 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     // Accept already-converted packs and repair early installed packs here.
     const loopStart = zone.loopStart > buffer.duration ? zone.loopStart / buffer.sampleRate : zone.loopStart
     const loopEnd = zone.loopEnd > buffer.duration ? zone.loopEnd / buffer.sampleRate : zone.loopEnd
-    if (Number.isFinite(loopStart) && Number.isFinite(loopEnd) && loopEnd > loopStart && loopEnd <= buffer.duration) {
+    // Tiny SF2 loops rely on an SF2 volume envelope we do not render. Repeating
+    // them raw turns a natural attack into a harsh buzzy sustain.
+    if (Number.isFinite(loopStart) && Number.isFinite(loopEnd) && loopEnd - loopStart >= 0.02 && loopEnd <= buffer.duration) {
       source.loop = true
       source.loopStart = loopStart
       source.loopEnd = loopEnd
