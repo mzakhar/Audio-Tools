@@ -87,6 +87,19 @@ async function auditionPack(pack, patch) {
   setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
 }
 
+async function auditionRawPack(pack, patch) {
+  await ensureAudio()
+  const ctx = AudioEngine.getContext()
+  const zone = patch?.zones?.find(item => 60 >= item.keyLo && 60 <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
+  if (!ctx || !zone || !window.electronFS?.readInstrumentSample) throw new Error('Selected pack sample is unavailable')
+  const bytes = await window.electronFS.readInstrumentSample(pack.id, pack.version, zone.sampleId)
+  const source = ctx.createBufferSource()
+  source.buffer = await ctx.decodeAudioData(bytes)
+  source.connect(ctx.destination)
+  source.start()
+  setTimeout(() => source.stop(), 800)
+}
+
 function addMidiTrack(name = 'MIDI') {
   ProjectStore.dispatch(AddTrack('midi', name))
   const track = ProjectStore.getState().tracks.at(-1)
@@ -1212,6 +1225,7 @@ function boot() {
     packCatalog: () => _packCatalog,
     audition: auditionTrack,
     auditionPack,
+    auditionRawPack,
     selectPreview: selection => { _previewPack = selection }
   })
   const rackContainer = document.getElementById('rack-view')

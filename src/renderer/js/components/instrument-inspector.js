@@ -29,12 +29,13 @@ export function trackInstrumentLabel(instrument, packs) {
 }
 
 export class InstrumentInspector {
-  constructor(container, { store, packCatalog, audition, auditionPack, selectPreview }) {
+  constructor(container, { store, packCatalog, audition, auditionPack, auditionRawPack, selectPreview }) {
     this.container = container
     this.store = store
     this.packCatalog = packCatalog
     this.audition = audition
     this.auditionPack = auditionPack
+    this.auditionRawPack = auditionRawPack
     this.selectPreview = selectPreview
     this.trackId = null
     this.diagnostic = ''
@@ -154,7 +155,16 @@ export class InstrumentInspector {
       catch (error) { alert(`Could not audition pack: ${error.message}`) }
       finally { audition.disabled = false }
     }
-    this.container.append(field('Pack', packSelect), field('Program', program), text('Audition uses master output. Add a MIDI track to arrange this selection.'), audition)
+    const raw = document.createElement('button')
+    raw.className = 'instrument-audition'
+    raw.textContent = 'RAW WAV TEST'
+    raw.onclick = async () => {
+      raw.disabled = true
+      try { const { pack, patch } = selection(); await this.auditionRawPack?.(pack, patch) }
+      catch (error) { alert(`Could not run raw WAV test: ${error.message}`) }
+      finally { raw.disabled = false }
+    }
+    this.container.append(field('Pack', packSelect), field('Program', program), text('Audition uses master output. Add a MIDI track to arrange this selection.'), audition, raw)
   }
 
   renderInternal(track, instrument) {
