@@ -811,7 +811,7 @@ function initMidi() {
 
   if (!enableBtn) return
 
-  enableBtn.addEventListener('click', async () => {
+  const enableMidi = async () => {
     const { granted, inputs, error } = await MidiController.requestAccess()
     if (!granted) {
       statusEl.textContent = 'MIDI: ' + (error || 'denied')
@@ -823,7 +823,12 @@ function initMidi() {
     deviceSel.style.display = ''
     recBtn.style.display = ''
     updateMidiDeviceSelect(inputs)
-  })
+  }
+
+  enableBtn.addEventListener('click', enableMidi)
+  // Electron resets Web MIDI access with every renderer restart. Reconnect a
+  // previously-approved device so restarting the app cannot silently disable it.
+  enableMidi()
 
   deviceSel?.addEventListener('change', () => {
     MidiController.selectInput(deviceSel.value)
