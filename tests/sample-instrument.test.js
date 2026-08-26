@@ -3,6 +3,7 @@ import { sampleInstrumentFor } from '../src/renderer/js/instruments/sample-instr
 
 function setup() {
   const sources = []
+  const gains = []
   const ctx = {
     currentTime: 3,
     createBufferSource: () => {
@@ -10,9 +11,13 @@ function setup() {
       sources.push(source)
       return source
     },
-    createGain: () => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { setValueAtTime: vi.fn() } })
+    createGain: () => {
+      const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { setValueAtTime: vi.fn() } }
+      gains.push(gain)
+      return gain
+    }
   }
-  return { ctx, sources, output: {} }
+  return { ctx, sources, gains, output: {} }
 }
 
 const patch = { zones: [
@@ -51,5 +56,16 @@ describe('sample instrument', () => {
     inst.noteOff(60)
     expect(sources[0].stop).toHaveBeenCalledWith(3)
     expect(sources[0].disconnect).toHaveBeenCalled()
+  })
+
+  it('keeps legacy zero-gain imported zones audible', async () => {
+    const { ctx, sources, gains } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', gain: 0 }] }, {
+      ctx, output: {}, sampleStore: { get: vi.fn(() => Promise.resolve({})) }
+    })
+    inst.noteOn(60, 127)
+    await Promise.resolve()
+    expect(gains[0].gain.setValueAtTime).toHaveBeenCalledWith(1, 3)
+    expect(sources[0].start).toHaveBeenCalled()
   })
 })

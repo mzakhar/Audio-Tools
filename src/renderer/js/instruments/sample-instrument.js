@@ -30,7 +30,10 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
     const gain = ctx.createGain()
     source.buffer = buffer
     source.playbackRate.value = Math.pow(2, (pitch - zone.rootKey) / 12)
-    gain.gain.setValueAtTime((zone.gain ?? 1) * Math.max(0, Math.min(127, velocity)) / 127, time)
+    // Earlier SF2 imports stored attenuation as zero/negative gain. Treat it
+    // as unity so existing local packs become audible after this fix.
+    const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
+    gain.gain.setValueAtTime(zoneGain * Math.max(0, Math.min(127, velocity)) / 127, time)
     if (Number.isFinite(zone.loopStart) && Number.isFinite(zone.loopEnd) && zone.loopEnd > zone.loopStart) {
       source.loop = true
       source.loopStart = zone.loopStart
