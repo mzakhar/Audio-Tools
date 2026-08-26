@@ -119,6 +119,15 @@ ipcMain.handle('fs:exportWav', async (event, buffer, defaultName) => {
   return filePath
 })
 
+ipcMain.handle('fs:saveRecording', async (_event, projectDir, buffer, filename) => {
+  if (typeof projectDir !== 'string' || !/^[\w.-]+\.wav$/i.test(filename)) throw new Error('Invalid recording destination')
+  const recordingsDir = assertPathWithin(join(resolve(projectDir), 'recordings'), projectDir)
+  const filePath = assertPathWithin(join(recordingsDir, filename), recordingsDir)
+  await mkdir(recordingsDir, { recursive: true })
+  await writeFile(filePath, Buffer.from(buffer))
+  return filePath
+})
+
 ipcMain.handle('fs:importRackPatch', async () => {
   const { filePaths, canceled } = await dialog.showOpenDialog({ filters: [{ name: 'Synth Rack Patch', extensions: ['synthrack'] }], properties: ['openFile'] })
   return canceled || !filePaths[0] ? null : readFile(filePaths[0], 'utf-8')

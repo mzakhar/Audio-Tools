@@ -564,7 +564,7 @@ function initRecorder() {
       timer.textContent = '00:00'
       const ts = new Date().toISOString().replace('T', '-').replace(/:/g, '-').slice(0, 19)
       try {
-        const path = await Recorder.stop('synth-' + ts + '.wav')
+        const path = await Recorder.stop('synth-' + ts + '.wav', AudioStore.getProjectDir())
         status.textContent = path ? `SAVED: ${path}` : 'SAVE CANCELED'
       } catch (error) {
         console.error('Audio recording save failed:', error)

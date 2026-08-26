@@ -39,7 +39,7 @@ function start(ctx, compressor) {
   workletNode.connect(ctx.destination)
 }
 
-async function stop(filename) {
+async function stop(filename, projectDir) {
   if (!workletNode) return
 
   // Tell worklet to stop recording
@@ -68,7 +68,7 @@ async function stop(filename) {
   }
 
   const wav = encodeWAV(pcm, sampleRate, 2)
-  const savedPath = await FileAdapter.exportWav(wav, filename || 'recording.wav')
+  const savedPath = await FileAdapter.saveRecording(projectDir, wav, filename || 'recording.wav')
 
   chunksL = []
   chunksR = []
