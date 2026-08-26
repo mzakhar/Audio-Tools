@@ -68,12 +68,13 @@ async function stop(filename) {
   }
 
   const wav = encodeWAV(pcm, sampleRate, 2)
-  await FileAdapter.exportWav(wav, filename || 'recording.wav')
+  const savedPath = await FileAdapter.exportWav(wav, filename || 'recording.wav')
 
   chunksL = []
   chunksR = []
   _ctx = null
   _compressor = null
+  return savedPath
 }
 
 const Recorder = { start, stop }

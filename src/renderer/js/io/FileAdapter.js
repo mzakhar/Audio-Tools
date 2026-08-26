@@ -117,7 +117,7 @@ const ElectronAdapter = {
   },
 
   async exportWav(arrayBuffer, defaultName) {
-    await window.electronFS.exportWav(arrayBuffer, defaultName || 'export.wav')
+    return window.electronFS.exportWav(arrayBuffer, defaultName || 'export.wav')
   },
 
   async importRackPatch() {

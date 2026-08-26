@@ -109,8 +109,8 @@ ipcMain.handle('fs:importAudio', async (_event, srcPath, projectDir) => {
   return join('audio', filename)
 })
 
-ipcMain.handle('fs:exportWav', async (_event, buffer, defaultName) => {
-  const { filePath, canceled } = await dialog.showSaveDialog({
+ipcMain.handle('fs:exportWav', async (event, buffer, defaultName) => {
+  const { filePath, canceled } = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
     defaultPath: defaultName || 'recording.wav',
     filters: [{ name: 'WAV Audio', extensions: ['wav'] }],
   })
