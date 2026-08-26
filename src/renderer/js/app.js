@@ -68,8 +68,11 @@ function sampleStatus(trackId, status) {
 async function warmPack(pack, patch) {
   await ensureAudio()
   const ctx = AudioEngine.getContext(), store = pack && ctx && sampleStoreFor(pack, ctx)
-  const zone = patch?.zones?.find(item => 60 >= item.keyLo && 60 <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
-  if (store && zone) await store.preload([zone.sampleId])
+  // Warm a small playable octave range, not an entire SoundFont preset.
+  const ids = [...new Set([48, 60, 72].flatMap(note => patch?.zones
+    ?.filter(item => note >= item.keyLo && note <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
+    .map(item => item.sampleId) || []))]
+  if (store && ids.length) await store.preload(ids)
 }
 
 function previewInstrumentFor(ctx) {

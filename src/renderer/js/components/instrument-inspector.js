@@ -82,7 +82,10 @@ export class InstrumentInspector {
       if (source.value === 'palette') this.store.dispatch(SetTrackInstrument(track.id, { type: 'palette', paletteKey: 'classic' }))
       if (source.value === 'pack') {
         const pack = packs[0], patch = manifestOf(pack)?.patches?.[0]
-        if (pack && patch) this.store.dispatch(SetTrackInstrument(track.id, { type: 'pack', packId: pack.id, packVersion: pack.version, patchId: patch.id, programFollow: 'midi' }))
+        if (pack && patch) {
+          this.store.dispatch(SetTrackInstrument(track.id, { type: 'pack', packId: pack.id, packVersion: pack.version, patchId: patch.id, programFollow: 'pinned' }))
+          this.preloadPack?.(pack, patch)
+        }
       }
       if (source.value === 'rack') {
         const rack = Object.values(state.racks || {})[0]
@@ -180,10 +183,10 @@ export class InstrumentInspector {
     const packSelect = document.createElement('select')
     for (const pack of packs) option(packSelect, `${pack.id}@${pack.version}`, `${manifestOf(pack).name} · ${pack.version}`)
     packSelect.value = `${instrument.packId}@${instrument.packVersion}`
-    const choose = (chosenPack, patch) => {
+    const choose = (chosenPack, patch, programFollow = 'pinned') => {
       this.store.dispatch(SetTrackInstrument(track.id, {
       type: 'pack', packId: chosenPack.id, packVersion: chosenPack.version, patchId: patch.id,
-      programFollow: follow.checked ? 'midi' : 'pinned',
+      programFollow,
       received: { bankMsb: patch.address.bankMsb, bankLsb: patch.address.bankLsb, program: patch.address.program }
       }))
       this.preloadPack?.(chosenPack, patch)
@@ -222,7 +225,7 @@ export class InstrumentInspector {
     program.onchange = () => choose(pack, manifest.patches.find(item => item.id === program.value))
     const follow = document.createElement('input')
     follow.type = 'checkbox'; follow.checked = instrument.programFollow !== 'pinned'
-    follow.onchange = () => choose(pack, manifest.patches.find(item => item.id === program.value) || current)
+    follow.onchange = () => choose(pack, manifest.patches.find(item => item.id === program.value) || current, follow.checked ? 'midi' : 'pinned')
     this.container.append(field('Pack', packSelect), field('Bank', bank), field('Program', program), field('Search', search), check('Follow keyboard program changes', follow))
   }
 

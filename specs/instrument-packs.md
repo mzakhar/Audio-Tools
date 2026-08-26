@@ -10,10 +10,10 @@ Load large playable instrument libraries without making Synth startup, project l
 |---|---|---|
 | 0 — Contracts and parser | done | `91ac5e8` |
 | 1 — Pack manifest and GM starter pack | in progress — registry done | `adedcd4` |
-| 2 — Lazy sample instrument | not started | |
-| 3 — Channel program state and routing | not started | |
-| 4 — Project persistence and UI | in progress — persistence done | `9bb65f1` |
-| 5 — Pack manager and `.sf2` import | in progress — converter core done | `7b547a2` |
+| 2 — Lazy sample instrument | done | `ecd46d9` |
+| 3 — Channel program state and routing | done | `d5fb36c` |
+| 4 — Project persistence and UI | done | `d5fb36c` |
+| 5 — Pack manager and `.sf2` import | done — local `.sf2` only | `57ca872` |
 
 ## Progress — 2026-08-25
 
@@ -21,6 +21,7 @@ Load large playable instrument libraries without making Synth startup, project l
 - Electron imports selected local PCM `.sf2`, validates pack files, then atomically publishes under user-data `instrument-packs/`. Renderer has list/import/sample-byte IPC only.
 - Pack patches appear in track selectors. Missing selections remain saved, labeled, and silent. Bank Select/Program Change routes only MIDI-following pack tracks; channel 10 prefers GM percussion.
 - Samples decode on first use into bounded LRU cache. Timeline and offline bounce use packs; bounce preloads required samples and reports missing identifiers.
+- Manual pack and program choices now pin the patch by default; selected presets warm three representative octaves without eagerly decoding a whole bank.
 - Deferred: home-server catalog, remote download, zip install, enable/disable/remove UI. No static HTTPS catalog source, signed artifact, or zip extractor exists here; adding one would invent distribution/trust policy. Local `.sf2` remains first path.
 
 ## Product decisions
