@@ -29,13 +29,16 @@ export function trackInstrumentLabel(instrument, packs) {
 }
 
 export class InstrumentInspector {
-  constructor(container, { store, packCatalog, audition }) {
+  constructor(container, { store, packCatalog, audition, auditionPack, selectPreview }) {
     this.container = container
     this.store = store
     this.packCatalog = packCatalog
     this.audition = audition
+    this.auditionPack = auditionPack
+    this.selectPreview = selectPreview
     this.trackId = null
     this.diagnostic = ''
+    this.preview = null
     document.addEventListener('track-selected', event => {
       this.trackId = event.detail.trackId
       this.render()
@@ -59,7 +62,7 @@ export class InstrumentInspector {
     const track = state.tracks.find(item => item.id === this.trackId)
     this.container.innerHTML = ''
     if (!track || track.type !== 'midi') {
-      this.container.innerHTML = '<p class="instrument-empty">Select MIDI track to choose instrument.</p>'
+      this.renderBrowser(catalog(this.packCatalog))
       return
     }
 
@@ -108,6 +111,50 @@ export class InstrumentInspector {
       finally { audition.disabled = false }
     }
     this.container.append(audition)
+  }
+
+  renderBrowser(packs) {
+    const title = document.createElement('h2')
+    title.textContent = 'Instrument Browser'
+    this.container.append(title)
+    if (!packs.length) {
+      this.container.append(text('Import a SoundFont with + PACK to audition instruments.'))
+      return
+    }
+    const packSelect = document.createElement('select')
+    for (const pack of packs) option(packSelect, `${pack.id}@${pack.version}`, `${manifestOf(pack).name} · ${pack.version}`)
+    const initial = this.preview && packFor(packs, this.preview.packId, this.preview.packVersion)
+      ? this.preview : { packId: packs[0].id, packVersion: packs[0].version, patchId: manifestOf(packs[0]).patches[0].id }
+    packSelect.value = `${initial.packId}@${initial.packVersion}`
+    const program = document.createElement('select')
+    const fill = () => {
+      const [id, version] = packSelect.value.split('@')
+      const pack = packFor(packs, id, version), manifest = manifestOf(pack)
+      program.innerHTML = ''
+      for (const patch of manifest.patches) option(program, patch.id, `${String(patch.address.program).padStart(3, '0')} · ${patch.name}`)
+      if (this.preview?.packId === id && this.preview?.packVersion === version) program.value = this.preview.patchId
+      if (program.selectedIndex < 0) program.selectedIndex = 0
+    }
+    fill()
+    const selection = () => {
+      const [packId, packVersion] = packSelect.value.split('@')
+      const pack = packFor(packs, packId, packVersion), patch = patchFor(pack, program.value)
+      this.preview = { packId, packVersion, patchId: patch.id }
+      this.selectPreview?.(this.preview)
+      return { pack, patch }
+    }
+    packSelect.onchange = () => { fill(); selection() }
+    program.onchange = selection
+    const audition = document.createElement('button')
+    audition.className = 'instrument-audition'
+    audition.textContent = '▶ AUDITION C4'
+    audition.onclick = async () => {
+      audition.disabled = true
+      try { const { pack, patch } = selection(); await this.auditionPack?.(pack, patch) }
+      catch (error) { alert(`Could not audition pack: ${error.message}`) }
+      finally { audition.disabled = false }
+    }
+    this.container.append(field('Pack', packSelect), field('Program', program), text('Audition uses master output. Add a MIDI track to arrange this selection.'), audition)
   }
 
   renderInternal(track, instrument) {

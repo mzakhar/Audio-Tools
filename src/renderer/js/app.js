@@ -8,7 +8,7 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrumentProgram } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { liveInstrumentFor } from './midi/live-instrument.js'
@@ -29,6 +29,7 @@ import { applyTheme, savedTheme } from './theme.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
+import { sampleInstrumentFor } from './instruments/sample-instrument.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -43,6 +44,7 @@ const computerKeyTracks = new Map() // note → MIDI channel while held
 const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
+let _previewPack = null
 const _sampleStores = new WeakMap()
 
 function packFor(packId, version) {
@@ -73,6 +75,24 @@ async function auditionTrack(track) {
   await instrument.preload?.(60, 100)
   instrument.noteOn(60, 100)
   setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
+}
+
+async function auditionPack(pack, patch) {
+  await ensureAudio()
+  const ctx = AudioEngine.getContext(), sampleStore = pack && ctx && sampleStoreFor(pack, ctx)
+  if (!ctx || !sampleStore || !patch) throw new Error('Selected pack is unavailable')
+  const instrument = sampleInstrumentFor(patch, { ctx, output: AudioEngine.getMasterInput(), sampleStore })
+  await instrument.preload(60, 100)
+  instrument.noteOn(60, 100)
+  setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
+}
+
+function addMidiTrack(name = 'MIDI') {
+  ProjectStore.dispatch(AddTrack('midi', name))
+  const track = ProjectStore.getState().tracks.at(-1)
+  if (_previewPack && track) ProjectStore.dispatch(SetTrackInstrument(track.id, { type: 'pack', ..._previewPack, programFollow: 'pinned' }))
+  syncMixerStrips(ProjectStore.getState())
+  return ProjectStore.getState().tracks.at(-1)
 }
 
 async function refreshPackCatalog() {
@@ -801,8 +821,7 @@ function initArrangeToolbar() {
     syncMixerStrips(ProjectStore.getState())
   })
   document.addEventListener('add-midi-track', () => {
-    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
-    syncMixerStrips(ProjectStore.getState())
+    addMidiTrack()
   })
 }
 
@@ -865,10 +884,8 @@ function initMidi() {
         : state.tracks.find(t => t.type === 'midi')
 
       if (!midiTrack) {
-        ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+        midiTrack = addMidiTrack()
         state = ProjectStore.getState()
-        midiTrack = state.tracks[state.tracks.length - 1]
-        syncMixerStrips(state)
       }
       _midiTargetTrackId = midiTrack.id
 
@@ -914,8 +931,7 @@ function initMidi() {
   })
 
   addMidiBtn?.addEventListener('click', () => {
-    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
-    syncMixerStrips(ProjectStore.getState())
+    addMidiTrack()
     switchMode('arrange')
   })
 
@@ -1191,7 +1207,13 @@ function boot() {
     })
   }
   const inspector = document.getElementById('instrument-inspector')
-  if (inspector) _instrumentInspector = new InstrumentInspector(inspector, { store: ProjectStore, packCatalog: () => _packCatalog, audition: auditionTrack })
+  if (inspector) _instrumentInspector = new InstrumentInspector(inspector, {
+    store: ProjectStore,
+    packCatalog: () => _packCatalog,
+    audition: auditionTrack,
+    auditionPack,
+    selectPreview: selection => { _previewPack = selection }
+  })
   const rackContainer = document.getElementById('rack-view')
   if (rackContainer) _rackView = new RackView(rackContainer, {
     hasWorklet: () => AudioEngine.hasWorklet(),
