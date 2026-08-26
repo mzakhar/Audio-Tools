@@ -50,6 +50,21 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     }
     source.start(time)
     onStatus({ state: 'started', sampleId: zone.sampleId, pitch, gain: zoneGain, duration: buffer.duration })
+    // Temporary, visible signal probe: this samples the track output without
+    // changing its route to the master bus.
+    if (ctx.createAnalyser) {
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      output.connect(analyser)
+      setTimeout(() => {
+        const data = new Float32Array(analyser.fftSize)
+        analyser.getFloatTimeDomainData(data)
+        let peak = 0
+        for (const value of data) peak = Math.max(peak, Math.abs(value))
+        analyser.disconnect()
+        onStatus({ state: 'track-signal', sampleId: zone.sampleId, peak })
+      }, 100)
+    }
   }
 
   return {

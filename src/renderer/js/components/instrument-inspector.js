@@ -45,6 +45,8 @@ export class InstrumentInspector {
       const status = event.detail.status
       this.diagnostic = status.state === 'error'
         ? `Pack error: ${status.error}`
+        : status.state === 'track-signal'
+          ? `Track signal peak: ${status.peak.toFixed(3)}`
         : `Pack ${status.state}: ${status.sampleId}${status.duration ? ` (${status.duration.toFixed(2)}s)` : ''}`
       this.render()
     })
