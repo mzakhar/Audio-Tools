@@ -58,6 +58,14 @@ describe('sample instrument', () => {
     expect(sources[0].disconnect).toHaveBeenCalled()
   })
 
+  it('preloads only the requested note zone', async () => {
+    const { ctx, output } = setup()
+    const preload = vi.fn(() => Promise.resolve())
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(), preload } })
+    await inst.preload(72, 64)
+    expect(preload).toHaveBeenCalledWith(['high'])
+  })
+
   it('keeps legacy zero-gain imported zones audible', async () => {
     const { ctx, sources, gains } = setup()
     const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', gain: 0 }] }, {

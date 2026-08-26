@@ -65,7 +65,11 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
       })
     },
     noteOff: stop,
-    preload() { return sampleStore.preload ? sampleStore.preload((patch.zones || []).map(zone => zone.sampleId)) : Promise.all((patch.zones || []).map(zone => sampleStore.get(zone.sampleId))) },
+    preload(pitch, velocity = 127) {
+      const zone = Number.isFinite(pitch) && zoneFor(patch, pitch, velocity)
+      const sampleIds = zone ? [zone.sampleId] : (patch.zones || []).map(item => item.sampleId)
+      return sampleStore.preload ? sampleStore.preload(sampleIds) : Promise.all(sampleIds.map(sampleId => sampleStore.get(sampleId)))
+    },
     dispose() {
       disposed = true
       pending.clear()

@@ -64,7 +64,8 @@ async function auditionTrack(track) {
   const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
   const instrument = liveInstrumentFor(track, { palettes: Palettes, ctx, output, racks: ProjectStore.getState().racks, packFor, sampleStoreFor, mountRack: rack => RackEngine.mount(ctx, rack, { output }) })
   if (!instrument) throw new Error('Selected instrument is unavailable')
-  await instrument.preload?.()
+  // Audition must stay lazy: a preset may reference hundreds of samples.
+  await instrument.preload?.(60, 100)
   instrument.noteOn(60, 100)
   setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
 }
