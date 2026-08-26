@@ -5,13 +5,13 @@
 import RackEngine from '../rack/rack-engine.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 
-export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRack, packFor, sampleStoreFor }) {
+export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRack, packFor, sampleStoreFor, onStatus }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)
     const patch = pack?.byId?.get(instrument.patchId)
     const sampleStore = patch && sampleStoreFor?.(pack, ctx)
-    return sampleStore ? sampleInstrumentFor(patch, { ctx, output, sampleStore }) : null
+    return sampleStore ? sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus }) : null
   }
 
   if (instrument.type === 'rack') {

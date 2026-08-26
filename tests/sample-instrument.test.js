@@ -76,4 +76,15 @@ describe('sample instrument', () => {
     expect(gains[0].gain.setValueAtTime).toHaveBeenCalledWith(1, 3)
     expect(sources[0].start).toHaveBeenCalled()
   })
+
+  it('reports a started sample with its effective gain', async () => {
+    const { ctx, output } = setup()
+    const onStatus = vi.fn()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', gain: 0.5 }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 1 })) }, onStatus
+    })
+    inst.noteOn(60, 127)
+    await Promise.resolve()
+    expect(onStatus).toHaveBeenLastCalledWith({ state: 'started', sampleId: 'sample', pitch: 60, gain: 0.5, duration: 1 })
+  })
 })

@@ -35,8 +35,17 @@ export class InstrumentInspector {
     this.packCatalog = packCatalog
     this.audition = audition
     this.trackId = null
+    this.diagnostic = ''
     document.addEventListener('track-selected', event => {
       this.trackId = event.detail.trackId
+      this.render()
+    })
+    document.addEventListener('instrument-sample-status', event => {
+      if (event.detail.trackId !== this.trackId) return
+      const status = event.detail.status
+      this.diagnostic = status.state === 'error'
+        ? `Pack error: ${status.error}`
+        : `Pack ${status.state}: ${status.sampleId}${status.duration ? ` (${status.duration.toFixed(2)}s)` : ''}`
       this.render()
     })
     store.subscribe(() => this.render())
@@ -85,6 +94,7 @@ export class InstrumentInspector {
     if (instrument.type === 'palette') this.renderInternal(track, instrument)
     else if (instrument.type === 'pack') this.renderPack(track, instrument, packs)
     else this.renderRack(track, instrument, state)
+    if (instrument.type === 'pack' && this.diagnostic) this.container.append(text(this.diagnostic))
 
     const audition = document.createElement('button')
     audition.className = 'instrument-audition'

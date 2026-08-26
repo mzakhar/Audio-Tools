@@ -58,12 +58,16 @@ function sampleStoreFor(pack, ctx) {
   return stores.get(key)
 }
 
+function sampleStatus(trackId, status) {
+  document.dispatchEvent(new CustomEvent('instrument-sample-status', { detail: { trackId, status } }))
+}
+
 async function auditionTrack(track) {
   await ensureAudio()
   const ctx = AudioEngine.getContext()
   if (!track || !ctx) return
   const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
-  const instrument = liveInstrumentFor(track, { palettes: Palettes, ctx, output, racks: ProjectStore.getState().racks, packFor, sampleStoreFor, mountRack: rack => RackEngine.mount(ctx, rack, { output }) })
+  const instrument = liveInstrumentFor(track, { palettes: Palettes, ctx, output, racks: ProjectStore.getState().racks, packFor, sampleStoreFor, onStatus: status => sampleStatus(track.id, status), mountRack: rack => RackEngine.mount(ctx, rack, { output }) })
   if (!instrument) throw new Error('Selected instrument is unavailable')
   // Audition must stay lazy: a preset may reference hundreds of samples.
   await instrument.preload?.(60, 100)
@@ -995,6 +999,7 @@ function initMidi() {
           racks: state.racks,
           packFor,
           sampleStoreFor,
+          onStatus: status => sampleStatus(track.id, status),
           mountRack: rack => RackEngine.mount(ctx, rack, {
             output,
             getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,

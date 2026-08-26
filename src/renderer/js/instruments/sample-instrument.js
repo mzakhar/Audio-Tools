@@ -5,7 +5,7 @@ function zoneFor(patch, pitch, velocity) {
 }
 
 /** One Web Audio source per held note; sample loading stays in the injected store. */
-export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
+export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus = () => {} }) {
   if (!ctx || !output || !sampleStore?.get) throw new TypeError('sample instrument needs ctx, output, and sampleStore')
   const voices = new Map()
   const pending = new Map()
@@ -49,6 +49,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
       gain.disconnect()
     }
     source.start(time)
+    onStatus({ state: 'started', sampleId: zone.sampleId, pitch, gain: zoneGain, duration: buffer.duration })
   }
 
   return {
@@ -58,10 +59,12 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore }) {
       if (!zone || disposed) return
       const token = {}
       pending.set(pitch, token)
+      onStatus({ state: 'loading', sampleId: zone.sampleId, pitch })
       const cached = sampleStore.peek?.(zone.sampleId)
       if (cached) return start(pitch, velocity, zone, cached, token, time)
-      Promise.resolve(sampleStore.get(zone.sampleId)).then(buffer => start(pitch, velocity, zone, buffer, token, time)).catch(() => {
+      Promise.resolve(sampleStore.get(zone.sampleId)).then(buffer => start(pitch, velocity, zone, buffer, token, time)).catch(error => {
         if (pending.get(pitch) === token) pending.delete(pitch)
+        onStatus({ state: 'error', sampleId: zone.sampleId, pitch, error: error?.message || 'Sample load failed' })
       })
     },
     noteOff: stop,
