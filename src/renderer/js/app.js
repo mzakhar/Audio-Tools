@@ -39,6 +39,7 @@ function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
 const activeVoices = {} // midi note → voice object
+const computerKeyTracks = new Map() // note → MIDI channel while held
 const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
@@ -397,6 +398,15 @@ function initGlobalHeader() {
 
 // ─── Note events (from Keyboard) ───────────────────────────────────────────
 document.addEventListener('note-on', (e) => {
+  const state = ProjectStore.getState()
+  const midiTracks = state.tracks.filter(track => track.type === 'midi')
+  const target = midiTracks.find(track => track.id === _midiTargetTrackId) || (midiTracks.length === 1 ? midiTracks[0] : null)
+  if (target) {
+    const channel = target.midiChannel ?? 0
+    computerKeyTracks.set(e.detail.note, channel)
+    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-on', channel, pitch: e.detail.note, velocity: 108 } }))
+    return
+  }
   ensureAudio()
   const ctx = AudioEngine.getContext()
   if (!ctx) return
@@ -412,6 +422,12 @@ document.addEventListener('note-on', (e) => {
 
 document.addEventListener('note-off', (e) => {
   const note = e.detail.note
+  if (computerKeyTracks.has(note)) {
+    const channel = computerKeyTracks.get(note)
+    computerKeyTracks.delete(note)
+    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
+    return
+  }
   if (activeVoices[note]) {
     const ctx = AudioEngine.getContext()
     try { activeVoices[note].stop(ctx ? ctx.currentTime : 0) } catch (err) {}
