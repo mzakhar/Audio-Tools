@@ -560,10 +560,11 @@ function initRecorder() {
       btn.textContent = '● REC'
       btn.classList.remove('recording')
       btn.setAttribute('aria-pressed', 'false')
-      status.textContent = ''
+      status.textContent = 'SAVING…'
       timer.textContent = '00:00'
       const ts = new Date().toISOString().replace('T', '-').replace(/:/g, '-').slice(0, 19)
-      Recorder.stop('synth-' + ts + '.wav')
+      try { await Recorder.stop('synth-' + ts + '.wav') }
+      finally { status.textContent = '' }
     }
   })
 }
