@@ -17,11 +17,12 @@ const stubNode = () => ({
   connect: vi.fn(), disconnect: vi.fn()
 })
 
-function fakeCtx({ worklet }) {
+function fakeCtx({ worklet, state = 'running' }) {
   return {
     sampleRate: 44100,
     currentTime: 0,
-    state: 'running',
+    state,
+    resume: vi.fn(async () => {}),
     destination: stubNode(),
     audioWorklet: worklet,
     createGain: stubNode,
@@ -31,9 +32,11 @@ function fakeCtx({ worklet }) {
   }
 }
 
-async function freshEngine(worklet) {
+async function freshEngine(worklet, state) {
   vi.resetModules()
-  window.AudioContext = function () { return fakeCtx({ worklet }) }
+  const ctx = fakeCtx({ worklet, state })
+  window.AudioContext = function () { return ctx }
+  window.__audioEngineTestContext = ctx
   return (await import('../src/renderer/js/audio-engine.js')).default
 }
 
@@ -51,5 +54,11 @@ describe('AudioEngine.init', () => {
     await engine.init()
     expect(engine.getMasterInput()).toBeTruthy()
     expect(engine.hasRecorder()).toBe(true)
+  })
+
+  it('resumes a newly created suspended context before loading worklets', async () => {
+    const engine = await freshEngine({ addModule: vi.fn(async () => {}) }, 'suspended')
+    await engine.init()
+    expect(window.__audioEngineTestContext.resume).toHaveBeenCalledOnce()
   })
 })
