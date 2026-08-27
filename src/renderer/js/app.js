@@ -749,6 +749,7 @@ function switchMode(mode) {
   const mainEl = document.getElementById('main')
   if (mainEl) mainEl.dataset.view = mode
   const rackEl = document.getElementById('rack-view')
+  syncTransportPressed()   // the two transports have separate running states
   document.querySelectorAll('.tool-btn').forEach(btn => {
     const isActive = btn.dataset.tool === mode
     btn.classList.toggle('active', isActive)
@@ -1177,7 +1178,7 @@ function initMidi() {
         // flush the undo stack with dispatches that change nothing.
         const nextPatchId = resolved?.patch?.id || track.instrument.patchId
         const had = track.instrument.received
-        if (nextPatchId === track.instrument.patchId && had &&
+        if (nextPatchId === track.instrument.patchId && had && !track.instrument.unresolved &&
             had.bankMsb === result.change.bankMsb && had.bankLsb === result.change.bankLsb &&
             had.program === result.change.program) continue
         ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, {
@@ -1257,9 +1258,11 @@ function initMidi() {
 
   // Keep device list in sync when devices connect/disconnect
   document.addEventListener('midi-device-change', (e) => {
-    // Whatever was held on the old device can never be released from it:
-    // drop the live instruments and the pedal state together.
-    disposeLiveInstruments()
+    // Fires on connect, disconnect and port open alike. Only a device that
+    // actually went away can be holding notes nothing can release — plugging
+    // a second controller in mid-performance must not cut the first one off.
+    const selected = deviceSel?.value
+    if (selected && !e.detail.inputs.some(input => input.id === selected)) disposeLiveInstruments()
     updateMidiDeviceSelect(e.detail.inputs)
   })
 
@@ -1332,7 +1335,7 @@ function initPianoRoll() {
 // ─── Shortcuts ────────────────────────────────────────────────────────────────
 /** True while either transport is actually running — never a shadow copy. */
 function isTransportPlaying() {
-  return _currentMode === 'arrange' ? !!TimelinePlayer._isPlaying : Sequencer.isPlaying()
+  return _currentMode === 'arrange' ? TimelinePlayer.isPlaying() : Sequencer.isPlaying()
 }
 
 /** Play's pressed state is derived, so a disabled button cannot desync it. */

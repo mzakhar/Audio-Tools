@@ -196,6 +196,9 @@ const TimelinePlayer = {
     this._midiTimeouts = []
   },
 
+  /** Public running state — the UI derives the transport button from this. */
+  isPlaying() { return this._isPlaying },
+
   getCurrentBeat(bpm) {
     if (!this._isPlaying) return this._startBeat
     const ctx = AudioEngine.getContext()

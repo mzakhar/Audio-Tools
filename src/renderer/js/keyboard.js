@@ -129,14 +129,14 @@ function renderRange() {
   if (up)   up.disabled   = shiftWindow(startNote, endNote, 1).start === startNote
 }
 
-function setWindow({ start, end }) {
+function setWindow({ start, end }, { force = false } = {}) {
   if (start === startNote && end === endNote) return false
-  // A shifting window would otherwise strand held notes under keys that are no
-  // longer on screen, and nothing would ever send their note-off. Rather than
-  // cut them, refuse to move while anything is held — an automatic follow must
-  // never truncate a note the player is still holding.
-  if (pressedKeys.size || heldKeys.size) return false
+  // An automatic follow must never truncate a note the player is holding, so
+  // it waits. An explicit octave move is intent: it takes the notes with it,
+  // releasing them first so nothing is stranded under a key that moved away.
+  if (!force && (pressedKeys.size || heldKeys.size)) return false
   for (const note of [...pressedKeys]) fireNoteOff(note)
+  for (const [key, note] of [...heldKeys]) { heldKeys.delete(key); fireNoteOff(note) }
   activeMouseNote.val = null
   render(null, { start, end })
   return true
@@ -149,8 +149,16 @@ function ensureVisible(note) {
 }
 
 function shiftOctave(octaves) {
-  return setWindow(shiftWindow(startNote, endNote, octaves))
+  return setWindow(shiftWindow(startNote, endNote, octaves), { force: true })
 }
+
+// A keyup lost to alt-tab would otherwise leave a key "held" forever, which
+// silently freezes the automatic window follow.
+window.addEventListener('blur', () => {
+  for (const [key, note] of [...heldKeys]) { heldKeys.delete(key); fireNoteOff(note) }
+  for (const note of [...pressedKeys]) fireNoteOff(note)
+  activeMouseNote.val = null
+})
 
 function getRange() { return { start: startNote, end: endNote } }
 

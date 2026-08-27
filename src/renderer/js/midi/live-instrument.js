@@ -52,13 +52,19 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
     let unusable = false          // rack has no midi-in — do not remount every note
     const held = new Set()        // pitches currently gated, so a repeat note-on
                                   // cannot orphan a voice in midi-in's allocator
+    let standingBend = null     // last expression seen while unmounted
+    let standingMod = null
     const ensureMounted = () => {
       if (handle || unusable) return
       // ponytail: live rack mount is independent of TimelinePlayer's, so a rack
       // played live during transport is mounted twice. Share handles if CPU bites.
       handle = mountRack(rack)
       moduleId = [...handle.mods].find(([, entry]) => entry.def?.type === 'midi-in')?.[0]
-      if (!moduleId) { RackEngine.unmount(handle); handle = null; unusable = true }
+      if (!moduleId) { RackEngine.unmount(handle); handle = null; unusable = true; return }
+      // A wheel deflected before the first note still has to be heard on it.
+      for (const event of [standingBend, standingMod]) {
+        if (event) RackEngine.sendEvent(handle, moduleId, 'note', event)
+      }
     }
 
     return {
@@ -77,8 +83,13 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
         // Never mounts: a wheel nudge must not start every oscillator in a rack
         // that has not played a note. bendRange is midi-in's own scaling here —
         // applying it again would double the bend.
-        if (!moduleId) return
         if (event?.type === 'mod' && modOff) return
+        if (!moduleId) {
+          // Remember it instead of dropping it; ensureMounted replays it.
+          if (event?.type === 'pitch-bend') standingBend = event
+          else if (event?.type === 'mod') standingMod = event
+          return
+        }
         RackEngine.sendEvent(handle, moduleId, 'note', event)
       },
       dispose() {
@@ -86,6 +97,8 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
         handle = null
         moduleId = null
         held.clear()
+        standingBend = null
+        standingMod = null
       }
     }
   }

@@ -98,3 +98,52 @@ describe('dialog', () => {
     expect(() => closeDialog('d5')).not.toThrow()
   })
 })
+
+describe('dialog kit with a queued close event', () => {
+  // The real <dialog> fires 'close' on a queued task, not synchronously.
+  function makeAsyncDialog(id) {
+    const el = document.createElement('dialog')
+    el.id = id
+    el.showModal = function () { this.open = true }
+    el.close = function () {
+      this.open = false
+      setTimeout(() => this.dispatchEvent(new Event('close')), 0)
+    }
+    document.body.appendChild(el)
+    return el
+  }
+
+  it('hands off between dialogs without stranding the context', async () => {
+    makeAsyncDialog('hop-a')
+    makeAsyncDialog('hop-b')
+    ShortcutManager.setContext('synth')
+
+    openDialog('hop-a', { context: 'dialog' })
+    // The hop the instrument browser does: close itself, open settings, same tick.
+    closeDialog('hop-a')
+    openDialog('hop-b', { context: 'dialog' })
+    expect(ShortcutManager.getContext()).toBe('dialog')
+
+    // hop-a's queued close event must not stamp anything now.
+    await new Promise(done => setTimeout(done, 5))
+    expect(ShortcutManager.getContext()).toBe('dialog')
+
+    closeDialog('hop-b')
+    await new Promise(done => setTimeout(done, 5))
+    expect(ShortcutManager.getContext()).toBe('synth')
+  })
+
+  it('restores the outer dialog context when a nested one closes', () => {
+    makeAsyncDialog('outer')
+    makeAsyncDialog('inner')
+    ShortcutManager.setContext('synth')
+
+    openDialog('outer', { context: 'pianoroll' })
+    openDialog('inner', { context: 'dialog' })
+    closeDialog('inner')
+    expect(ShortcutManager.getContext()).toBe('pianoroll')
+
+    closeDialog('outer')
+    expect(ShortcutManager.getContext()).toBe('synth')
+  })
+})

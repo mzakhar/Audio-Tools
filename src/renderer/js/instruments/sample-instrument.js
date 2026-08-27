@@ -45,6 +45,8 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     try { vibratoGain?.disconnect(source.detune) } catch { /* already disconnected */ }
   }
 
+  const releasing = new Set() // voices sounding out their release tail
+
   const stop = (pitch, time = ctx.currentTime) => {
     const pendingVoice = pending.get(pitch)
     if (pendingVoice) {
@@ -62,6 +64,9 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       voice.gain.gain.cancelScheduledValues?.(time)
       voice.gain.gain.setTargetAtTime?.(0, time, Math.max(0.005, release / 5))
       try { voice.source.stop(time + release * 6) } catch { /* already stopped */ }
+      // Still ours until onended: dispose() has to be able to cut it short,
+      // otherwise a released note outlives the instrument that made it.
+      releasing.add(voice)
     } else {
       try { voice.source.stop(time) } catch { /* already stopped */ }
       if (time <= ctx.currentTime) {
@@ -119,6 +124,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     const voice = { source, gain, analyser, release: envelope?.release || 0 }
     voices.set(pitch, voice)
     source.onended = () => {
+      releasing.delete(voice)
       if (voices.get(pitch) === voice) voices.delete(pitch)
       source.disconnect()
       gain.disconnect()
@@ -178,6 +184,14 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       disposed = true
       pending.clear()
       for (const pitch of [...voices.keys()]) stop(pitch)
+      for (const voice of releasing) {
+        try { voice.source.stop(ctx.currentTime) } catch { /* already stopped */ }
+        voice.source.disconnect()
+        voice.gain.disconnect()
+        voice.analyser?.disconnect()
+        disconnectExpression(voice.source)
+      }
+      releasing.clear()
       try { bendSource?.stop(ctx.currentTime) } catch { /* already stopped */ }
       bendSource?.disconnect()
       try { vibratoGain?._osc?.stop(ctx.currentTime) } catch { /* already stopped */ }
