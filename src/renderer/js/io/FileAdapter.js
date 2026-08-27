@@ -64,6 +64,16 @@ const BrowserAdapter = {
     await writable.close()
   },
 
+  async saveRecording(dirHandle, arrayBuffer, filename) {
+    if (!dirHandle) return this.exportWav(arrayBuffer, filename)
+    const recordings = await dirHandle.getDirectoryHandle('recordings', { create: true })
+    const handle = await recordings.getFileHandle(filename, { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(arrayBuffer)
+    await writable.close()
+    return `recordings/${filename}`
+  },
+
   async importRackPatch() {
     const [handle] = await window.showOpenFilePicker({
       multiple: false,
@@ -117,7 +127,12 @@ const ElectronAdapter = {
   },
 
   async exportWav(arrayBuffer, defaultName) {
-    await window.electronFS.exportWav(arrayBuffer, defaultName || 'export.wav')
+    return window.electronFS.exportWav(arrayBuffer, defaultName || 'export.wav')
+  },
+
+  async saveRecording(projectDir, arrayBuffer, filename) {
+    if (!projectDir) return this.exportWav(arrayBuffer, filename)
+    return window.electronFS.saveRecording(projectDir, arrayBuffer, filename)
   },
 
   async importRackPatch() {

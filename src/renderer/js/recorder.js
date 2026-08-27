@@ -3,6 +3,7 @@
  * Taps the compressor output via AudioWorkletNode to capture stereo WAV.
  */
 import { encodeWAV } from './utils/wav-encoder.js'
+import FileAdapter from './io/FileAdapter.js'
 
 let workletNode = null
 let chunksL = []
@@ -38,7 +39,7 @@ function start(ctx, compressor) {
   workletNode.connect(ctx.destination)
 }
 
-function stop(filename) {
+async function stop(filename, projectDir) {
   if (!workletNode) return
 
   // Tell worklet to stop recording
@@ -67,22 +68,13 @@ function stop(filename) {
   }
 
   const wav = encodeWAV(pcm, sampleRate, 2)
-  download(wav, filename || 'recording.wav')
+  const savedPath = await FileAdapter.saveRecording(projectDir, wav, filename || 'recording.wav')
 
   chunksL = []
   chunksR = []
   _ctx = null
   _compressor = null
-}
-
-function download(arrayBuffer, filename) {
-  const blob = new Blob([arrayBuffer], { type: 'audio/wav' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 10000)
+  return savedPath
 }
 
 const Recorder = { start, stop }

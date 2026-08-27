@@ -18,12 +18,15 @@ describe('routeChannel', () => {
 
   it('falls back to armed track when nothing declares a channel', () => {
     const tracks = [track('a'), track('b')]
-    expect(routeChannel(tracks, 3, 'armed')).toEqual(['armed'])
+    expect(routeChannel(tracks, 3, 'a')).toEqual(['a'])
   })
 
-  it('omni fallback with no armed track returns empty', () => {
-    const tracks = [track('a'), track('b')]
-    expect(routeChannel(tracks, 3, null)).toEqual([])
+  it('routes a single Omni track without requiring arming', () => {
+    expect(routeChannel([track('a')], 3, null)).toEqual(['a'])
+  })
+
+  it('does not guess between multiple Omni tracks', () => {
+    expect(routeChannel([track('a'), track('b')], 3, null)).toEqual([])
   })
 
   it('returns empty when a routing map exists but channel is unmapped', () => {

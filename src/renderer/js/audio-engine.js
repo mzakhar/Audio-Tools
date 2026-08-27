@@ -17,7 +17,7 @@ const AudioEngine = {
 
   async init() {
     if (this._ctx) {
-      if (this._ctx.state === 'suspended') this._ctx.resume()
+      if (this._ctx.state === 'suspended') await this._ctx.resume()
       return
     }
 
@@ -57,6 +57,10 @@ const AudioEngine = {
     this._compressor.connect(ctx.destination)
 
     this._ctx = ctx
+
+    // Creation is usually inside a user gesture, but awaiting the worklet below
+    // loses that activation. Resume the context before any asynchronous setup.
+    if (ctx.state === 'suspended') await ctx.resume()
 
     // Recorder's worklet. `ctx.audioWorklet` is undefined outside a secure
     // context (plain-http deploys), so this must not be fatal — synth audio

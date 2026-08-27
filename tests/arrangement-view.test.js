@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { hitTestClip } from '../src/renderer/js/components/arrangement-view.js'
+import { hitTestClip, packOptionValue, packPatchOptions, packInstrumentLabel } from '../src/renderer/js/components/arrangement-view.js'
 
 // Mock ProjectStore imports used inside arrangement-view.js
 vi.mock('../src/renderer/js/store/ProjectStore.js', () => ({
@@ -67,5 +67,27 @@ describe('hitTestClip with scroll', () => {
     // clipX = 4*64 - 128 + 160 = 256 - 128 + 160 = 288
     // clipW = 4*64 = 256 → center = 288 + 128 = 416
     expect(hitTestClip(clip, 416, 0, ppb, scrollLeft, headerW, 72)).toBe('body')
+  })
+})
+
+describe('pack selector options', () => {
+  const catalog = () => [{
+    id: 'starter', version: '1.0.0', manifest: {
+      id: 'starter', version: '1.0.0', name: 'Starter',
+      patches: [{ id: 'piano', name: 'Piano' }]
+    }
+  }]
+
+  it('lists catalog patches with stable pack selection values', () => {
+    expect(packPatchOptions(catalog)).toEqual([{
+      value: packOptionValue('starter', '1.0.0', 'piano'),
+      label: 'Starter — Piano',
+      selection: { packId: 'starter', packVersion: '1.0.0', patchId: 'piano' }
+    }])
+  })
+
+  it('labels unavailable selected packs without changing selection', () => {
+    expect(packInstrumentLabel({ type: 'pack', packId: 'gone', packVersion: '1', patchId: 'piano' }, catalog))
+      .toBe('Missing pack: gone@1 — piano')
   })
 })

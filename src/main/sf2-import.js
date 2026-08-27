@@ -10,6 +10,23 @@ const text = (view, off, len) => {
 const name = (view, off, len) => text(view, off, len).replace(/\0.*$/, '').trim()
 const fail = message => { throw new Error(`Invalid SF2: ${message}`) }
 const idFor = (value, fallback) => (value || fallback).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || fallback
+const signed16 = value => value > 0x7fff ? value - 0x10000 : value
+const timecentsToSeconds = value => {
+  const seconds = Math.pow(2, signed16(value) / 1200)
+  return Number.isFinite(seconds) ? Math.min(20, seconds) : 0
+}
+
+function volumeEnvelope(g) {
+  if (![33, 34, 35, 36, 37, 38].some(op => g.has(op))) return null
+  return {
+    delay: timecentsToSeconds(g.get(33) ?? 0xd120),
+    attack: timecentsToSeconds(g.get(34) ?? 0xd120),
+    hold: timecentsToSeconds(g.get(35) ?? 0xd120),
+    decay: timecentsToSeconds(g.get(36) ?? 0xd120),
+    sustain: Math.pow(10, -Math.max(0, g.get(37) ?? 0) / 200),
+    release: timecentsToSeconds(g.get(38) ?? 0xd120)
+  }
+}
 
 function chunks(view, start, end) {
   const found = []
@@ -114,7 +131,9 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
         const rootKey = g.get(58) ?? sample.rootKey
         if (rootKey > 127) fail('invalid root key')
         const loop = (g.get(54) ?? 0) & 1
-        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: (g.get(51) ?? 0) * 100 + (g.get(52) ?? 0) + sample.pitchCorrection, gain: -((g.get(48) ?? 0) / 100), ...(loop ? { loopStart: sample.loopStart - sample.start, loopEnd: sample.loopEnd - sample.start } : {}) })
+        const attenuation = g.get(48) ?? 0 // SoundFont centibels.
+        const envelope = volumeEnvelope(g)
+        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: signed16(g.get(51) ?? 0) * 100 + signed16(g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(envelope ? { volumeEnvelope: envelope } : {}), ...(loop ? { loopStart: (sample.loopStart - sample.start) / sample.rate, loopEnd: (sample.loopEnd - sample.start) / sample.rate } : {}) })
       }
     }
     if (zones.length) {

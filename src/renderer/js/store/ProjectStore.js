@@ -154,19 +154,22 @@ export function SetTrackInstrumentProgram(trackId, selection) {
     execute(state) {
       const next = JSON.parse(JSON.stringify(state))
       const track = next.tracks.find(t => t.id === trackId)
-      if (!track || track.type !== 'midi' || !selection?.packId || !selection?.packVersion || !selection?.patchId) return next
+      if (!track || track.type !== 'midi' || !selection?.packId || !selection?.packVersion) return next
       if (track.instrument?.programFollow === 'pinned') return next
+      const patchId = selection.patchId || track.instrument?.patchId
+      if (!patchId) return next
       track.instrument = {
         type: 'pack',
         packId: selection.packId,
         packVersion: selection.packVersion,
-        patchId: selection.patchId,
+        patchId,
         programFollow: 'midi',
         received: {
           bankMsb: selection.bankMsb,
           bankLsb: selection.bankLsb,
           program: selection.program
-        }
+        },
+        ...(selection.unresolved ? { unresolved: true } : {})
       }
       return next
     },

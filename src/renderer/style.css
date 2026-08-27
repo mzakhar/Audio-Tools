@@ -506,9 +506,7 @@ html, body {
 #record-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
 }
 
 .rec-btn {
@@ -1517,6 +1515,12 @@ button { font-family: var(--font-mono); }
   overflow: hidden;
   min-height: 0;
 }
+#arrange-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 #arrange-toolbar {
   display: flex;
   align-items: center;
@@ -1537,6 +1541,20 @@ button { font-family: var(--font-mono); }
   background: var(--bg);
   min-height: 0;
 }
+#instrument-inspector {
+  width: 270px;
+  flex: 0 0 270px;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+}
+#instrument-inspector h2 { margin: 0 0 14px; font-size: 13px; color: var(--accent); }
+.instrument-field { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; margin: 9px 0; color: var(--text-dim); font-size: 10px; }
+.instrument-field select, .instrument-field input { min-width: 0; width: 100%; background: var(--bg4); color: var(--text); border: 1px solid var(--border); padding: 5px; font: inherit; }
+.instrument-check { display: flex; gap: 7px; align-items: center; margin: 14px 0; color: var(--text-dim); font-size: 10px; }
+.instrument-audition { width: 100%; margin-top: 8px; padding: 8px; color: var(--accent); border-color: var(--accent); }
+.instrument-empty { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
 #arrangement-container canvas {
   display: block;
 }
@@ -1563,6 +1581,7 @@ button { font-family: var(--font-mono); }
 .track-header-item {
   height: 72px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   padding: 0 8px;
   gap: 6px;
@@ -1571,7 +1590,7 @@ button { font-family: var(--font-mono); }
   pointer-events: all;
 }
 .track-header-item .track-name {
-  flex: 1;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1604,11 +1623,34 @@ button { font-family: var(--font-mono); }
   color: var(--text-dim);
 }
 .track-header-item .track-instrument {
-  width: 90px;
+  display: none;
   font-size: 9px;
   background: var(--bg4);
   border: 1px solid var(--border);
   color: var(--text-dim);
+}
+.track-header-item .track-instrument-status {
+  display: none;
+}
+.track-header-item .track-instrument-chip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  text-align: left;
+  color: var(--text-dim);
+  background: var(--bg4);
+}
+.track-header-item .track-instrument-status.missing {
+  display: block;
+  color: #ff6b6b;
+  font-size: 9px;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* ── Arrangement scrollbars ──────────────────────────────────────────────── */
 .arr-scrollbar {

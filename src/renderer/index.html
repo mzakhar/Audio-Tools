@@ -44,7 +44,13 @@
       <span id="project-name">No Project</span>
       <button id="import-audio-btn" disabled>+ AUDIO</button>
       <button id="add-midi-track-btn" disabled>+ MIDI</button>
+      <button id="import-pack-btn" title="Import local SoundFont">+ PACK</button>
       <button id="bounce-btn" disabled>BOUNCE</button>
+      <span id="record-bar" role="toolbar" aria-label="Master audio recorder">
+        <button id="rec-btn" class="rec-btn" aria-label="Record master audio" aria-pressed="false">● AUDIO REC</button>
+        <span id="rec-timer" class="rec-timer" aria-live="off">00:00</span>
+        <span id="rec-status" class="rec-status" aria-live="polite"></span>
+      </span>
       <span class="project-bar-sep" aria-hidden="true"></span>
       <label class="theme-control" for="theme-select">THEME</label>
       <select id="theme-select" aria-label="Theme">
@@ -57,13 +63,16 @@
       <select id="midi-device-select" class="midi-select" aria-label="MIDI input device" style="display:none">
         <option value="">— no device —</option>
       </select>
-      <button id="midi-record-btn" class="midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ REC</button>
+      <button id="midi-record-btn" class="midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ MIDI REC</button>
     </div>
     <div id="arrange-view">
       <div id="arrange-toolbar" role="toolbar" aria-label="Arrange transport">
         <button id="arr-add-track-btn" class="transport-btn">+ TRACK</button>
       </div>
-      <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
+      <div id="arrange-workspace">
+        <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
+        <aside id="instrument-inspector" aria-label="Selected track instrument"></aside>
+      </div>
       <div id="piano-roll-drawer" class="pr-drawer" role="dialog" aria-modal="true" aria-labelledby="pr-drawer-title" style="display:none">
         <div class="pr-drawer-header">
           <span id="pr-drawer-title" class="pr-title">PIANO ROLL — <span id="pr-clip-name"></span></span>
@@ -103,12 +112,6 @@
         <button class="tab" data-palette="pad" role="tab" aria-selected="false">PAD / AMBIENT</button>
       </div>
     </header>
-
-    <div id="record-bar" role="toolbar" aria-label="Recorder">
-      <button id="rec-btn" class="rec-btn" aria-label="Record audio" aria-pressed="false">● REC</button>
-      <span id="rec-timer" class="rec-timer" aria-live="off">00:00</span>
-      <span id="rec-status" class="rec-status" aria-live="polite"></span>
-    </div>
 
     <section id="knob-panel" aria-label="Palette parameters" role="tabpanel">
       <!-- Populated dynamically by app.js -->

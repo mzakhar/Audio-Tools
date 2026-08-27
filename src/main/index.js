@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, resolve, dirname, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
+import { importSf2Pack, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -108,12 +109,21 @@ ipcMain.handle('fs:importAudio', async (_event, srcPath, projectDir) => {
   return join('audio', filename)
 })
 
-ipcMain.handle('fs:exportWav', async (_event, buffer, defaultName) => {
-  const { filePath, canceled } = await dialog.showSaveDialog({
+ipcMain.handle('fs:exportWav', async (event, buffer, defaultName) => {
+  const { filePath, canceled } = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
     defaultPath: defaultName || 'recording.wav',
     filters: [{ name: 'WAV Audio', extensions: ['wav'] }],
   })
   if (canceled || !filePath) return null
+  await writeFile(filePath, Buffer.from(buffer))
+  return filePath
+})
+
+ipcMain.handle('fs:saveRecording', async (_event, projectDir, buffer, filename) => {
+  if (typeof projectDir !== 'string' || !/^[\w.-]+\.wav$/i.test(filename)) throw new Error('Invalid recording destination')
+  const recordingsDir = assertPathWithin(join(resolve(projectDir), 'recordings'), projectDir)
+  const filePath = assertPathWithin(join(recordingsDir, filename), recordingsDir)
+  await mkdir(recordingsDir, { recursive: true })
   await writeFile(filePath, Buffer.from(buffer))
   return filePath
 })
@@ -143,4 +153,19 @@ ipcMain.handle('fs:readAudioBytes', async (_event, dirPath, relPath) => {
   const fullPath = assertPathWithin(resolve(resolvedDir, relPath), resolvedDir)
   const buf = await readFile(fullPath)
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+})
+
+ipcMain.handle('instrumentPacks:list', () => listInstrumentPacks(app.getPath('userData')))
+
+ipcMain.handle('instrumentPacks:importSf2', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog({
+    filters: [{ name: 'SoundFont 2', extensions: ['sf2'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || !filePaths[0]) return null
+  return importSf2Pack(app.getPath('userData'), filePaths[0])
+})
+
+ipcMain.handle('instrumentPacks:readSample', (_event, packId, version, sampleId) => {
+  return readInstrumentSample(app.getPath('userData'), packId, version, sampleId)
 })
