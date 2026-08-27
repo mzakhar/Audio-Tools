@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { trackInstrumentLabel } from '../src/renderer/js/components/instrument-inspector.js'
+import { trackInstrumentLabel } from '../src/renderer/js/instruments/instrument-label.js'
 
 describe('trackInstrumentLabel', () => {
   it('uses friendly names for internal and installed pack instruments', () => {

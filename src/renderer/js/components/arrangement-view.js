@@ -12,9 +12,9 @@ import {
   visibleBeatRange
 } from '../utils/timeline-math.js'
 
-import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel, SetTrackInstrument } from '../store/ProjectStore.js'
+import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
-import Palettes from '../palettes.js'
+import { trackInstrumentLabel } from '../instruments/instrument-label.js'
 
 function catalogPacks(catalog) {
   const packs = typeof catalog === 'function' ? catalog() : catalog
@@ -563,16 +563,14 @@ export class ArrangementView {
         midiChSel.appendChild(opt)
       }
 
-      const instrumentSel = document.createElement('select')
-      instrumentSel.className = 'track-instrument'
-
-      const instrumentStatus = document.createElement('span')
-      instrumentStatus.className = 'track-instrument-status'
-
       const instrumentChip = document.createElement('button')
       instrumentChip.className = 'track-instrument-chip'
 
-      div.append(name, muteBtn, soloBtn, midiChSel, instrumentSel, instrumentStatus, instrumentChip)
+      const instrumentGear = document.createElement('button')
+      instrumentGear.className = 'track-instrument-gear'
+      instrumentGear.textContent = '⚙'
+
+      div.append(name, muteBtn, soloBtn, midiChSel, instrumentChip, instrumentGear)
       this._headerList.appendChild(div)
     }
 
@@ -617,76 +615,22 @@ export class ArrangementView {
         SetTrackMidiChannel(track.id, midiChSel.value === '' ? null : Number(midiChSel.value))
       )
 
-      const instrumentSel = item.querySelector('.track-instrument')
-      instrumentSel.style.display = track.type === 'midi' ? '' : 'none'
-      // render() runs every frame during playback, so only rebuild the option
-      // list when the rack set actually changed — otherwise an open dropdown
-      // would be torn out from under the pointer 60 times a second.
-      const racks = Object.values(state.racks || {})
-      const packOptions = packPatchOptions(this._packCatalog)
-      const optionsKey = [
-        racks.map(r => `${r.id}:${r.name}`).join('|'),
-        packOptions.map(option => `${option.value}:${option.label}`).join('|')
-      ].join('||')
-      if (instrumentSel.dataset.optionsKey !== optionsKey) {
-        instrumentSel.dataset.optionsKey = optionsKey
-        instrumentSel.innerHTML = ''
-        // tr909 is the 909 editor's own transport, not a playable voice — its
-        // createVoice is a silent stub (palettes.js:389), so keep it out.
-        for (const key of Object.keys(Palettes).filter(k => k !== 'tr909')) {
-          const opt = document.createElement('option')
-          opt.value = `p:${key}`
-          opt.textContent = Palettes[key].name || key
-          instrumentSel.appendChild(opt)
-        }
-        for (const rack of racks) {
-          const opt = document.createElement('option')
-          opt.value = `r:${rack.id}`
-          opt.textContent = rack.name || rack.id
-          instrumentSel.appendChild(opt)
-        }
-        for (const option of packOptions) {
-          const opt = document.createElement('option')
-          opt.value = option.value
-          opt.textContent = option.label
-          instrumentSel.appendChild(opt)
-        }
-      }
-      const instrument = track.instrument
-      const selectedValue = instrument && instrument.type === 'pack'
-        ? packOptionValue(instrument.packId, instrument.packVersion, instrument.patchId)
-        : instrument && instrument.type === 'rack'
-        ? `r:${instrument.rackId}`
-        : `p:${(instrument && instrument.paletteKey) || track.paletteKey || 'classic'}`
-      if (instrument?.type === 'pack' && !Array.from(instrumentSel.options).some(option => option.value === selectedValue)) {
-        const missing = document.createElement('option')
-        missing.value = selectedValue
-        missing.textContent = packInstrumentLabel(instrument, this._packCatalog)
-        instrumentSel.appendChild(missing)
-      }
-      instrumentSel.value = selectedValue
-      const instrumentStatus = item.querySelector('.track-instrument-status')
-      const instrumentLabel = packInstrumentLabel(instrument, this._packCatalog)
-      instrumentStatus.textContent = instrument?.type === 'pack' ? instrumentLabel : ''
-      instrumentStatus.className = 'track-instrument-status' + (instrumentLabel.startsWith('Missing pack:') ? ' missing' : '')
-      instrumentStatus.title = instrumentLabel
+      // One compact line: the label opens the browser, the gear opens settings.
+      // Both arm the track first, so "assign" always means "assign to this one".
       const instrumentChip = item.querySelector('.track-instrument-chip')
-      instrumentChip.textContent = instrument?.type === 'pack'
-        ? instrumentLabel
-        : instrument?.type === 'rack'
-          ? `Rack: ${instrument.rackId}`
-          : Palettes[(instrument && instrument.paletteKey) || track.paletteKey || 'classic']?.name || 'Internal Synth'
-      instrumentChip.title = 'Open instrument controls'
-      instrumentChip.onclick = () => document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
-      instrumentSel.onchange = () => {
-        const selection = packSelectionFromValue(instrumentSel.value)
-        this._store.dispatch(SetTrackInstrument(track.id,
-          selection
-            ? { type: 'pack', ...selection, programFollow: 'pinned' }
-            : instrumentSel.value.startsWith('r:')
-              ? { type: 'rack', rackId: instrumentSel.value.slice(2) }
-              : { type: 'palette', paletteKey: instrumentSel.value.slice(2) }
-        ))
+      const instrumentGear = item.querySelector('.track-instrument-gear')
+      const isMidi = track.type === 'midi'
+      instrumentChip.style.display = isMidi ? '' : 'none'
+      instrumentGear.style.display = isMidi ? '' : 'none'
+      if (isMidi) {
+        const label = trackInstrumentLabel(track.instrument, this._packCatalog)
+        instrumentChip.textContent = label
+        instrumentChip.title = `${label} — click to change`
+        instrumentChip.className = 'track-instrument-chip' + (label.startsWith('Missing:') ? ' missing' : '')
+        const arm = () => document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
+        instrumentChip.onclick = () => { arm(); document.dispatchEvent(new CustomEvent('open-instrument-browser')) }
+        instrumentGear.title = 'Instrument settings'
+        instrumentGear.onclick = () => { arm(); document.dispatchEvent(new CustomEvent('open-instrument-settings', { detail: { trackId: track.id } })) }
       }
     })
   }

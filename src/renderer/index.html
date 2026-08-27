@@ -48,7 +48,6 @@
     <div id="arrange-view">
       <div id="arrange-workspace">
         <div id="arrangement-container" aria-label="Arrangement timeline" role="region"></div>
-        <aside id="instrument-inspector" aria-label="Selected track instrument"></aside>
       </div>
       <div id="mixer-bar" role="region" aria-label="Mixer"></div>
     </div>
@@ -139,6 +138,42 @@
         <button id="midi-record-btn" class="midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ MIDI REC</button>
       </div>
       <p class="dlg-note">Web MIDI needs a secure context (https or localhost). On the plain-http LAN address there is no MIDI at all.</p>
+    </div>
+  </dialog>
+
+  <dialog id="instrument-browser-dialog" class="app-dialog ib-dialog" aria-labelledby="ib-title">
+    <div class="dlg-header">
+      <span id="ib-title" class="dlg-title">INSTRUMENT</span>
+      <button id="ib-settings-btn" class="dlg-close-btn" aria-label="Instrument settings">⚙ SETTINGS</button>
+      <button class="dlg-close-btn" data-close-dialog="instrument-browser-dialog" aria-label="Close instrument browser">✕</button>
+    </div>
+    <div class="dlg-body">
+      <input type="search" id="ib-search" class="ib-search" placeholder="Search instruments" aria-label="Search instruments" autocomplete="off">
+      <div id="ib-scopes" class="ib-scopes" role="group" aria-label="Scope"></div>
+      <div id="ib-list" class="ib-list" role="listbox" aria-label="Instruments" tabindex="-1"></div>
+      <p class="dlg-note">↑↓ audition · Enter assign · Shift+Enter new track · Tab scope · Ctrl+D favourite · Esc cancel</p>
+    </div>
+  </dialog>
+
+  <dialog id="instrument-settings-dialog" class="app-dialog" aria-labelledby="is-title">
+    <div class="dlg-header">
+      <span id="is-title" class="dlg-title">INSTRUMENT</span>
+      <button class="dlg-close-btn" data-close-dialog="instrument-settings-dialog" aria-label="Close instrument settings">✕</button>
+    </div>
+    <div id="is-tabs" class="is-tabs" role="tablist" aria-label="Instrument settings"></div>
+    <div id="is-body" class="dlg-body" role="tabpanel"></div>
+  </dialog>
+
+  <dialog id="library-dialog" class="app-dialog" aria-labelledby="lib-title">
+    <div class="dlg-header">
+      <span id="lib-title" class="dlg-title">LIBRARY</span>
+      <button class="dlg-close-btn" data-close-dialog="library-dialog" aria-label="Close library">✕</button>
+    </div>
+    <div class="dlg-body">
+      <div class="dlg-row">
+        <button id="lib-import-btn" class="midi-btn">+ IMPORT .SF2</button>
+      </div>
+      <div id="lib-list" class="lib-list"></div>
     </div>
   </dialog>
 

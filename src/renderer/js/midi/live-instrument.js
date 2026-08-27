@@ -1,21 +1,40 @@
-// live-instrument.js — plays one track live from external MIDI. Palette
-// tracks make voices directly; rack tracks mount lazily and drive the
+// live-instrument.js — builds one playable instrument from an instrument
+// descriptor. The browser's audition, the armed-track live path and timeline
+// playback all come through here, so a sound auditions exactly as it plays.
+// Palette tracks make voices directly; rack tracks mount lazily and drive the
 // track's midi-in module. Same note maths as timeline-player.js.
 
 import RackEngine from '../rack/rack-engine.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 
-export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRack, packFor, sampleStoreFor, onStatus }) {
-  const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
+
+export function liveInstrumentFor(track, deps) {
+  return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
+}
+
+export function instrumentFor(instrument, { palettes, ctx, output, racks, mountRack, packFor, sampleStoreFor, onStatus } = {}) {
+  if (!instrument) return null
+  const bendRange = instrument.bendRange ?? DEFAULT_BEND_RANGE
+  const modOff = instrument.modDest === 'off'
+
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)
     const patch = pack?.byId?.get(instrument.patchId)
     const sampleStore = patch && sampleStoreFor?.(pack, ctx)
-    return sampleStore ? sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus }) : null
+    if (!sampleStore) return null
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus })
+    return {
+      ...inst,
+      send(event) {
+        if (event?.type === 'pitch-bend') inst.setBend?.(event.value * bendRange)
+        else if (event?.type === 'mod' && !modOff) inst.setMod?.(event.value)
+      }
+    }
   }
 
   if (instrument.type === 'rack') {
-    const rack = racks[instrument.rackId]
+    const rack = racks?.[instrument.rackId]
     if (!rack) return null
 
     let handle = null
@@ -62,15 +81,21 @@ export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRa
   // palette here: an unavailable selected pack must stay silent and visible.
   if (instrument.type !== 'palette') return null
 
-  const palette = palettes?.[instrument.paletteKey || track.paletteKey || 'classic']
+  const palette = palettes?.[instrument.paletteKey || 'classic']
   if (!palette) return null
 
   const voices = new Map() // pitch → voice
+  let bend = 0             // semitones, applied to voices struck later too
+  let mod = 0
   return {
     noteOn(pitch, velocity) {
       if (voices.has(pitch)) return
       const freq = 440 * Math.pow(2, (pitch - 69) / 12)
-      voices.set(pitch, palette.createVoice(ctx, output, freq, velocity / 127, ctx.currentTime))
+      const voice = palette.createVoice(ctx, output, freq, velocity / 127, ctx.currentTime)
+      voices.set(pitch, voice)
+      // A note struck mid-bend has to land in tune, not snap on the next wheel move.
+      if (bend) voice?.setBend?.(bend)
+      if (mod) voice?.setMod?.(mod)
     },
     noteOff(pitch) {
       const voice = voices.get(pitch)
@@ -78,7 +103,16 @@ export function liveInstrumentFor(track, { palettes, ctx, output, racks, mountRa
       voice.stop(ctx.currentTime)
       voices.delete(pitch)
     },
-    send() {},
+    send(event) {
+      // Drum voices have neither — the optional calls keep them silent, not broken.
+      if (event?.type === 'pitch-bend') {
+        bend = event.value * bendRange
+        for (const voice of voices.values()) voice?.setBend?.(bend)
+      } else if (event?.type === 'mod' && !modOff) {
+        mod = event.value
+        for (const voice of voices.values()) voice?.setMod?.(mod)
+      }
+    },
     dispose() {
       for (const voice of voices.values()) voice.stop(ctx.currentTime)
       voices.clear()

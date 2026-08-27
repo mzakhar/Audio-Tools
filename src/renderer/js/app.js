@@ -8,7 +8,7 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrumentProgram } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { liveInstrumentFor } from './midi/live-instrument.js'
@@ -23,7 +23,9 @@ import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
-import { InstrumentInspector } from './components/instrument-inspector.js'
+import { InstrumentBrowser } from './components/instrument-browser.js'
+import { InstrumentSettings } from './components/instrument-settings.js'
+import { LibraryDialog } from './components/library-dialog.js'
 import ShortcutManager from './shortcuts.js'
 import { applyTheme, savedTheme, THEMES } from './theme.js'
 import { commandItems } from './ui/command-model.js'
@@ -31,7 +33,8 @@ import { openDialog, closeDialog } from './ui/dialog.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
-import { sampleInstrumentFor } from './instruments/sample-instrument.js'
+import { createAuditioner } from './instruments/auditioner.js'
+import { armPlan } from './instruments/arm-track.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -41,13 +44,10 @@ function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 
 let currentPaletteKey = 'classic'
 let currentPalette = Palettes.classic
-const activeVoices = {} // midi note → voice object
 const computerKeyTracks = new Map() // note → MIDI channel while held
 const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
-let _previewPack = null
-let _previewInstrument = null
 const _sampleStores = new WeakMap()
 
 function packFor(packId, version) {
@@ -77,67 +77,66 @@ async function warmPack(pack, patch) {
   if (store && ids.length) await store.preload(ids)
 }
 
-function previewInstrumentFor(ctx) {
-  const pack = _previewPack && packFor(_previewPack.packId, _previewPack.packVersion)
-  const patch = pack?.byId?.get(_previewPack.patchId)
-  if (!pack || !patch) return null
-  const signature = `${pack.id}@${pack.version}:${patch.id}`
-  if (_previewInstrument?.ctx === ctx && _previewInstrument.signature === signature) return _previewInstrument.instrument
-  _previewInstrument?.instrument.dispose()
-  const instrument = sampleInstrumentFor(patch, { ctx, output: AudioEngine.getMasterInput(), sampleStore: sampleStoreFor(pack, ctx) })
-  _previewInstrument = { ctx, signature, instrument }
-  return instrument
-}
-
-async function auditionTrack(track) {
-  await ensureAudio()
+/** Deps for instrumentFor/liveInstrumentFor — one shape, every call site, so
+ *  an audition cannot be built differently from the thing it auditions. */
+function instrumentDeps({ output, trackId } = {}) {
   const ctx = AudioEngine.getContext()
-  if (!track || !ctx) return
-  const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
-  const instrument = liveInstrumentFor(track, { palettes: Palettes, ctx, output, racks: ProjectStore.getState().racks, packFor, sampleStoreFor, onStatus: status => sampleStatus(track.id, status), mountRack: rack => RackEngine.mount(ctx, rack, { output }) })
-  if (!instrument) throw new Error('Selected instrument is unavailable')
-  // Audition must stay lazy: a preset may reference hundreds of samples.
-  await instrument.preload?.(60, 100)
-  instrument.noteOn(60, 100)
-  setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
+  const out = output || AudioEngine.getMasterInput()
+  return {
+    palettes: Palettes,
+    ctx,
+    output: out,
+    racks: ProjectStore.getState().racks,
+    packFor,
+    sampleStoreFor,
+    onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
+    mountRack: rack => RackEngine.mount(ctx, rack, {
+      output: out,
+      getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
+      onParam: (target, value) => {
+        const [channelId, param] = target.split('.')
+        if (param === 'volume') MixerEngine.setVolume(channelId, value)
+        else if (param === 'pan') MixerEngine.setPan(channelId, value)
+      }
+    })
+  }
 }
 
-async function auditionPack(pack, patch) {
-  await ensureAudio()
-  const ctx = AudioEngine.getContext(), sampleStore = pack && ctx && sampleStoreFor(pack, ctx)
-  if (!ctx || !sampleStore || !patch) throw new Error('Selected pack is unavailable')
-  const instrument = sampleInstrumentFor(patch, { ctx, output: AudioEngine.getMasterInput(), sampleStore })
-  await instrument.preload(60, 100)
-  instrument.noteOn(60, 100)
-  setTimeout(() => { instrument.noteOff(60); instrument.dispose() }, 600)
-}
+const _auditioner = createAuditioner({ ensureAudio, buildDeps: () => instrumentDeps() })
 
-async function auditionRawPack(pack, patch) {
-  await ensureAudio()
-  const ctx = AudioEngine.getContext()
-  const zone = patch?.zones?.find(item => 60 >= item.keyLo && 60 <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
-  if (!ctx || !zone || !window.electronFS?.readInstrumentSample) throw new Error('Selected pack sample is unavailable')
-  const bytes = await window.electronFS.readInstrumentSample(pack.id, pack.version, zone.sampleId)
-  const source = ctx.createBufferSource()
-  source.buffer = await ctx.decodeAudioData(bytes)
-  source.connect(ctx.destination)
-  source.start()
-  setTimeout(() => source.stop(), 800)
+/** 'ready' | 'unavailable' | 'missing' for a pack instrument descriptor. */
+function packState(instrument) {
+  const pack = packFor(instrument.packId, instrument.packVersion)
+  if (!pack?.byId?.get(instrument.patchId)) return 'missing'
+  return window.electronFS?.readInstrumentSample ? 'ready' : 'unavailable'
 }
 
 function addMidiTrack(name = 'MIDI') {
   ProjectStore.dispatch(AddTrack('midi', name))
   const track = ProjectStore.getState().tracks.at(-1)
-  if (_previewPack && track) ProjectStore.dispatch(SetTrackInstrument(track.id, { type: 'pack', ..._previewPack, programFollow: 'pinned' }))
+  if (track) _midiTargetTrackId = track.id
   syncMixerStrips(ProjectStore.getState())
-  return ProjectStore.getState().tracks.at(-1)
+  return track
+}
+
+/**
+ * The one selection: the armed MIDI track. A note played into a project with
+ * no MIDI track provisions one — a person playing notes wants somewhere to
+ * record them. One track, once; never one per note.
+ */
+function ensureMidiTrack() {
+  const plan = armPlan(ProjectStore.getState().tracks, _midiTargetTrackId)
+  if (plan.provision) return addMidiTrack()
+  _midiTargetTrackId = plan.trackId
+  return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
 }
 
 async function refreshPackCatalog() {
   if (!window.electronFS?.listInstrumentPacks) return
   _packCatalog = (await window.electronFS.listInstrumentPacks()).map(entry => compilePackManifest(entry.manifest))
   _arrangementView?.render()
-  _instrumentInspector?.render()
+  _instrumentBrowser?.refresh()
+  _libraryDialog?.render()
 }
 
 /** Tear down every live MIDI instrument — the old project's tracks are gone. */
@@ -152,7 +151,9 @@ let _arrangementView = null
 let _pianoRoll = null
 let _tr909View = null
 let _rackView = null
-let _instrumentInspector = null
+let _instrumentBrowser = null
+let _instrumentSettings = null
+let _libraryDialog = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
 let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack'
 let _selectedArrangeTrackId = null
@@ -184,7 +185,7 @@ async function ensureAudio() {
 // shortcuts all route through here, so a control can never be live in one
 // place and dead in another.
 const COMMANDS = Object.create(null)
-function runCommand(id) { COMMANDS[id]?.() }
+function runCommand(id) { return COMMANDS[id]?.() }
 
 /** Transient status line — replaces the permanent #rec-status span. */
 let _toastTimer = null
@@ -289,10 +290,10 @@ function switchPalette(key) {
   if (key !== 'tr909') _tr909View?.stop()
 
   // Stop any held notes
-  Object.keys(activeVoices).forEach(note => {
-    try { activeVoices[note].stop(AudioEngine.getContext()?.currentTime || 0) } catch (e) {}
-    delete activeVoices[note]
-  })
+  for (const [note, channel] of computerKeyTracks) {
+    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
+  }
+  computerKeyTracks.clear()
   document.querySelectorAll('.key-white.active, .key-black.active')
     .forEach(el => el.classList.remove('active'))
 
@@ -570,51 +571,22 @@ function initCommandBar() {
 }
 
 // ─── Note events (from Keyboard) ───────────────────────────────────────────
-document.addEventListener('note-on', async (e) => {
-  const state = ProjectStore.getState()
-  const midiTracks = state.tracks.filter(track => track.type === 'midi')
-  const target = midiTracks.find(track => track.id === _midiTargetTrackId) || (midiTracks.length === 1 ? midiTracks[0] : null)
-  if (target) {
-    const channel = target.midiChannel ?? 0
-    computerKeyTracks.set(e.detail.note, channel)
-    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-on', channel, pitch: e.detail.note, velocity: 108 } }))
-    return
-  }
-  await ensureAudio()
-  const ctx = AudioEngine.getContext()
-  if (!ctx) return
-  const note = e.detail.note
-  const preview = previewInstrumentFor(ctx)
-  if (preview) {
-    preview.noteOn(note, 108)
-    return
-  }
-  if (activeVoices[note]) return
-
-  const freq = 440 * Math.pow(2, (note - 69) / 12)
-  try {
-    const voice = currentPalette.createVoice(ctx, AudioEngine.getMasterInput(), freq, 0.85, ctx.currentTime)
-    activeVoices[note] = voice
-  } catch (err) { console.error('createVoice error', err) }
+// There is one selection: the armed MIDI track. Keys, pads and external MIDI
+// all reach it through the same 'midi-event' path.
+document.addEventListener('note-on', (e) => {
+  const target = ensureMidiTrack()
+  if (!target) return
+  const channel = target.midiChannel ?? 0
+  computerKeyTracks.set(e.detail.note, channel)
+  document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-on', channel, pitch: e.detail.note, velocity: 108 } }))
 })
 
 document.addEventListener('note-off', (e) => {
   const note = e.detail.note
-  if (computerKeyTracks.has(note)) {
-    const channel = computerKeyTracks.get(note)
-    computerKeyTracks.delete(note)
-    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
-    return
-  }
-  if (_previewInstrument) {
-    _previewInstrument.instrument.noteOff(note)
-    return
-  }
-  if (activeVoices[note]) {
-    const ctx = AudioEngine.getContext()
-    try { activeVoices[note].stop(ctx ? ctx.currentTime : 0) } catch (err) {}
-    delete activeVoices[note]
-  }
+  if (!computerKeyTracks.has(note)) return
+  const channel = computerKeyTracks.get(note)
+  computerKeyTracks.delete(note)
+  document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
 })
 
 // ─── Transport buttons ──────────────────────────────────────────────────────
@@ -1129,6 +1101,9 @@ function initMidi() {
     const ctx = AudioEngine.getContext()
     if (!ctx) return
 
+    // Auto-provision: a note into an empty project makes the track it belongs
+    // on, once. Note-offs never provision — they can only follow a note-on.
+    if (detail.kind === 'note-on') ensureMidiTrack()
     const state = ProjectStore.getState()
     const midiTracks = state.tracks.filter(t => t.type === 'midi')
 
@@ -1142,32 +1117,6 @@ function initMidi() {
 
     const ids = routeChannel(midiTracks, detail.channel, _midiTargetTrackId)
 
-    if (ids.length === 0 && midiTracks.length === 0) {
-      // No MIDI tracks at all — plain keyboard behaviour, notes only.
-      if (detail.kind !== 'note-on' && detail.kind !== 'note-off') return
-      const note = detail.pitch
-      const preview = previewInstrumentFor(ctx)
-      if (preview) {
-        if (detail.kind === 'note-on') preview.noteOn(note, detail.velocity)
-        else preview.noteOff(note)
-        return
-      }
-      if (detail.kind === 'note-on') {
-        if (activeVoices[note]) return
-        const freq = 440 * Math.pow(2, (note - 69) / 12)
-        try {
-          const voice = currentPalette.createVoice(ctx, AudioEngine.getMasterInput(), freq, detail.velocity / 127, ctx.currentTime)
-          activeVoices[note] = voice
-        } catch (err) {}
-      } else {
-        if (activeVoices[note]) {
-          try { activeVoices[note].stop(ctx.currentTime) } catch (err) {}
-          delete activeVoices[note]
-        }
-      }
-      return
-    }
-
     for (const trackId of ids) {
       const track = state.tracks.find(t => t.id === trackId)
       if (!track) continue
@@ -1180,24 +1129,7 @@ function initMidi() {
       }
       if (!entry) {
         const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
-        const inst = liveInstrumentFor(track, {
-          palettes: Palettes,
-          ctx,
-          output,
-          racks: state.racks,
-          packFor,
-          sampleStoreFor,
-          onStatus: status => sampleStatus(track.id, status),
-          mountRack: rack => RackEngine.mount(ctx, rack, {
-            output,
-            getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
-            onParam: (target, value) => {
-              const [channelId, param] = target.split('.')
-              if (param === 'volume') MixerEngine.setVolume(channelId, value)
-              else if (param === 'pan') MixerEngine.setPan(channelId, value)
-            }
-          })
-        })
+        const inst = liveInstrumentFor(track, instrumentDeps({ output, trackId: track.id }))
         if (!inst) continue
         entry = { sig, inst }
         _liveInstruments.set(trackId, entry)
@@ -1386,22 +1318,32 @@ function boot() {
       packCatalog: () => _packCatalog
     })
   }
-  const inspector = document.getElementById('instrument-inspector')
-  if (inspector) _instrumentInspector = new InstrumentInspector(inspector, {
+  _instrumentSettings = new InstrumentSettings({
     store: ProjectStore,
     packCatalog: () => _packCatalog,
-    audition: auditionTrack,
-    auditionPack,
-    auditionRawPack,
-    selectPreview: selection => {
-      _previewPack = selection
-      _previewInstrument?.instrument.dispose()
-      _previewInstrument = null
-      const pack = packFor(selection.packId, selection.packVersion)
-      warmPack(pack, pack?.byId?.get(selection.patchId)).catch(() => {})
-    },
-    preloadPack: (pack, patch) => warmPack(pack, patch).catch(() => {})
+    warmPack: (pack, patch) => warmPack(pack, patch).catch(() => {})
   })
+  _instrumentBrowser = new InstrumentBrowser({
+    store: ProjectStore,
+    packCatalog: () => _packCatalog,
+    // tr909 is the 909 editor's own transport, not a playable voice.
+    palettes: () => Object.fromEntries(Object.entries(Palettes).filter(([key]) => key !== 'tr909')),
+    racks: () => ProjectStore.getState().racks,
+    auditioner: _auditioner,
+    ensureTrack: ensureMidiTrack,
+    addTrack: () => addMidiTrack(),
+    packState,
+    openSettings: trackId => document.dispatchEvent(new CustomEvent('open-instrument-settings', { detail: { trackId } }))
+  })
+  _libraryDialog = new LibraryDialog({
+    packCatalog: () => _packCatalog,
+    canImport: () => !!window.electronFS?.importSf2Pack,
+    importPack: async () => { await runCommand('import-pack') }
+  })
+  document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
+  document.addEventListener('open-library', () => _libraryDialog.open())
+  document.addEventListener('open-instrument-settings', e => _instrumentSettings.open(e.detail?.trackId ?? ensureMidiTrack()?.id))
+
   const rackContainer = document.getElementById('rack-view')
   if (rackContainer) _rackView = new RackView(rackContainer, {
     hasWorklet: () => AudioEngine.hasWorklet(),
