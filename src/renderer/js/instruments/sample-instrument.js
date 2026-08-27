@@ -11,6 +11,40 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
   const pending = new Map()
   let disposed = false
 
+  // Shared expression sources: one bend offset (cents) and one vibrato LFO
+  // (cents), summed into every live voice's detune. Built once per
+  // instrument, not per voice. Guarded — fake test contexts and older
+  // browsers may lack ConstantSourceNode or a connectable AudioParam.
+  let bendSource = null
+  let vibratoGain = null
+  try {
+    if (ctx.createConstantSource && ctx.createOscillator && ctx.createGain) {
+      bendSource = ctx.createConstantSource()
+      bendSource.offset.value = 0
+      bendSource.start(ctx.currentTime)
+      const vibratoOsc = ctx.createOscillator()
+      vibratoOsc.frequency.value = 5
+      vibratoGain = ctx.createGain()
+      vibratoGain.gain.value = 0
+      vibratoOsc.connect(vibratoGain)
+      vibratoOsc.start(ctx.currentTime)
+      vibratoGain._osc = vibratoOsc
+    }
+  } catch { bendSource = null; vibratoGain = null }
+
+  const connectExpression = source => {
+    if (!source.detune || typeof source.detune.connect !== 'function') return
+    try {
+      bendSource?.connect(source.detune)
+      vibratoGain?.connect(source.detune)
+    } catch { /* not connectable in this context */ }
+  }
+  const disconnectExpression = source => {
+    if (!source.detune) return
+    try { bendSource?.disconnect(source.detune) } catch { /* already disconnected */ }
+    try { vibratoGain?.disconnect(source.detune) } catch { /* already disconnected */ }
+  }
+
   const stop = (pitch, time = ctx.currentTime) => {
     const pendingVoice = pending.get(pitch)
     if (pendingVoice) {
@@ -30,6 +64,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       voice.source.disconnect()
       voice.gain.disconnect()
       voice.analyser?.disconnect()
+      disconnectExpression(voice.source)
     }
   }
 
@@ -75,6 +110,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       analyser.connect(output)
     } else gain.connect(output)
     source.connect(gain)
+    connectExpression(source)
     const voice = { source, gain, analyser, release: envelope?.release || 0 }
     voices.set(pitch, voice)
     source.onended = () => {
@@ -82,6 +118,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       source.disconnect()
       gain.disconnect()
       analyser?.disconnect()
+      disconnectExpression(source)
     }
     source.start(time)
     if (pendingVoice.released) source.stop(Math.max(time, ctx.currentTime) + 0.08)
@@ -120,10 +157,27 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       const sampleIds = zone ? [zone.sampleId] : (patch.zones || []).map(item => item.sampleId)
       return sampleStore.preload ? sampleStore.preload(sampleIds) : Promise.all(sampleIds.map(sampleId => sampleStore.get(sampleId)))
     },
+    setBend(semitones) {
+      if (!bendSource) return
+      const cents = (Number(semitones) || 0) * 100
+      bendSource.offset.setValueAtTime?.(cents, ctx.currentTime)
+      if (!bendSource.offset.setValueAtTime) bendSource.offset.value = cents
+    },
+    setMod(value01) {
+      if (!vibratoGain) return
+      const depth = Math.max(0, Math.min(1, Number(value01) || 0)) * 50
+      vibratoGain.gain.setValueAtTime?.(depth, ctx.currentTime)
+      if (!vibratoGain.gain.setValueAtTime) vibratoGain.gain.value = depth
+    },
     dispose() {
       disposed = true
       pending.clear()
       for (const pitch of [...voices.keys()]) stop(pitch)
+      try { bendSource?.stop(ctx.currentTime) } catch { /* already stopped */ }
+      bendSource?.disconnect()
+      try { vibratoGain?._osc?.stop(ctx.currentTime) } catch { /* already stopped */ }
+      vibratoGain?._osc?.disconnect()
+      vibratoGain?.disconnect()
     }
   }
 }

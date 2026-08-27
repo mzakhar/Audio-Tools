@@ -124,4 +124,54 @@ describe('sample instrument', () => {
     inst.noteOff(60)
     expect(sources[0].stop).toHaveBeenCalledWith(4.2)
   })
+
+  it('exposes setBend/setMod that are safe to call before any note', async () => {
+    const { ctx, output } = setup()
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({})) } })
+    expect(typeof inst.setBend).toBe('function')
+    expect(typeof inst.setMod).toBe('function')
+    expect(() => inst.setBend(2)).not.toThrow()
+    expect(() => inst.setMod(0.5)).not.toThrow()
+  })
+
+  it('connects the shared bend/vibrato sources into a started voice detune', async () => {
+    const { ctx, sources, output } = setup()
+    const bend = { offset: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const vibrato = { gain: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn() }
+    ctx.createConstantSource = () => bend
+    ctx.createOscillator = () => ({ frequency: { value: 0 }, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn() })
+    const realCreateGain = ctx.createGain
+    let gainCalls = 0
+    ctx.createGain = () => (gainCalls++ === 0 ? vibrato : realCreateGain())
+    const realCreateBufferSource = ctx.createBufferSource
+    ctx.createBufferSource = () => {
+      const source = realCreateBufferSource()
+      source.detune = { value: 0, connect: vi.fn(), disconnect: vi.fn() }
+      return source
+    }
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({})) } })
+    inst.noteOn(72, 64)
+    await Promise.resolve(); await Promise.resolve()
+    expect(bend.connect).toHaveBeenCalledWith(sources[0].detune)
+    expect(vibrato.connect).toHaveBeenCalledWith(sources[0].detune)
+  })
+
+  it('dispose leaves the shared bend/vibrato sources stopped and disconnected', async () => {
+    const { ctx, output } = setup()
+    const bend = { offset: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const osc = { frequency: { value: 0 }, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const vibrato = { gain: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn() }
+    ctx.createConstantSource = () => bend
+    ctx.createOscillator = () => osc
+    const realCreateGain = ctx.createGain
+    let gainCalls = 0
+    ctx.createGain = () => (gainCalls++ === 0 ? vibrato : realCreateGain())
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({})) } })
+    inst.dispose()
+    expect(bend.stop).toHaveBeenCalled()
+    expect(bend.disconnect).toHaveBeenCalled()
+    expect(osc.stop).toHaveBeenCalled()
+    expect(osc.disconnect).toHaveBeenCalled()
+    expect(vibrato.disconnect).toHaveBeenCalled()
+  })
 })

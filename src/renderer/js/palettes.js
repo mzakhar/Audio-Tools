@@ -67,6 +67,7 @@ const classicPalette = {
     gainNode.connect(output)
     osc.start(startTime)
 
+    const baseDetune = osc.detune.value
     return {
       stop(t) {
         const rel = p.release
@@ -75,6 +76,12 @@ const classicPalette = {
         gainNode.gain.linearRampToValueAtTime(0, t + rel)
         osc.stop(t + rel + 0.05)
         osc.onended = () => { osc.disconnect(); filter.disconnect(); gainNode.disconnect() }
+      },
+      setBend(semitones) {
+        osc.detune.value = baseDetune + (semitones || 0) * 100
+      },
+      setMod(value01) {
+        filter.frequency.value = p.cutoff + (value01 || 0) * p.cutoff
       }
     }
   }
@@ -131,6 +138,7 @@ const fmPalette = {
     modulator.start(startTime)
     carrier.start(startTime)
 
+    const baseModDepth = modDepth.gain.value
     return {
       stop(t) {
         const rel = p.release
@@ -143,6 +151,16 @@ const fmPalette = {
           carrier.disconnect(); modulator.disconnect()
           modDepth.disconnect(); outGain.disconnect()
         }
+      },
+      setBend(semitones) {
+        const cents = (semitones || 0) * 100
+        carrier.detune.value = cents
+        modulator.detune.value = cents
+      },
+      setMod(value01) {
+        // No filter on this voice — mod wheel brightens/dulls the FM tone
+        // by scaling modulation depth instead, the closest musical fit.
+        modDepth.gain.value = baseModDepth + (value01 || 0) * baseModDepth
       }
     }
   }
@@ -362,6 +380,8 @@ const padPalette = {
     oscA.start(startTime)
     oscB.start(startTime)
 
+    const baseDetuneA = oscA.detune.value
+    const baseDetuneB = oscB.detune.value
     return {
       stop(t) {
         const rel = p.release
@@ -371,6 +391,14 @@ const padPalette = {
         oscA.stop(t + rel + 0.1)
         oscB.stop(t + rel + 0.1)
         oscA.onended = () => { oscA.disconnect(); oscB.disconnect(); filter.disconnect(); outGain.disconnect() }
+      },
+      setBend(semitones) {
+        const cents = (semitones || 0) * 100
+        oscA.detune.value = baseDetuneA + cents
+        oscB.detune.value = baseDetuneB + cents
+      },
+      setMod(value01) {
+        filter.frequency.value = p.cutoff + (value01 || 0) * p.cutoff
       }
     }
   }
