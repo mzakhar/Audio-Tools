@@ -208,3 +208,22 @@ describe('RemoveRack with a track on it', () => {
     expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
   })
 })
+
+describe('SetTrackInstrumentProgram keeps track-level expression', () => {
+  it('preserves bendRange and modDest across a program change', () => {
+    ProjectStore.reset()
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, {
+      type: 'pack', packId: 'gm', packVersion: '1.0', patchId: 'p1',
+      programFollow: 'midi', bendRange: 12, modDest: 'off'
+    }))
+    ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, {
+      packId: 'gm', packVersion: '1.0', patchId: 'p2', bankMsb: 0, bankLsb: 0, program: 42
+    }))
+    const instrument = ProjectStore.getState().tracks[0].instrument
+    expect(instrument.patchId).toBe('p2')
+    expect(instrument.bendRange).toBe(12)
+    expect(instrument.modDest).toBe('off')
+  })
+})

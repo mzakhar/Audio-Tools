@@ -158,12 +158,17 @@ export function SetTrackInstrumentProgram(trackId, selection) {
       if (track.instrument?.programFollow === 'pinned') return next
       const patchId = selection.patchId || track.instrument?.patchId
       if (!patchId) return next
+      // Per-track expression settings belong to the track, not the patch — a
+      // program change must not silently reset the player's bend range.
+      const { bendRange, modDest } = track.instrument || {}
       track.instrument = {
         type: 'pack',
         packId: selection.packId,
         packVersion: selection.packVersion,
         patchId,
         programFollow: 'midi',
+        ...(bendRange === undefined ? {} : { bendRange }),
+        ...(modDest === undefined ? {} : { modDest }),
         received: {
           bankMsb: selection.bankMsb,
           bankLsb: selection.bankLsb,

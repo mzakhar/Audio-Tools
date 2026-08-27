@@ -11,6 +11,7 @@ import Recorder from './recorder.js'
 import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrumentProgram } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
+import { holdReducer } from './midi/midi-hold.js'
 import { liveInstrumentFor } from './midi/live-instrument.js'
 import FileAdapter from './io/FileAdapter.js'
 import { pickAudioFile } from './io/audio-picker.js'
@@ -48,6 +49,7 @@ const computerKeyTracks = new Map() // note → MIDI channel while held
 const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
+let _holdState                        // sustain-pedal state, one shared object, keyed internally by channel
 const _sampleStores = new WeakMap()
 
 function packFor(packId, version) {
@@ -1075,8 +1077,16 @@ function initMidi() {
 
   // Route live MIDI note events → track instruments (routeChannel), falling
   // back to the plain keyboard behaviour when no MIDI tracks exist at all.
+  // Sustain (CC64) is resolved before anything else sees the stream: the pure
+  // reducer swallows note-offs while a channel is held and flushes them on
+  // release, so no instrument has to know the pedal exists.
   document.addEventListener('midi-event', async (e) => {
-    const detail = e.detail
+    const { state, emit } = holdReducer(_holdState, e.detail)
+    _holdState = state
+    for (const event of emit) await handleMidiEvent(event)
+  })
+
+  async function handleMidiEvent(detail) {
     if (detail.kind === 'program-change' || (detail.kind === 'cc' && (detail.controller === 0 || detail.controller === 32))) {
       const result = applyChannelMidi(_channelPrograms, detail)
       _channelPrograms = result.stateByChannel
@@ -1145,7 +1155,7 @@ function initMidi() {
         else entry.inst.send({ type: 'pitch-bend', value: detail.value })
       } catch (err) {}
     }
-  })
+  }
 
   // Keep device list in sync when devices connect/disconnect
   document.addEventListener('midi-device-change', (e) => {
