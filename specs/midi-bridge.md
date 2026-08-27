@@ -13,7 +13,7 @@ Motivating case: [Midinous](https://midinous.com) creates two virtual ports at s
 | 1 — Pure message parser | done | `3665564` |
 | 2 — Channel routing + live instruments | done | `c9ddf05` |
 | 3 — CC + pitch bend into racks | done | `76214f1` |
-| 3b — Expression + hold for every instrument | not started | |
+| 3b — Expression + hold for every instrument | done | `9d403ee`, `3eee12a` |
 | 4 — Clock in (optional) | not started | |
 | 5 — MIDI out (optional) | not started | |
 

@@ -17,15 +17,34 @@ Everything else lives in a dialog on a shortcut.
 
 | Phase | State | Commit |
 |---|---|---|
-| 0 — Guard fixes + `data-view` switching | not started | |
-| 1 — Command bar | not started | |
-| 2 — Dialog kit + piano-roll migration | not started | |
-| 3 — Project, MIDI and Library dialogs | not started | |
-| 4 — Mixer drawer | not started | |
+| 0 — Guard fixes + `data-view` switching | done | `0a0f4ec` |
+| 1 — Command bar | done | `0a0f4ec` |
+| 2 — Dialog kit + piano-roll migration | done | `0a0f4ec` |
+| 3 — Project, MIDI and Library dialogs | done | `0a0f4ec`, `3db4997` |
+| 4 — Mixer drawer | done | `0a0f4ec` |
 
 Companion specs: `specs/instrument-browser.md` (the instrument picker and the
 synth view, which depend on phases 1–2 here) and `specs/midi-control-surface.md`
 (deferred, builds nothing).
+
+## Progress — 2026-08-27
+
+All five phases are in. One `#command-bar` above the view body; `⋯` is a native
+popover; MIDI setup, Library, instrument settings and the piano roll are native
+`<dialog>`s through `ui/dialog.js`; the mixer is a drawer, closed by default.
+`#main[data-view]` drives view visibility — `#rack-view` stays out of it because
+`RackView` owns and reads its own inline display (rack-view.js:183).
+
+Two guards that had to land first: `setProjectOpen()` and `initMidi()` were
+dereferencing buttons that this rewrite moves. Both are optional now.
+
+The 909's promotion to its own view (`specs/instrument-browser.md` phase 5)
+deleted the mode+palette hazard in `updateGlobalPlayAvailability()`; `paletteKey`
+is gone from `command-model.js` entirely.
+
+Coverage that did not exist before: `tests/app-boot.test.js` boots the real
+`index.html` in jsdom and switches all four views, `tests/ui-shell-structure.test.js`
+asserts the removed bars stay removed.
 
 ---
 

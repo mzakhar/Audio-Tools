@@ -19,11 +19,34 @@ Depends on `specs/ui-shell.md` phases 1–2 (command bar and the `<dialog>` kit)
 
 | Phase | State | Commit |
 |---|---|---|
-| 1 — Patch index + browser overlay | not started | |
-| 2 — One selection, one instrument factory | not started | |
-| 3 — Instrument settings dialog | not started | |
-| 4 — Synth view: slot, pads, keys | not started | |
-| 5 — 909 promoted out of the palette axis | not started | |
+| 1 — Patch index + browser overlay | done | `66b7366`, `3db4997` |
+| 2 — One selection, one instrument factory | done | `3db4997` |
+| 3 — Instrument settings dialog | done | `3db4997` |
+| 4 — Synth view: slot, pads, keys | done | `da2073d` |
+| 5 — 909 promoted out of the palette axis | done | `da2073d` |
+
+## Progress — 2026-08-27
+
+All five phases are in.
+
+- `Ctrl+I` opens one overlay over `buildIndex`/`searchIndex`; the highlighted row
+  auditions through `instrumentFor` — the same factory that plays for real.
+- The preview concept is gone. `armPlan()` (pure) decides when a note
+  auto-provisions a MIDI track, so the rule is testable instead of buried in glue.
+- `switchPalette` and `#palette-tabs` are deleted; internal engines are the
+  Internal scope of the browser.
+- Pads are 8 x 2 off `pad-map.js` and dispatch synthetic `midi-event`s, inheriting
+  routing, sustain and mixer output. `PALETTE_DRUM_NOTES` maps GM percussion onto
+  the internal drum palette's four voices.
+- Keys keep a visible window that follows incoming notes by whole octaves
+  (`keyboard-range.js`, pure), plus manual octave buttons for playing without
+  hardware.
+
+Deliberately not built: pack removal and disk-size reporting in the Library
+dialog — the main-process IPC exposes neither, and inventing it here would be
+guessing at install policy. `instrument.modDest` exists but has two values
+(`default` / `off`); real destination switching needs engine work in
+`palettes.js` and `sample-instrument.js`.
 
 ---
 
