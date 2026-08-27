@@ -11,11 +11,10 @@ const DEFAULTS = {
   projectOpen: false,
   recording: false,
   midiInput: null,
-  paletteKey: 'classic',
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, midiInput, paletteKey } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, midiInput } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -25,7 +24,8 @@ export function commandItems(opts = {}) {
       label: 'Play',
       shortcut: null,
       group: 'transport',
-      enabled: !(mode === 'synth' && paletteKey === 'tr909'),
+      // The 909 is its own view with its own Bar/Chain transport.
+      enabled: mode !== 'tr909',
       visible: true,
     },
     {

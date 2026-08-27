@@ -1,21 +1,30 @@
 /**
  * keyboard.js
- * Renders a 2-octave on-screen piano (C3–C5, 25 keys).
- * Fires custom events 'note-on' and 'note-off' on the document.
- * Handles mouse, touch, and PC keyboard input.
+ * Renders an on-screen piano over a movable window of the MIDI range
+ * (C3–C5, 25 keys by default). Fires custom events 'note-on' and 'note-off'
+ * on the document. Handles mouse, touch, and PC keyboard input.
+ *
+ * The window is what makes a hardware octave button visible: an incoming note
+ * outside it scrolls the whole thing rather than vanishing. Range maths is
+ * pure and lives in keyboard-range.js.
  */
 
 import { KEY_MAP, keyLayout, noteToName } from './key-layout.js'
+import { windowForNote, shiftWindow } from './keyboard-range.js'
 
-// C3 = MIDI 48, C5 = MIDI 72
-const START_NOTE = 48 // C3
-const END_NOTE   = 72 // C5
+// C3 = MIDI 48, C5 = MIDI 72 — defaults, not constants any more.
+const DEFAULT_START = 48
+const DEFAULT_END   = 72
 const WHITE_KEY_W = 44
 const WHITE_KEY_H = 130
 const BLACK_KEY_W = 28
 const BLACK_KEY_H = 80
 
 let container = null
+let containerId = null
+let startNote = DEFAULT_START
+let endNote   = DEFAULT_END
+let touchBound = false // render() runs again on every octave shift
 const pressedKeys = new Set() // MIDI notes currently held
 const activeMouseNote = { val: null } // currently held mouse note
 
@@ -42,21 +51,30 @@ function highlightKey(note, on) {
   if (el) el.classList.toggle('active', on)
 }
 
+// PC keys are laid out relative to the window, not to MIDI 48, so the same
+// finger plays the same key of whatever octave is on screen.
+function pcNote(key) {
+  const note = KEY_MAP[key]
+  return note === undefined ? undefined : note - DEFAULT_START + startNote
+}
+
 function buildKeyboardLabel(note) {
-  // find PC key for this note
   for (const [k, n] of Object.entries(KEY_MAP)) {
-    if (n === note) return k === "'" ? "'" : k
+    if (n - DEFAULT_START + startNote === note) return k
   }
   return ''
 }
 
-function render(containerId) {
+function render(id, { start, end } = {}) {
+  if (id) containerId = id
+  if (start != null) startNote = start
+  if (end != null) endNote = end
   container = document.getElementById(containerId)
   if (!container) return
   container.innerHTML = ''
   container.style.position = 'relative'
 
-  const layout = keyLayout({ start: START_NOTE, end: END_NOTE, whiteW: WHITE_KEY_W, whiteH: WHITE_KEY_H, blackW: BLACK_KEY_W, blackH: BLACK_KEY_H })
+  const layout = keyLayout({ start: startNote, end: endNote, whiteW: WHITE_KEY_W, whiteH: WHITE_KEY_H, blackW: BLACK_KEY_W, blackH: BLACK_KEY_H })
   container.style.width = layout.width + 'px'
   container.style.height = layout.height + 'px'
 
@@ -79,11 +97,58 @@ function render(containerId) {
     container.appendChild(div)
   }
 
-  // Touch events on container (for multi-touch)
-  container.addEventListener('touchstart', onTouchStart, { passive: false })
-  container.addEventListener('touchend', onTouchEnd, { passive: false })
-  container.addEventListener('touchcancel', onTouchEnd, { passive: false })
+  // Touch events live on the container, which survives a re-render — bind once
+  // or every octave shift stacks another listener on it.
+  if (!touchBound) {
+    touchBound = true
+    container.addEventListener('touchstart', onTouchStart, { passive: false })
+    container.addEventListener('touchend', onTouchEnd, { passive: false })
+    container.addEventListener('touchcancel', onTouchEnd, { passive: false })
+  }
+
+  for (const note of [...pressedKeys]) highlightKey(note, true)
+  renderRange()
 }
+
+/** The "which octaves am I looking at" readout, plus its two octave buttons. */
+function renderRange() {
+  const label = document.getElementById('keyboard-range-label')
+  if (label) label.textContent = noteToName(startNote) + ' – ' + noteToName(endNote)
+  const down = document.getElementById('kb-oct-down')
+  const up   = document.getElementById('kb-oct-up')
+  if (down && !down.dataset.bound) {
+    down.dataset.bound = '1'
+    down.addEventListener('click', () => shiftOctave(-1))
+  }
+  if (up && !up.dataset.bound) {
+    up.dataset.bound = '1'
+    up.addEventListener('click', () => shiftOctave(1))
+  }
+  if (down) down.disabled = shiftWindow(startNote, endNote, -1).start === startNote
+  if (up)   up.disabled   = shiftWindow(startNote, endNote, 1).start === startNote
+}
+
+function setWindow({ start, end }) {
+  if (start === startNote && end === endNote) return false
+  // A shifting window would otherwise strand held notes under keys that are no
+  // longer on screen, and nothing would ever send their note-off.
+  for (const note of [...pressedKeys]) fireNoteOff(note)
+  activeMouseNote.val = null
+  render(null, { start, end })
+  return true
+}
+
+/** Scroll the window, in whole octaves, so `note` is on screen. */
+function ensureVisible(note) {
+  if (!container) return false
+  return setWindow(windowForNote(startNote, endNote, note))
+}
+
+function shiftOctave(octaves) {
+  return setWindow(shiftWindow(startNote, endNote, octaves))
+}
+
+function getRange() { return { start: startNote, end: endNote } }
 
 function attachMouseEvents(el, note) {
   el.addEventListener('mousedown', (e) => {
@@ -144,8 +209,9 @@ function onTouchEnd(e) {
   }
 }
 
-// PC keyboard events
-const heldKeys = new Set() // keycodes currently down
+// PC keyboard events. heldKeys remembers the note each key actually fired, so
+// an octave shift mid-hold still releases the note that sounded.
+const heldKeys = new Map() // key → MIDI note
 window.addEventListener('keydown', (e) => {
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
   // Don't capture if focus is on an input
@@ -153,21 +219,19 @@ window.addEventListener('keydown', (e) => {
 
   const key = e.key.toLowerCase()
   if (heldKeys.has(key)) return
-  const note = KEY_MAP[key]
+  const note = pcNote(key)
   if (note !== undefined) {
-    heldKeys.add(key)
+    heldKeys.set(key, note)
     fireNoteOn(note)
   }
 })
 
 window.addEventListener('keyup', (e) => {
   const key = e.key.toLowerCase()
+  const note = heldKeys.get(key)
   heldKeys.delete(key)
-  const note = KEY_MAP[key]
-  if (note !== undefined) {
-    fireNoteOff(note)
-  }
+  if (note !== undefined) fireNoteOff(note)
 })
 
-const Keyboard = { render, noteToFreq, noteToName }
+const Keyboard = { render, noteToFreq, noteToName, ensureVisible, shiftOctave, getRange }
 export default Keyboard

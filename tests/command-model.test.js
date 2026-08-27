@@ -25,10 +25,11 @@ describe('commandItems', () => {
     expect(find(open, 'add-midi-track').enabled).toBe(true)
   })
 
-  it('disables play only for synth+tr909', () => {
-    expect(find(commandItems({ mode: 'synth', paletteKey: 'tr909' }), 'play').enabled).toBe(false)
-    expect(find(commandItems({ mode: 'synth', paletteKey: 'classic' }), 'play').enabled).toBe(true)
-    expect(find(commandItems({ mode: 'arrange', paletteKey: 'tr909' }), 'play').enabled).toBe(true)
+  it('disables play only on the 909 view, which owns its own transport', () => {
+    expect(find(commandItems({ mode: 'tr909' }), 'play').enabled).toBe(false)
+    expect(find(commandItems({ mode: 'synth' }), 'play').enabled).toBe(true)
+    expect(find(commandItems({ mode: 'arrange' }), 'play').enabled).toBe(true)
+    expect(find(commandItems({ mode: 'rack' }), 'play').enabled).toBe(true)
   })
 
   it('shows add-track only in arrange', () => {

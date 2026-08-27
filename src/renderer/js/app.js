@@ -8,11 +8,11 @@ import Palettes from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrumentProgram } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
-import { liveInstrumentFor } from './midi/live-instrument.js'
+import { liveInstrumentFor, paletteAcceptsNote } from './midi/live-instrument.js'
 import FileAdapter from './io/FileAdapter.js'
 import { pickAudioFile } from './io/audio-picker.js'
 import AudioStore from './audio-store.js'
@@ -36,6 +36,9 @@ import { compilePackManifest, resolvePatch } from './instruments/pack-registry.j
 import { createSampleStore } from './instruments/sample-store.js'
 import { createAuditioner } from './instruments/auditioner.js'
 import { armPlan } from './instruments/arm-track.js'
+import { trackInstrumentLabel } from './instruments/instrument-label.js'
+import { PadGrid } from './components/pad-grid.js'
+import { padBank } from './instruments/pad-map.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -43,8 +46,6 @@ const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
 function getLastDir(key)       { return localStorage.getItem(key) || undefined }
 function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 
-let currentPaletteKey = 'classic'
-let currentPalette = Palettes.classic
 const computerKeyTracks = new Map() // note → MIDI channel while held
 const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
@@ -118,6 +119,7 @@ function addMidiTrack(name = 'MIDI') {
   const track = ProjectStore.getState().tracks.at(-1)
   if (track) _midiTargetTrackId = track.id
   syncMixerStrips(ProjectStore.getState())
+  syncInstrumentUi()
   return track
 }
 
@@ -130,12 +132,14 @@ function ensureMidiTrack() {
   const plan = armPlan(ProjectStore.getState().tracks, _midiTargetTrackId)
   if (plan.provision) return addMidiTrack()
   _midiTargetTrackId = plan.trackId
+  syncInstrumentUi()
   return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
 }
 
 async function refreshPackCatalog() {
   if (!window.electronFS?.listInstrumentPacks) return
   _packCatalog = (await window.electronFS.listInstrumentPacks()).map(entry => compilePackManifest(entry.manifest))
+  renderInstrumentSlot()
   _arrangementView?.render()
   _instrumentBrowser?.refresh()
   _libraryDialog?.render()
@@ -157,7 +161,7 @@ let _instrumentBrowser = null
 let _instrumentSettings = null
 let _libraryDialog = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
-let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack'
+let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack' | 'tr909'
 let _selectedArrangeTrackId = null
 let _rafId = null
 let _midiRecording = false
@@ -169,13 +173,9 @@ let _projectDirty = false
 let _midiInputName = null      // selected MIDI input, drives the live status token
 let _audioRecording = false
 
-const DRUM_DEFS = [
-  { label: 'KICK',   key: '1', color: '#ff4444' },
-  { label: 'SNARE',  key: '2', color: '#ffaa00' },
-  { label: 'HI-HAT', key: '3', color: '#39ff14' },
-  { label: 'CLAP',   key: '4', color: '#ff00aa' },
-]
-const drumPadEls = [] // indexed by drumIndex
+let _padGrid = null
+let _slotSig = null           // armed track + instrument, so the panel only rebuilds when it must
+let _reverbAmount = 0.2       // AudioEngine has no getter; this is the knob's copy
 
 // ─── Audio init on first gesture ──────────────────────────────────────────
 async function ensureAudio() {
@@ -209,8 +209,7 @@ function renderCommands() {
     mode: _currentMode,
     projectOpen: _projectOpen,
     recording: _audioRecording,
-    midiInput: _midiInputName,
-    paletteKey: currentPaletteKey
+    midiInput: _midiInputName
   })
   for (const item of items) {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
@@ -287,116 +286,136 @@ function toggleMixer(force) {
   document.getElementById('mixer-toggle-btn')?.setAttribute('aria-pressed', open ? 'true' : 'false')
 }
 
-// ─── Palette switching ─────────────────────────────────────────────────────
-function switchPalette(key) {
-  if (key !== 'tr909') _tr909View?.stop()
+// ─── The armed instrument ──────────────────────────────────────────────────
+// One selection: the armed MIDI track's instrument. The slot shows it, the
+// knob panel follows it, the pads and keys play it. Nothing in the synth view
+// picks a sound any more — the browser does.
 
-  // Stop any held notes
-  for (const [note, channel] of computerKeyTracks) {
-    document.dispatchEvent(new CustomEvent('midi-event', { detail: { kind: 'note-off', channel, pitch: note } }))
-  }
-  computerKeyTracks.clear()
-  document.querySelectorAll('.key-white.active, .key-black.active')
-    .forEach(el => el.classList.remove('active'))
-
-  currentPaletteKey = key
-  currentPalette = Palettes[key]
-  renderKnobPanel()
-
-  // Apply this palette's default reverb
-  if (AudioEngine.getContext()) {
-    AudioEngine.setReverb(currentPalette.params.reverb || 0.2)
-  }
-
-  document.querySelectorAll('.tab').forEach(t => {
-    const isActive = t.dataset.palette === key
-    t.classList.toggle('active', isActive)
-    t.setAttribute('aria-selected', isActive ? 'true' : 'false')
-  })
-
-  const isDrum = key === 'drum'
-  const is909 = key === 'tr909'
-  document.getElementById('knob-panel').style.display = is909 ? 'none' : ''
-  document.getElementById('keyboard-section').style.display = is909 ? 'none' : ''
-  document.getElementById('sequencer-section').style.display = is909 ? 'none' : ''
-  document.getElementById('tr909-view').style.display = is909 ? 'block' : 'none'
-  document.getElementById('keyboard-wrap').style.display = isDrum ? 'none' : ''
-  document.getElementById('keyboard-hint').style.display = isDrum ? 'none' : ''
-  document.getElementById('drum-pads').style.display    = isDrum ? 'flex' : 'none'
-  document.getElementById('drum-hint').style.display    = isDrum ? '' : 'none'
-
-  updateGlobalPlayAvailability()
+function armedTrack() {
+  const state = ProjectStore.getState()
+  const plan = armPlan(state.tracks, _midiTargetTrackId)
+  return plan.provision ? null : state.tracks.find(track => track.id === plan.trackId) || null
 }
 
-// The 909 has its own Bar/Chain transport, so the shared Play is meaningless
-// while it is on screen. Derived from both mode and palette and called from
-// both switches — keying it off the palette alone left Play stuck disabled
-// after leaving the 909 for arrange or rack, which never re-run switchPalette.
+/** Never null: an empty project still plays and provisions its track on the
+ *  first note. Mirrors liveInstrumentFor's own fallback. */
+function armedInstrument() {
+  const track = armedTrack()
+  return track?.instrument || { type: 'palette', paletteKey: track?.paletteKey || 'classic' }
+}
+
+/** Rebuild the slot, knobs and pads — but only when the selection really moved. */
+function syncInstrumentUi() {
+  const track = armedTrack()
+  const sig = JSON.stringify([track?.id ?? null, track?.midiChannel ?? null, track?.instrument ?? null])
+  if (sig === _slotSig) return
+  _slotSig = sig
+  renderInstrumentSlot()
+  renderKnobPanel()
+  _padGrid?.render()
+}
+
+const SLOT_STATE = { ready: '● loaded', unavailable: '○ no audio', missing: '○ missing' }
+
+function renderInstrumentSlot() {
+  const nameEl = document.getElementById('slot-name')
+  if (!nameEl) return
+  const track = armedTrack()
+  const instrument = armedInstrument()
+  nameEl.textContent = trackInstrumentLabel(instrument, _packCatalog)
+  const channelEl = document.getElementById('slot-channel')
+  if (channelEl) {
+    channelEl.textContent = !track ? 'no track'
+      : track.midiChannel == null ? 'omni'
+      : 'ch ' + (track.midiChannel + 1)
+  }
+  const stateEl = document.getElementById('slot-state')
+  if (stateEl) {
+    const state = instrument.type === 'pack' ? packState(instrument) : 'ready'
+    stateEl.textContent = instrument.type === 'pack' ? SLOT_STATE[state] : ''
+    stateEl.classList.toggle('slot-warn', state !== 'ready')
+  }
+}
+
+function initInstrumentSlot() {
+  document.getElementById('instrument-slot')?.addEventListener('click', () => {
+    ensureAudio()
+    runCommand('instrument-browser')
+  })
+  document.getElementById('instrument-gear')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('open-instrument-settings'))
+  })
+}
+
+// The 909 owns its own Bar/Chain transport, so the shared Play is meaningless
+// while it is on screen. It is a view now, not a palette, so exactly one
+// variable decides: Play belongs to whichever view is active.
 function updateGlobalPlayAvailability() {
   // `disabled` is set by renderCommands from commandItems().play.enabled; only
   // the explanation is local.
   renderCommands()
   const btn = document.getElementById('global-play-btn')
   if (!btn) return
-  const on909 = _currentMode === 'synth' && currentPaletteKey === 'tr909'
-  btn.title = on909 ? '909 uses its own Bar/Chain transport' : 'Play (Space)'
+  btn.title = _currentMode === 'tr909' ? '909 uses its own Bar/Chain transport' : 'Play (Space)'
 }
 
-// ─── Drum pads ─────────────────────────────────────────────────────────────
-function triggerDrumPad(drumIndex) {
+// ─── Pads ──────────────────────────────────────────────────────────────────
+// Pads are input, not a drum kit: a press is a note through the same
+// 'midi-event' path as an on-screen key, so routing, sustain, the mixer and
+// the armed track all come along for free. They stay visible for every
+// instrument.
+
+function padNote(note, on) {
   ensureAudio()
-  const ctx = AudioEngine.getContext()
-  if (!ctx) return
-  Palettes.drum.createDrumVoice(ctx, AudioEngine.getMasterInput(), drumIndex, 0.9, ctx.currentTime)
-
-  const pad = drumPadEls[drumIndex]
-  if (!pad) return
-  pad.classList.add('active')
-  setTimeout(() => pad.classList.remove('active'), 120)
+  const target = ensureMidiTrack()
+  if (!target) return
+  const channel = target.midiChannel ?? 0
+  const detail = on
+    ? { kind: 'note-on', channel, pitch: note, velocity: 108, source: 'pad' }
+    : { kind: 'note-off', channel, pitch: note, source: 'pad' }
+  document.dispatchEvent(new CustomEvent('midi-event', { detail }))
 }
 
-function renderDrumPads() {
+/** An internal drum palette only answers to four GM notes; the rest read unlit
+ *  rather than pretending. Every other source is pitch-mapped already. */
+function padPlayable(note) {
+  const instrument = armedInstrument()
+  if (instrument.type !== 'palette') return true
+  return paletteAcceptsNote(Palettes[instrument.paletteKey || 'classic'], note)
+}
+
+function initPads() {
   const container = document.getElementById('drum-pads')
   if (!container) return
-  container.style.display = 'none' // hidden until drum tab selected
-
-  DRUM_DEFS.forEach((def, i) => {
-    const pad = document.createElement('div')
-    pad.className = 'drum-pad'
-    pad.style.setProperty('--pad-color', def.color)
-
-    const label = document.createElement('div')
-    label.className = 'drum-pad-label'
-    label.textContent = def.label
-
-    const kbd = document.createElement('div')
-    kbd.className = 'drum-pad-key'
-    kbd.textContent = def.key
-
-    pad.appendChild(label)
-    pad.appendChild(kbd)
-
-    pad.addEventListener('mousedown', (e) => { e.preventDefault(); triggerDrumPad(i) })
-    pad.addEventListener('touchstart', (e) => { e.preventDefault(); triggerDrumPad(i) }, { passive: false })
-
-    container.appendChild(pad)
-    drumPadEls[i] = pad
+  _padGrid = new PadGrid(container, {
+    bankEl: document.getElementById('pad-banks'),
+    onPad: padNote,
+    isPlayable: padPlayable
   })
 }
 
-// The number row triggers drum pads / 909 voices. Registered in
-// initShortcuts() under the 'synth' context — as raw document listeners they
-// also fired while a modal dialog had focus.
+// The number row triggers pads on the synth view and 909 voices on the 909
+// view. Registered per context in initShortcuts() — as raw document listeners
+// they also fired while a modal dialog had focus.
+const PAD_KEYS = padBank('A').map(pad => pad.key)
 const NUMBER_ROW = ['1','2','3','4','5','6','7','8','9','0','-']
 const TR909_VOICES = ['bd','sd','lt','mt','ht','rs','cp','ch','oh','cr','rd']
 
 // ─── Knob panel ────────────────────────────────────────────────────────────
+// Follows the armed instrument. A pack shows only what is really wired — no
+// cutoff knob that changes nothing.
 function renderKnobPanel() {
   const panel = document.getElementById('knob-panel')
   if (!panel) return
   panel.innerHTML = ''
+  const instrument = armedInstrument()
+  if (instrument.type === 'rack') return renderRackPanel(panel, instrument)
+  if (instrument.type === 'pack') return renderPackKnobs(panel, instrument)
+  renderPaletteKnobs(panel, instrument.paletteKey || 'classic')
+}
 
-  const p = currentPalette
+function renderPaletteKnobs(panel, paletteKey) {
+  const p = Palettes[paletteKey] || Palettes.classic
 
   // Selectors (waveform picker etc.)
   if (p.selectors && p.selectors.length) {
@@ -428,63 +447,111 @@ function renderKnobPanel() {
     })
   }
 
-  // Knobs (range sliders)
   p.knobs.forEach((def, i) => {
-    const group = document.createElement('div')
-    group.className = 'knob-group'
-
-    const knobId = `knob-${currentPaletteKey}-${def.key}`
-    const lbl = document.createElement('label')
-    lbl.className = 'knob-label'
-    lbl.textContent = def.label
-    lbl.setAttribute('for', knobId)
-
-    const rawVal = p.params[def.key]
-    const slider = document.createElement('input')
-    slider.type = 'range'
-    slider.id = knobId
-    slider.className = 'filled'
-    slider.min = def.min
-    slider.max = def.max
-    slider.step = def.step
-    slider.value = rawVal
-
-    const valSpan = document.createElement('span')
-    valSpan.className = 'knob-val'
-
-    function formatVal(v) {
-      const fmt = def.fmt || ''
-      if (fmt === 's') return parseFloat(v).toFixed(2) + 's'
-      if (fmt === 'Hz') return v >= 1000 ? (v/1000).toFixed(1) + 'k' : Math.round(v) + ''
-      if (fmt === 'c') return Math.round(v) + 'c'
-      return parseFloat(v).toFixed(2)
-    }
-
-    function updateFill() {
-      const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100
-      slider.style.setProperty('--fill', pct + '%')
-      valSpan.textContent = formatVal(slider.value)
-    }
-
-    slider.addEventListener('input', () => {
-      const v = parseFloat(slider.value)
-      p.params[def.key] = v
-      updateFill()
-
-      if (def.key === 'reverb') {
-        AudioEngine.setReverb(v)
+    addKnob(panel, def, {
+      id: `knob-${paletteKey}-${def.key}`,
+      value: p.params[def.key],
+      onInput: v => {
+        p.params[def.key] = v
+        if (def.key === 'reverb') { _reverbAmount = v; AudioEngine.setReverb(v) }
       }
     })
-
-    updateFill()
-    group.appendChild(lbl)
-    group.appendChild(slider)
-    group.appendChild(valSpan)
-    panel.appendChild(group)
-
-    // Divider after every knob except last
     if (i < p.knobs.length - 1) addDivider(panel)
   })
+
+  // Each palette carries its own reverb default, applied when it becomes the
+  // armed sound rather than on a tab click that no longer exists.
+  if (AudioEngine.getContext() && p.params?.reverb != null) {
+    _reverbAmount = p.params.reverb
+    AudioEngine.setReverb(_reverbAmount)
+  }
+}
+
+/** Only the controls a pack patch really has: mixer level and pan, the master
+ *  reverb send, and the bend range the instrument descriptor carries. */
+function renderPackKnobs(panel, instrument) {
+  const track = armedTrack()
+  const channel = ProjectStore.getState().mixer.channels.find(item => item.id === track?.mixerChannelId)
+  const send = (param, value) => document.dispatchEvent(new CustomEvent('mixer-param', { detail: { channelId: track.mixerChannelId, param, value } }))
+
+  const rows = []
+  if (channel) {
+    rows.push({ def: { key: 'level', label: 'Level', min: 0, max: 1.5, step: 0.01, fmt: '' }, value: channel.volume ?? 1, onInput: v => send('volume', v) })
+    rows.push({ def: { key: 'pan', label: 'Pan', min: -1, max: 1, step: 0.01, fmt: '' }, value: channel.pan ?? 0, onInput: v => send('pan', v) })
+  }
+  rows.push({ def: { key: 'reverb', label: 'Reverb', min: 0, max: 1, step: 0.01, fmt: '' }, value: _reverbAmount, onInput: v => { _reverbAmount = v; AudioEngine.setReverb(v) } })
+  rows.push({
+    def: { key: 'bend', label: 'Bend', min: 0, max: 24, step: 1, fmt: 'st' },
+    value: instrument.bendRange ?? 2,
+    // On 'change', not 'input': the dispatch rewrites the instrument, which
+    // rebuilds this panel — mid-drag that would pull the slider out from
+    // under the pointer.
+    event: 'change',
+    onInput: v => { if (track) ProjectStore.dispatch(SetTrackInstrument(track.id, { ...instrument, bendRange: v })) }
+  })
+
+  rows.forEach((row, i) => {
+    addKnob(panel, row.def, { id: `knob-pack-${row.def.key}`, value: row.value, onInput: row.onInput, event: row.event })
+    if (i < rows.length - 1) addDivider(panel)
+  })
+}
+
+function renderRackPanel(panel, instrument) {
+  const rack = ProjectStore.getState().racks?.[instrument.rackId]
+  const note = document.createElement('span')
+  note.className = 'knob-note'
+  note.textContent = `Rack: ${rack?.name || instrument.rackId}`
+  const open = document.createElement('button')
+  open.type = 'button'
+  open.className = 'knob-open-btn'
+  open.textContent = 'OPEN RACK'
+  open.addEventListener('click', () => switchMode('rack'))
+  panel.append(note, open)
+}
+
+/** One slider, one label, one readout — the shape every knob has always had. */
+function addKnob(panel, def, { id, value, onInput, event = 'input' }) {
+  const group = document.createElement('div')
+  group.className = 'knob-group'
+
+  const lbl = document.createElement('label')
+  lbl.className = 'knob-label'
+  lbl.textContent = def.label
+  lbl.setAttribute('for', id)
+
+  const slider = document.createElement('input')
+  slider.type = 'range'
+  slider.id = id
+  slider.className = 'filled'
+  slider.min = def.min
+  slider.max = def.max
+  slider.step = def.step
+  slider.value = value
+
+  const valSpan = document.createElement('span')
+  valSpan.className = 'knob-val'
+
+  function formatVal(v) {
+    const fmt = def.fmt || ''
+    if (fmt === 's') return parseFloat(v).toFixed(2) + 's'
+    if (fmt === 'Hz') return v >= 1000 ? (v/1000).toFixed(1) + 'k' : Math.round(v) + ''
+    if (fmt === 'c') return Math.round(v) + 'c'
+    if (fmt === 'st') return Math.round(v) + 'st'
+    return parseFloat(v).toFixed(2)
+  }
+
+  function updateFill() {
+    const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100
+    slider.style.setProperty('--fill', pct + '%')
+    valSpan.textContent = formatVal(slider.value)
+  }
+
+  slider.addEventListener('input', updateFill)
+  slider.addEventListener(event, () => onInput(parseFloat(slider.value)))
+
+  updateFill()
+  group.append(lbl, slider, valSpan)
+  panel.appendChild(group)
 }
 
 function addDivider(panel) {
@@ -602,16 +669,6 @@ function initTransport() {
   })
 }
 
-// ─── Palette tabs ───────────────────────────────────────────────────────────
-function initTabs() {
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      ensureAudio()
-      switchPalette(tab.dataset.palette)
-    })
-  })
-}
-
 // ─── Recorder ───────────────────────────────────────────────────────────────
 function pad(n) { return String(n).padStart(2, '0') }
 
@@ -664,8 +721,8 @@ function initRecorder() {
 function switchMode(mode) {
   _currentMode = mode
   updateGlobalPlayAvailability()
-  // The number row only means something on the synth view.
-  ShortcutManager.setContext(mode === 'synth' ? 'synth' : 'global')
+  // The number row means pads on the synth view and voices on the 909's.
+  ShortcutManager.setContext(mode === 'synth' || mode === 'tr909' ? mode : 'global')
   // #app and #arrange-view visibility is CSS, keyed off this attribute.
   // #rack-view is not: RackView owns its own inline display and reads it back
   // (rack-view.js:183), so an inline style would win over any rule here.
@@ -677,8 +734,8 @@ function switchMode(mode) {
     btn.classList.toggle('active', isActive)
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   })
+  if (mode !== 'tr909') _tr909View?.stop()
   if (mode === 'arrange') {
-    _tr909View?.stop()
     // The rack is a sibling of #arrange-view, both flex: 1 — leaving it visible
     // stacks the two views and keeps RackPoll's interval running.
     if (_rackView) _rackView.hide()
@@ -690,7 +747,6 @@ function switchMode(mode) {
       if (_arrangementView) _arrangementView._onResize()
     })
   } else if (mode === 'rack') {
-    _tr909View?.stop()
     stopArrangeLoop()
     _rackView?.show()
   } else {
@@ -1113,7 +1169,13 @@ function initMidi() {
 
     // Auto-provision: a note into an empty project makes the track it belongs
     // on, once. Note-offs never provision — they can only follow a note-on.
-    if (detail.kind === 'note-on') ensureMidiTrack()
+    if (detail.kind === 'note-on') {
+      ensureMidiTrack()
+      // A hardware octave button has to be visible: scroll the key window to
+      // the note instead of letting it disappear. Pads send percussion notes
+      // that have nothing to do with the keys, so they are exempt.
+      if (detail.source !== 'pad') Keyboard.ensureVisible(detail.pitch)
+    }
     const state = ProjectStore.getState()
     const midiTracks = state.tracks.filter(t => t.type === 'midi')
 
@@ -1168,6 +1230,7 @@ function initMidi() {
     const track = state.tracks.find(t => t.id === e.detail.trackId)
     if (track && track.type === 'midi') {
       _midiTargetTrackId = track.id
+      syncInstrumentUi()
       if (recBtn && MidiController.isGranted() && deviceSel?.value) {
         recBtn.disabled = false
       }
@@ -1250,21 +1313,25 @@ function initShortcuts() {
   ShortcutManager.register({ key: 'i', ctrl: true },              () => runCommand('instrument-browser'))
   ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => runCommand('mixer'))
 
-  // Number row: drum pads on the drum palette, voices on the 909. Bound to the
-  // 'synth' context so a modal dialog never swallows them.
-  NUMBER_ROW.forEach((key, idx) => {
+  // Number row: pads on the synth view, 909 voices on the 909 view. Bound to
+  // a context so a modal dialog never swallows them.
+  PAD_KEYS.forEach((key, idx) => {
     ShortcutManager.register({ key, context: 'synth' }, (e) => {
-      if (e.repeat) return
-      if (currentPaletteKey === 'drum') { if (idx < 4) triggerDrumPad(idx) }
-      else if (currentPaletteKey === 'tr909') _tr909View?.trigger(TR909_VOICES[idx], 0.9)
+      if (!e.repeat) _padGrid?.trigger(idx + 1)
     })
   })
-  ShortcutManager.setContext(_currentMode === 'synth' ? 'synth' : 'global')
+  NUMBER_ROW.forEach((key, idx) => {
+    ShortcutManager.register({ key, context: 'tr909' }, (e) => {
+      if (!e.repeat) _tr909View?.trigger(TR909_VOICES[idx], 0.9)
+    })
+  })
+  ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' ? _currentMode : 'global')
 
   // Mode switching
   ShortcutManager.register({ key: 'f1' }, () => switchMode('synth'))
   ShortcutManager.register({ key: 'f2' }, () => switchMode('arrange'))
   ShortcutManager.register({ key: 'f3' }, () => switchMode('rack'))
+  ShortcutManager.register({ key: 'f4' }, () => switchMode('tr909'))
 
   // Transport — Space = play/stop toggle (mode-aware)
   ShortcutManager.register({ key: ' ' }, () => {
@@ -1296,15 +1363,16 @@ function initUndoRedo() { /* migrated to initShortcuts */ }
 function boot() {
   applyTheme(savedTheme())
   Keyboard.render('keyboard')
-  renderDrumPads()
+  initPads()
   Sequencer.init('seq-tracks')
   const tr909Container = document.getElementById('tr909-view')
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 
+  renderInstrumentSlot()
   renderKnobPanel()
   initCommandBar()
   initTransport()
-  initTabs()
+  initInstrumentSlot()
   initRecorder()
 
   // Init audio on first click anywhere (required by browsers)
@@ -1362,7 +1430,7 @@ function boot() {
   })
 
   // Subscribe store to keep mixer in sync
-  ProjectStore.subscribe(state => syncMixerStrips(state))
+  ProjectStore.subscribe(state => { syncMixerStrips(state); syncInstrumentUi() })
   refreshPackCatalog().catch(error => console.warn('Could not load instrument packs:', error))
 }
 

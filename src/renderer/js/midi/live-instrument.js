@@ -6,8 +6,18 @@
 
 import RackEngine from '../rack/rack-engine.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
+import { PALETTE_DRUM_NOTES } from '../instruments/pad-map.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
+
+/** An internal drum palette answers to fixed voices, not to pitches. */
+const isDrumPalette = palette => palette?.type === 'drum' && !!palette.createDrumVoice
+
+/** Can this palette make a sound for this note at all? Drives the unlit pad. */
+export function paletteAcceptsNote(palette, note) {
+  if (!palette) return false
+  return isDrumPalette(palette) ? PALETTE_DRUM_NOTES[note] !== undefined : true
+}
 
 export function liveInstrumentFor(track, deps) {
   return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
@@ -84,14 +94,24 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
   const palette = palettes?.[instrument.paletteKey || 'classic']
   if (!palette) return null
 
+  const drums = isDrumPalette(palette)
   const voices = new Map() // pitch → voice
   let bend = 0             // semitones, applied to voices struck later too
   let mod = 0
   return {
     noteOn(pitch, velocity) {
       if (voices.has(pitch)) return
-      const freq = 440 * Math.pow(2, (pitch - 69) / 12)
-      const voice = palette.createVoice(ctx, output, freq, velocity / 127, ctx.currentTime)
+      let voice
+      if (drums) {
+        // GM percussion onto the palette's 0–3 voices. An unmapped note is
+        // silent rather than detuned — the pad shows unlit for the same reason.
+        const index = PALETTE_DRUM_NOTES[pitch]
+        if (index === undefined) return
+        voice = palette.createDrumVoice(ctx, output, index, velocity / 127, ctx.currentTime)
+      } else {
+        const freq = 440 * Math.pow(2, (pitch - 69) / 12)
+        voice = palette.createVoice(ctx, output, freq, velocity / 127, ctx.currentTime)
+      }
       voices.set(pitch, voice)
       // A note struck mid-bend has to land in tune, not snap on the next wheel move.
       if (bend) voice?.setBend?.(bend)

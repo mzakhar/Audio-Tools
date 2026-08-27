@@ -23,6 +23,10 @@
         <span class="tool-icon" aria-hidden="true">⌘</span>
         <span class="tool-label">RACK</span>
       </button>
+      <button class="tool-btn" data-tool="tr909" title="909 Rhythm Composer (F4)" aria-pressed="false">
+        <span class="tool-icon" aria-hidden="true">◉</span>
+        <span class="tool-label">909</span>
+      </button>
     </nav>
     <div id="main" data-view="synth">
     <div id="command-bar" role="toolbar" aria-label="Commands">
@@ -52,32 +56,39 @@
       <div id="mixer-bar" role="region" aria-label="Mixer"></div>
     </div>
     <section id="rack-view" aria-label="Modular rack" style="display:none"></section>
+    <section id="tr909-view" aria-label="909 rhythm composer"></section>
   <div id="app">
 
-    <div id="palette-tabs" role="tablist" aria-label="Palette">
-      <button class="tab active" data-palette="classic" role="tab" aria-selected="true">CLASSIC</button>
-      <button class="tab" data-palette="fm" role="tab" aria-selected="false">FM SYNTH</button>
-      <button class="tab" data-palette="drum" role="tab" aria-selected="false">DRUM MACHINE</button>
-      <button class="tab" data-palette="tr909" role="tab" aria-selected="false">909</button>
-      <button class="tab" data-palette="pad" role="tab" aria-selected="false">PAD / AMBIENT</button>
+    <div id="instrument-bar">
+      <button id="instrument-slot" class="instrument-slot" aria-label="Instrument — browse (Ctrl+I)">
+        <span class="slot-icon" aria-hidden="true">◈</span>
+        <span id="slot-name" class="slot-name">Classic Synth</span>
+        <span id="slot-channel" class="slot-meta"></span>
+        <span id="slot-state" class="slot-meta"></span>
+      </button>
+      <button id="instrument-gear" class="slot-gear" aria-label="Instrument settings">⚙</button>
     </div>
 
-    <section id="knob-panel" aria-label="Palette parameters" role="tabpanel">
-      <!-- Populated dynamically by app.js -->
-    </section>
-
-    <section id="tr909-view" aria-label="909 rhythm composer" role="tabpanel" style="display:none"></section>
+    <section id="knob-panel" aria-label="Instrument parameters"></section>
 
     <section id="keyboard-section" aria-label="On-screen keyboard">
+      <div id="pad-section">
+        <div id="drum-pads" role="group" aria-label="Pads" data-bank="A"></div>
+        <div id="pad-banks" role="group" aria-label="Pad bank"></div>
+      </div>
+      <div id="keyboard-range" role="group" aria-label="Octave window">
+        <button id="kb-oct-down" class="oct-btn" aria-label="Octave down">◀</button>
+        <span id="keyboard-range-label" aria-live="polite">C3 – C5</span>
+        <button id="kb-oct-up" class="oct-btn" aria-label="Octave up">▶</button>
+      </div>
       <div id="keyboard-wrap">
         <div id="keyboard" role="group" aria-label="Piano keys"></div>
       </div>
-      <div id="drum-pads" role="group" aria-label="Drum pads"></div>
       <div id="keyboard-hint" aria-hidden="true">
         PC Keys — White: <kbd>a</kbd><kbd>s</kbd><kbd>d</kbd><kbd>f</kbd><kbd>g</kbd><kbd>h</kbd><kbd>j</kbd> &nbsp;|&nbsp; Black: <kbd>w</kbd><kbd>e</kbd><kbd>t</kbd><kbd>y</kbd><kbd>u</kbd> &nbsp;|&nbsp; Upper: <kbd>k</kbd><kbd>l</kbd><kbd>;</kbd><kbd>'</kbd><kbd>z</kbd><kbd>x</kbd><kbd>c</kbd>
       </div>
       <div id="drum-hint" aria-hidden="true">
-        PC Keys — <kbd>1</kbd> Kick &nbsp;|&nbsp; <kbd>2</kbd> Snare &nbsp;|&nbsp; <kbd>3</kbd> Hi-Hat &nbsp;|&nbsp; <kbd>4</kbd> Clap
+        Pads — <kbd>1</kbd>…<kbd>8</kbd> trigger the current bank
       </div>
     </section>
 
