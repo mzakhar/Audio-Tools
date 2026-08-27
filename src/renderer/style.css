@@ -502,13 +502,7 @@ html, body {
 .rack-jack:hover { filter: brightness(1.6); }
 .rack-jack.patching { background: #eee; }
 
-/* ─── Record Bar ────────────────────────────────────────────────────────────── */
-#record-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
+/* ─── Recorder ──────────────────────────────────────────────────────────────── */
 .rec-btn {
   background: var(--bg4);
   border: 1px solid var(--danger);
@@ -530,37 +524,13 @@ html, body {
   min-width: 40px;
 }
 
-.rec-status {
-  font-size: 11px;
-  color: var(--danger);
-  letter-spacing: 1px;
-}
-
-/* ─── Header ───────────────────────────────────────────────────────────────── */
-#header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0 8px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-#app-title {
-  font-size: 22px;
-  font-weight: bold;
-  color: var(--accent);
-  letter-spacing: 4px;
-  text-shadow: var(--glow);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
+/* ─── Palette tabs ─────────────────────────────────────────────────────────── */
 #palette-tabs {
   display: flex;
   gap: 4px;
-  flex: 1;
   flex-wrap: wrap;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border);
 }
 
 .tab {
@@ -581,13 +551,6 @@ html, body {
   border-color: var(--accent);
   font-weight: bold;
   box-shadow: var(--glow);
-}
-
-#master-vol-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
 }
 
 /* ─── Knob Panel ───────────────────────────────────────────────────────────── */
@@ -1429,17 +1392,86 @@ input[type=range]::-moz-range-thumb {
 /* ─── Utility ──────────────────────────────────────────────────────────────── */
 button { font-family: var(--font-mono); }
 
-/* ─── Global Header (BPM, master volume, transport) ─────────────────────── */
-#global-header {
+/* --- Command bar: the only permanent chrome above the view body --------- */
+#command-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg2);
   flex-shrink: 0;
-  flex-wrap: wrap;
+  /* Never wrap: anything that does not fit is already in the menu. */
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
+#command-bar [hidden],
+#app-menu [hidden] { display: none !important; }
+
+#project-name {
+  color: var(--accent);
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+.dirty-mark {
+  color: var(--accent2);
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.cmd-spacer { flex: 1 1 auto; min-width: 8px; }
+.cmd-label {
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.cmd-btn {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 9px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+  transition: border-color 0.1s, color 0.1s;
+}
+.cmd-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.cmd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cmd-btn:disabled { opacity: 0.35; cursor: default; }
+.cmd-btn.stop:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+.cmd-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+.cmd-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 3px 6px;
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.cmd-token:hover { border-color: var(--border); color: var(--text); }
+.cmd-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cmd-dot { color: var(--accent3); font-size: 10px; }
+
 #global-bpm {
   width: 52px;
   background: var(--bg4);
@@ -1450,45 +1482,51 @@ button { font-family: var(--font-mono); }
   font-size: 12px;
   text-align: center;
   border-radius: 3px;
-}
-#header-view-slot {
-  display: flex;
-  align-items: center;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* ─── Phase 1: Project Bar ────────────────────────────────────────────────── */
-#project-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg2);
   flex-shrink: 0;
 }
-#project-bar button {
-  padding: 3px 10px;
-  font-size: 10px;
-  letter-spacing: 1px;
-  background: var(--bg4);
+
+/* --- Overflow menu (native popover) ------------------------------------- */
+#app-menu {
+  position: fixed;
+  inset: auto;
+  top: 40px;
+  right: 10px;
+  margin: 0;
+  min-width: 230px;
+  padding: 4px;
+  background: var(--bg3);
   border: 1px solid var(--border);
   color: var(--text);
+  box-shadow: 0 6px 20px #0009;
+}
+#app-menu::backdrop { background: transparent; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+  padding: 5px 8px;
   cursor: pointer;
 }
-#project-bar button:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-#project-bar button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.theme-control {
-  color: var(--text-dim);
-  font-size: 9px;
-  letter-spacing: 1px;
+.menu-item:hover:not(:disabled) { background: var(--bg4); color: var(--accent); }
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-item:disabled { opacity: 0.35; cursor: default; }
+.menu-shortcut { color: var(--text-dim); font-size: 9px; letter-spacing: 1px; }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 8px;
+  font-size: 11px;
 }
 #theme-select {
   background: var(--bg4);
@@ -1498,14 +1536,27 @@ button { font-family: var(--font-mono); }
   font-size: 10px;
   padding: 3px;
 }
-#project-name {
-  color: var(--accent);
+
+/* --- Toast: transient status, replaces the permanent rec-status span ----- */
+#toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 6px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-family: var(--font-mono);
   font-size: 11px;
-  flex: 1;
+  letter-spacing: 1px;
+  max-width: 70vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+#toast[hidden] { display: none; }
 
 /* ─── Phase 1: Arrangement View ──────────────────────────────────────────── */
 #arrange-view {
@@ -1515,24 +1566,18 @@ button { font-family: var(--font-mono); }
   overflow: hidden;
   min-height: 0;
 }
+
+/* View visibility is driven by #main[data-view]; switchMode() sets the attribute
+   and never writes inline display. #rack-view stays out of this on purpose —
+   RackView owns its own inline display and reads it back (rack-view.js:183). */
+#main[data-view="arrange"] #app { display: none; }
+#main[data-view="rack"] #app { display: none; }
+#main[data-view="arrange"] #arrange-view { display: flex; }
 #arrange-workspace {
   display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-#arrange-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-#arrange-toolbar .transport-btn {
-  padding: 4px 12px;
-  font-size: 11px;
 }
 #arrangement-container {
   flex: 1;
@@ -1723,14 +1768,22 @@ button { font-family: var(--font-mono); }
   background: rgba(255,85,85,0.15);
 }
 
-/* ─── Phase 1: Mixer Bar ─────────────────────────────────────────────────── */
+/* --- Mixer drawer: closed by default, session state only ---------------- */
 #mixer-bar {
-  height: 120px;
+  height: 0;
   flex-shrink: 0;
   display: flex;
-  overflow-x: auto;
+  overflow: hidden;
   background: var(--bg2);
   border-top: 1px solid var(--border);
+  transition: height 0.16s ease;
+}
+#mixer-bar.open {
+  height: 120px;
+  overflow-x: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  #mixer-bar { transition: none; }
 }
 .mixer-strip {
   width: 80px;
@@ -1772,14 +1825,7 @@ input[type=range].mixer-pan {
 .mixer-strip .mute-btn.active { border-color: var(--danger); color: var(--danger); }
 .mixer-strip .solo-btn.active { border-color: var(--accent); color: var(--accent); }
 
-/* ─── Phase 3: MIDI Controls ─────────────────────────────────────────────── */
-.project-bar-sep {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-  margin: 0 4px;
-}
-
+/* --- MIDI controls (inside the MIDI setup dialog) ----------------------- */
 .midi-status {
   font-size: 9px;
   letter-spacing: 1px;
@@ -1822,14 +1868,52 @@ input[type=range].mixer-pan {
 .midi-rec-btn.recording { background: #ff4444; color: #000; }
 .midi-rec-btn:not(:disabled):hover { background: #ff44441a; }
 
-/* ─── Phase 3: Piano Roll Drawer ────────────────────────────────────────── */
-.pr-drawer {
+/* --- Dialogs (native <dialog>) ------------------------------------------ */
+dialog.app-dialog,
+dialog.pr-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  padding: 0;
+}
+dialog.app-dialog::backdrop,
+dialog.pr-dialog::backdrop { background: #000a; }
+
+dialog.app-dialog[open] { width: min(420px, 92vw); }
+.dlg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.dlg-title { font-size: 10px; letter-spacing: 2px; color: var(--accent); }
+.dlg-close-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.dlg-close-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+.dlg-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.dlg-row { display: flex; align-items: center; gap: 8px; }
+.dlg-label { font-size: 9px; letter-spacing: 1px; color: var(--text-dim); min-width: 48px; }
+.dlg-note { font-size: 10px; line-height: 1.5; color: var(--text-dim); }
+
+/* The piano roll is a modal dialog now, not a bottom drawer. */
+dialog.pr-dialog[open] {
   display: flex;
   flex-direction: column;
-  height: 300px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  background: var(--bg);
+  width: min(1100px, 94vw);
+  height: min(560px, 82vh);
+  max-width: 94vw;
+  max-height: 88vh;
 }
 
 .pr-drawer-header {

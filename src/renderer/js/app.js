@@ -25,7 +25,9 @@ import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
 import { InstrumentInspector } from './components/instrument-inspector.js'
 import ShortcutManager from './shortcuts.js'
-import { applyTheme, savedTheme } from './theme.js'
+import { applyTheme, savedTheme, THEMES } from './theme.js'
+import { commandItems } from './ui/command-model.js'
+import { openDialog, closeDialog } from './ui/dialog.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
@@ -158,6 +160,11 @@ let _rafId = null
 let _midiRecording = false
 let _midiTargetTrackId = null  // track to write recorded MIDI into
 let _midiTargetClipId = null
+let _projectOpen = false
+let _projectName = ''
+let _projectDirty = false
+let _midiInputName = null      // selected MIDI input, drives the live status token
+let _audioRecording = false
 
 const DRUM_DEFS = [
   { label: 'KICK',   key: '1', color: '#ff4444' },
@@ -170,6 +177,111 @@ const drumPadEls = [] // indexed by drumIndex
 // ─── Audio init on first gesture ──────────────────────────────────────────
 async function ensureAudio() {
   await AudioEngine.init()
+}
+
+// ─── Commands ──────────────────────────────────────────────────────────────
+// One implementation per command id. The command bar, the ⋯ menu and the
+// shortcuts all route through here, so a control can never be live in one
+// place and dead in another.
+const COMMANDS = Object.create(null)
+function runCommand(id) { COMMANDS[id]?.() }
+
+/** Transient status line — replaces the permanent #rec-status span. */
+let _toastTimer = null
+function showToast(message) {
+  const el = document.getElementById('toast')
+  if (!el) return
+  el.textContent = message
+  el.hidden = false
+  clearTimeout(_toastTimer)
+  _toastTimer = setTimeout(() => { el.hidden = true }, 2000)
+}
+
+/**
+ * Push the pure command model onto every [data-cmd] element — bar and menu
+ * alike. Enabled/visible have exactly one source of truth: commandItems().
+ */
+function renderCommands() {
+  const items = commandItems({
+    mode: _currentMode,
+    projectOpen: _projectOpen,
+    recording: _audioRecording,
+    midiInput: _midiInputName,
+    paletteKey: currentPaletteKey
+  })
+  for (const item of items) {
+    document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
+      el.hidden = !item.visible
+      if ('disabled' in el) el.disabled = !item.enabled
+    })
+  }
+  const nameEl = document.getElementById('project-name')
+  if (nameEl) nameEl.textContent = _projectOpen ? (_projectName || 'Untitled') : 'No Project'
+  const dirtyEl = document.getElementById('project-dirty')
+  if (dirtyEl) dirtyEl.hidden = !(_projectOpen && _projectDirty)
+  const tokenName = document.getElementById('midi-token-name')
+  if (tokenName) tokenName.textContent = _midiInputName || ''
+}
+
+/** Build the ⋯ popover once. Labels are static; state comes from renderCommands. */
+function buildAppMenu() {
+  const menu = document.getElementById('app-menu')
+  if (!menu) return
+  menu.innerHTML = ''
+  // Ask the model for the full label set; the bar owns transport and the live
+  // MIDI token, so those never appear as menu items.
+  const items = commandItems({ mode: 'arrange', projectOpen: true })
+    .filter(item => item.group !== 'transport' && item.id !== 'midi-token' && item.id !== 'theme')
+
+  let group = null
+  for (const item of items) {
+    if (group && item.group !== group) menu.appendChild(Object.assign(document.createElement('div'), { className: 'menu-sep' }))
+    group = item.group
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'menu-item'
+    btn.setAttribute('role', 'menuitem')
+    btn.dataset.cmd = item.id
+    const label = document.createElement('span')
+    label.textContent = item.label
+    const key = document.createElement('span')
+    key.className = 'menu-shortcut'
+    key.textContent = item.shortcut || ''
+    btn.append(label, key)
+    btn.addEventListener('click', () => { menu.hidePopover?.(); runCommand(item.id) })
+    menu.appendChild(btn)
+  }
+
+  // Theme submenu — a select keeps all themes one click away without a
+  // second popover layer.
+  menu.appendChild(Object.assign(document.createElement('div'), { className: 'menu-sep' }))
+  const row = document.createElement('div')
+  row.className = 'menu-row'
+  const rowLabel = document.createElement('label')
+  rowLabel.textContent = 'Theme'
+  rowLabel.setAttribute('for', 'theme-select')
+  const select = document.createElement('select')
+  select.id = 'theme-select'
+  select.setAttribute('aria-label', 'Theme')
+  for (const theme of THEMES) {
+    const opt = document.createElement('option')
+    opt.value = theme
+    opt.textContent = theme.toUpperCase()
+    select.appendChild(opt)
+  }
+  select.value = savedTheme()
+  select.addEventListener('change', () => applyTheme(select.value))
+  row.append(rowLabel, select)
+  menu.appendChild(row)
+}
+
+/** Mixer drawer open/closed. Session state — never written to the project. */
+function toggleMixer(force) {
+  const bar = document.getElementById('mixer-bar')
+  if (!bar) return
+  const open = force ?? !bar.classList.contains('open')
+  bar.classList.toggle('open', open)
+  document.getElementById('mixer-toggle-btn')?.setAttribute('aria-pressed', open ? 'true' : 'false')
 }
 
 // ─── Palette switching ─────────────────────────────────────────────────────
@@ -218,11 +330,13 @@ function switchPalette(key) {
 // both switches — keying it off the palette alone left Play stuck disabled
 // after leaving the 909 for arrange or rack, which never re-run switchPalette.
 function updateGlobalPlayAvailability() {
+  // `disabled` is set by renderCommands from commandItems().play.enabled; only
+  // the explanation is local.
+  renderCommands()
   const btn = document.getElementById('global-play-btn')
   if (!btn) return
   const on909 = _currentMode === 'synth' && currentPaletteKey === 'tr909'
-  btn.disabled = on909
-  btn.title = on909 ? '909 uses its own Bar/Chain transport' : ''
+  btn.title = on909 ? '909 uses its own Bar/Chain transport' : 'Play (Space)'
 }
 
 // ─── Drum pads ─────────────────────────────────────────────────────────────
@@ -267,29 +381,11 @@ function renderDrumPads() {
   })
 }
 
-// PC keyboard 1–4 for drum pads (kept outside ShortcutManager to preserve
-// synth-mode context without conflicting with note-playing keyboard shortcuts)
-document.addEventListener('keydown', (e) => {
-  if (currentPaletteKey !== 'drum') return
-  if (_currentMode !== 'synth') return
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
-  const tag = document.activeElement?.tagName
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-  const idx = ['1','2','3','4'].indexOf(e.key)
-  if (idx !== -1) triggerDrumPad(idx)
-})
-
-document.addEventListener('keydown', (e) => {
-  if (currentPaletteKey !== 'tr909') return
-  if (_currentMode !== 'synth') return
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
-  const tag = document.activeElement?.tagName
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-  const idx = ['1','2','3','4','5','6','7','8','9','0','-'].indexOf(e.key)
-  if (idx === -1) return
-  const inst = ['bd','sd','lt','mt','ht','rs','cp','ch','oh','cr','rd'][idx]
-  _tr909View?.trigger(inst, 0.9)
-})
+// The number row triggers drum pads / 909 voices. Registered in
+// initShortcuts() under the 'synth' context — as raw document listeners they
+// also fired while a modal dialog had focus.
+const NUMBER_ROW = ['1','2','3','4','5','6','7','8','9','0','-']
+const TR909_VOICES = ['bd','sd','lt','mt','ht','rs','cp','ch','oh','cr','rd']
 
 // ─── Knob panel ────────────────────────────────────────────────────────────
 function renderKnobPanel() {
@@ -394,8 +490,8 @@ function addDivider(panel) {
   panel.appendChild(div)
 }
 
-// ─── Global header: BPM, master volume, transport ──────────────────────────
-function initGlobalHeader() {
+// ─── Command bar: BPM, master volume, transport, tokens, ⋯ menu ────────────
+function initCommandBar() {
   // Master volume
   const volSlider = document.getElementById('master-vol')
   const volDisp   = document.getElementById('master-vol-display')
@@ -424,6 +520,7 @@ function initGlobalHeader() {
     const bpm = ProjectStore.getState().bpm
     if (bpmEl) bpmEl.value = bpm
     Sequencer.setBPM(bpm)
+    if (_projectOpen && !_projectDirty) { _projectDirty = true; renderCommands() }
   })
 
   // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
@@ -454,6 +551,22 @@ function initGlobalHeader() {
       Sequencer.stop()
     }
   })
+
+  // Everything that is not live lives in the ⋯ menu or a dialog.
+  buildAppMenu()
+  COMMANDS['midi-setup'] = () => openDialog('midi-setup-dialog')
+  COMMANDS['mixer'] = () => toggleMixer()
+  // No listener yet for these two — the instrument agent wires them.
+  COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
+  COMMANDS['instrument-browser'] = () => document.dispatchEvent(new CustomEvent('open-instrument-browser'))
+
+  document.getElementById('midi-token')?.addEventListener('click', () => runCommand('midi-setup'))
+  document.getElementById('mixer-toggle-btn')?.addEventListener('click', () => runCommand('mixer'))
+  document.querySelectorAll('[data-close-dialog]').forEach(btn => {
+    btn.addEventListener('click', () => closeDialog(btn.dataset.closeDialog))
+  })
+
+  renderCommands()
 }
 
 // ─── Note events (from Keyboard) ───────────────────────────────────────────
@@ -529,48 +642,47 @@ function initTabs() {
 function pad(n) { return String(n).padStart(2, '0') }
 
 function initRecorder() {
-  const btn    = document.getElementById('rec-btn')
-  const timer  = document.getElementById('rec-timer')
-  const status = document.getElementById('rec-status')
+  const btn   = document.getElementById('rec-btn')
+  const timer = document.getElementById('rec-timer')
   if (!btn) return
 
-  let recording = false, interval = null, elapsed = 0
+  let interval = null, elapsed = 0
 
   btn.addEventListener('click', async () => {
     await ensureAudio()
-    if (!recording) {
+    if (!_audioRecording) {
       if (!AudioEngine.hasRecorder()) {
-        status.textContent = 'REC NEEDS HTTPS'
+        showToast('REC NEEDS HTTPS')
         return
       }
-      recording = true
+      _audioRecording = true
       elapsed = 0
-      btn.textContent = '■ STOP & SAVE'
       btn.classList.add('recording')
       btn.setAttribute('aria-pressed', 'true')
-      status.textContent = '● RECORDING'
+      if (timer) { timer.textContent = '00:00'; timer.hidden = false }
+      showToast('● RECORDING')
       Recorder.start(AudioEngine.getContext(), AudioEngine.getCompressor())
       interval = setInterval(() => {
         elapsed++
-        timer.textContent = pad(Math.floor(elapsed / 60)) + ':' + pad(elapsed % 60)
+        if (timer) timer.textContent = pad(Math.floor(elapsed / 60)) + ':' + pad(elapsed % 60)
       }, 1000)
     } else {
-      recording = false
+      _audioRecording = false
       clearInterval(interval)
-      btn.textContent = '● REC'
       btn.classList.remove('recording')
       btn.setAttribute('aria-pressed', 'false')
-      status.textContent = 'SAVING…'
-      timer.textContent = '00:00'
+      if (timer) { timer.hidden = true; timer.textContent = '00:00' }
+      showToast('SAVING…')
       const ts = new Date().toISOString().replace('T', '-').replace(/:/g, '-').slice(0, 19)
       try {
         const path = await Recorder.stop('synth-' + ts + '.wav', AudioStore.getProjectDir())
-        status.textContent = path ? `SAVED: ${path}` : 'SAVE CANCELED'
+        showToast(path ? `SAVED: ${path}` : 'SAVE CANCELED')
       } catch (error) {
         console.error('Audio recording save failed:', error)
-        status.textContent = `SAVE FAILED: ${error.message}`
+        showToast(`SAVE FAILED: ${error.message}`)
       }
     }
+    renderCommands()
   })
 }
 
@@ -578,8 +690,13 @@ function initRecorder() {
 function switchMode(mode) {
   _currentMode = mode
   updateGlobalPlayAvailability()
-  const appEl     = document.getElementById('app')
-  const arrangeEl = document.getElementById('arrange-view')
+  // The number row only means something on the synth view.
+  ShortcutManager.setContext(mode === 'synth' ? 'synth' : 'global')
+  // #app and #arrange-view visibility is CSS, keyed off this attribute.
+  // #rack-view is not: RackView owns its own inline display and reads it back
+  // (rack-view.js:183), so an inline style would win over any rule here.
+  const mainEl = document.getElementById('main')
+  if (mainEl) mainEl.dataset.view = mode
   const rackEl = document.getElementById('rack-view')
   document.querySelectorAll('.tool-btn').forEach(btn => {
     const isActive = btn.dataset.tool === mode
@@ -588,12 +705,10 @@ function switchMode(mode) {
   })
   if (mode === 'arrange') {
     _tr909View?.stop()
-    appEl.style.display = 'none'
     // The rack is a sibling of #arrange-view, both flex: 1 — leaving it visible
     // stacks the two views and keeps RackPoll's interval running.
-    rackEl.style.display = 'none'
-    _rackView?.hide()
-    arrangeEl.style.display = 'flex'
+    if (_rackView) _rackView.hide()
+    else if (rackEl) rackEl.style.display = 'none'
     startArrangeLoop()
     // Canvas may still be 0×0 if ResizeObserver hasn't fired since the element was hidden.
     // Force a size update on the next frame once the element is laid out.
@@ -602,15 +717,11 @@ function switchMode(mode) {
     })
   } else if (mode === 'rack') {
     _tr909View?.stop()
-    appEl.style.display = 'none'
-    arrangeEl.style.display = 'none'
     stopArrangeLoop()
     _rackView?.show()
   } else {
-    appEl.style.display = ''
-    arrangeEl.style.display = 'none'
-    rackEl.style.display = 'none'
-    _rackView?.hide()
+    if (_rackView) _rackView.hide()
+    else if (rackEl) rackEl.style.display = 'none'
     stopArrangeLoop()
   }
 }
@@ -663,21 +774,16 @@ function syncMixerStrips(state) {
 
 // ─── Project management ──────────────────────────────────────────────────────
 function setProjectOpen(name) {
-  document.getElementById('project-name').textContent = name || 'Untitled'
-  document.getElementById('save-project-btn').disabled = false
-  document.getElementById('import-audio-btn').disabled = false
-  document.getElementById('add-midi-track-btn').disabled = false
-  document.getElementById('bounce-btn').disabled = false
+  // No per-button disabling here: commandItems() derives every enabled state
+  // from _projectOpen, for the bar and the ⋯ menu alike.
+  _projectOpen = true
+  _projectName = name || 'Untitled'
+  _projectDirty = false
+  renderCommands()
 }
 
-function initProjectBar() {
-  const themeSelect = document.getElementById('theme-select')
-  if (themeSelect) {
-    themeSelect.value = savedTheme()
-    themeSelect.addEventListener('change', () => applyTheme(themeSelect.value))
-  }
-
-  document.getElementById('new-project-btn')?.addEventListener('click', async () => {
+function initProjectCommands() {
+  COMMANDS['new'] = (async () => {
     await ensureAudio()
     const handle = await FileAdapter.createProjectFolder(getLastDir(DIR_KEY_PROJECT))
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
@@ -693,7 +799,7 @@ function initProjectBar() {
     if (_arrangementView) _arrangementView.render()
   })
 
-  document.getElementById('open-project-btn')?.addEventListener('click', async () => {
+  COMMANDS['open'] = (async () => {
     await ensureAudio()
     const handle = await FileAdapter.openProjectFolder(getLastDir(DIR_KEY_PROJECT))
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
@@ -726,10 +832,12 @@ function initProjectBar() {
     if (_arrangementView) _arrangementView.render()
   })
 
-  document.getElementById('save-project-btn')?.addEventListener('click', async () => {
+  COMMANDS['save'] = (async () => {
     const handle = AudioStore.getProjectDir()
     if (!handle) return
     await FileAdapter.writeProject(handle, ProjectStore.getState())
+    _projectDirty = false
+    renderCommands()
   })
 
   // Shared audio import helper — picks a file and adds it to targetTrackId (or creates a new track)
@@ -784,11 +892,14 @@ function initProjectBar() {
     switchMode('arrange')
   }
 
-  document.getElementById('import-audio-btn')?.addEventListener('click', () => {
-    importAudioToTrack(_selectedArrangeTrackId)
-  })
+  COMMANDS['import-audio'] = () => importAudioToTrack(_selectedArrangeTrackId)
 
-  document.getElementById('import-pack-btn')?.addEventListener('click', async () => {
+  COMMANDS['add-midi-track'] = () => {
+    addMidiTrack()
+    switchMode('arrange')
+  }
+
+  COMMANDS['import-pack'] = (async () => {
     if (!window.electronFS?.importSf2Pack) return
     try {
       const pack = await window.electronFS.importSf2Pack()
@@ -802,7 +913,7 @@ function initProjectBar() {
     importAudioToTrack(e.detail.trackId)
   })
 
-  document.getElementById('bounce-btn')?.addEventListener('click', async () => {
+  COMMANDS['bounce'] = (async () => {
     if (!AudioStore.getProjectDir()) return
     await ensureAudio()
     const state = ProjectStore.getState()
@@ -860,11 +971,10 @@ function initMixerParamBus() {
 
 // ─── Arrange toolbar (non-transport wiring; transport lives in the global header) ──
 function initArrangeToolbar() {
-  // Add Track button in arrange toolbar
-  document.getElementById('arr-add-track-btn')?.addEventListener('click', () => {
+  COMMANDS['add-track'] = () => {
     ProjectStore.dispatch(AddTrack('audio', 'Track'))
     syncMixerStrips(ProjectStore.getState())
-  })
+  }
 
   // Add Track from arrangement context menu
   document.addEventListener('add-audio-track', () => {
@@ -890,6 +1000,14 @@ function updateMidiDeviceSelect(inputs) {
   if (inputs.find(i => i.id === current)) sel.value = current
   else if (inputs.length) sel.value = inputs[0].id
   MidiController.selectInput(sel.value)
+  syncMidiToken(sel)
+}
+
+/** The command bar shows one live MIDI token: a dot plus the device name. */
+function syncMidiToken(sel) {
+  const option = sel?.options?.[sel.selectedIndex]
+  _midiInputName = sel?.value ? (option?.textContent || 'MIDI') : null
+  renderCommands()
 }
 
 function initMidi() {
@@ -897,21 +1015,22 @@ function initMidi() {
   const statusEl   = document.getElementById('midi-status')
   const deviceSel  = document.getElementById('midi-device-select')
   const recBtn     = document.getElementById('midi-record-btn')
-  const addMidiBtn = document.getElementById('add-midi-track-btn')
 
   if (!enableBtn) return
 
   const enableMidi = async () => {
     const { granted, inputs, error } = await MidiController.requestAccess()
     if (!granted) {
-      statusEl.textContent = 'MIDI: ' + (error || 'denied')
+      if (statusEl) statusEl.textContent = 'MIDI: ' + (error || 'denied')
       return
     }
-    statusEl.textContent = 'MIDI ON'
-    statusEl.classList.add('granted')
+    if (statusEl) {
+      statusEl.textContent = 'MIDI ON'
+      statusEl.classList.add('granted')
+    }
     enableBtn.style.display = 'none'
-    deviceSel.style.display = ''
-    recBtn.style.display = ''
+    if (deviceSel) deviceSel.style.display = ''
+    if (recBtn) recBtn.style.display = ''
     updateMidiDeviceSelect(inputs)
   }
 
@@ -923,6 +1042,7 @@ function initMidi() {
   deviceSel?.addEventListener('change', () => {
     MidiController.selectInput(deviceSel.value)
     if (recBtn) recBtn.disabled = !deviceSel.value
+    syncMidiToken(deviceSel)
   })
 
   recBtn?.addEventListener('click', () => {
@@ -979,11 +1099,6 @@ function initMidi() {
       }
       _midiTargetClipId = null
     }
-  })
-
-  addMidiBtn?.addEventListener('click', () => {
-    addMidiTrack()
-    switchMode('arrange')
   })
 
   // Route live MIDI note events → track instruments (routeChannel), falling
@@ -1120,7 +1235,7 @@ function initMidi() {
 
 // ─── Piano Roll ──────────────────────────────────────────────────────────────
 function initPianoRoll() {
-  const drawer    = document.getElementById('piano-roll-drawer')
+  const drawer    = document.getElementById('piano-roll-dialog')
   const container = document.getElementById('piano-roll-container')
   const closeBtn  = document.getElementById('close-piano-roll-btn')
   const nameEl    = document.getElementById('pr-clip-name')
@@ -1147,22 +1262,19 @@ function initPianoRoll() {
     _pianoRoll.setQuantize(quantSel.value)
   })
 
-  function closePianoRoll() {
-    drawer.style.display = 'none'
-    ShortcutManager.setContext('global')
-    // Return focus to arrangement canvas
-    document.getElementById('arrangement-container')?.querySelector('canvas')?.focus()
-  }
-
-  closeBtn?.addEventListener('click', closePianoRoll)
+  // Escape, the focus trap and the context/focus restore are the dialog kit's
+  // job now — closeDialog only has to close.
+  closeBtn?.addEventListener('click', () => closeDialog('piano-roll-dialog'))
 
   // Open on double-click from arrangement view
   document.addEventListener('open-piano-roll', (e) => {
     const { trackId, clipId, clipName } = e.detail
     if (nameEl) nameEl.textContent = clipName || 'clip'
-    drawer.style.display = 'flex'
+    openDialog('piano-roll-dialog', { context: 'pianoroll' })
     _pianoRoll.open(trackId, clipId)
-    ShortcutManager.setContext('pianoroll')
+    // The container was 0×0 while the dialog was closed; ResizeObserver fires
+    // on show, but kick it once the modal is actually laid out.
+    requestAnimationFrame(() => _pianoRoll._onResize())
     // Focus the close button for keyboard users
     closeBtn?.focus()
   })
@@ -1171,7 +1283,6 @@ function initPianoRoll() {
   ShortcutManager.register({ key: 'd', context: 'pianoroll' }, () => setPrTool('draw'))
   ShortcutManager.register({ key: 's', context: 'pianoroll' }, () => setPrTool('select'))
   ShortcutManager.register({ key: 'e', context: 'pianoroll' }, () => setPrTool('erase'))
-  ShortcutManager.register({ key: 'escape', context: 'pianoroll' }, () => closePianoRoll())
 }
 
 // ─── Shortcuts ────────────────────────────────────────────────────────────────
@@ -1186,15 +1297,27 @@ function initShortcuts() {
   ShortcutManager.register({ key: 'y', ctrl: true },              () => ProjectStore.redo())
 
   // Project
-  ShortcutManager.register({ key: 's', ctrl: true }, () => {
-    document.getElementById('save-project-btn')?.click()
+  ShortcutManager.register({ key: 's', ctrl: true }, () => runCommand('save'))
+  ShortcutManager.register({ key: 'n', ctrl: true }, () => runCommand('new'))
+  ShortcutManager.register({ key: 'o', ctrl: true }, () => runCommand('open'))
+
+  // Dialogs and drawers — every one is also in the ⋯ menu.
+  ShortcutManager.register({ key: 'm', ctrl: true },              () => runCommand('midi-setup'))
+  ShortcutManager.register({ key: 'b', ctrl: true },              () => runCommand('bounce'))
+  ShortcutManager.register({ key: 'l', ctrl: true },              () => runCommand('library'))
+  ShortcutManager.register({ key: 'i', ctrl: true },              () => runCommand('instrument-browser'))
+  ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => runCommand('mixer'))
+
+  // Number row: drum pads on the drum palette, voices on the 909. Bound to the
+  // 'synth' context so a modal dialog never swallows them.
+  NUMBER_ROW.forEach((key, idx) => {
+    ShortcutManager.register({ key, context: 'synth' }, (e) => {
+      if (e.repeat) return
+      if (currentPaletteKey === 'drum') { if (idx < 4) triggerDrumPad(idx) }
+      else if (currentPaletteKey === 'tr909') _tr909View?.trigger(TR909_VOICES[idx], 0.9)
+    })
   })
-  ShortcutManager.register({ key: 'n', ctrl: true }, () => {
-    document.getElementById('new-project-btn')?.click()
-  })
-  ShortcutManager.register({ key: 'o', ctrl: true }, () => {
-    document.getElementById('open-project-btn')?.click()
-  })
+  ShortcutManager.setContext(_currentMode === 'synth' ? 'synth' : 'global')
 
   // Mode switching
   ShortcutManager.register({ key: 'f1' }, () => switchMode('synth'))
@@ -1237,7 +1360,7 @@ function boot() {
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 
   renderKnobPanel()
-  initGlobalHeader()
+  initCommandBar()
   initTransport()
   initTabs()
   initRecorder()
@@ -1246,7 +1369,7 @@ function boot() {
   document.body.addEventListener('click', ensureAudio, { once: false })
   document.body.addEventListener('keydown', ensureAudio, { once: false })
 
-  initProjectBar()
+  initProjectCommands()
   initSidebarModes()
   initMixerParamBus()
   initArrangeToolbar()
