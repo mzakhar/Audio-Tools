@@ -13,10 +13,13 @@ Motivating case: [Midinous](https://midinous.com) creates two virtual ports at s
 | 1 — Pure message parser | done | `3665564` |
 | 2 — Channel routing + live instruments | done | `c9ddf05` |
 | 3 — CC + pitch bend into racks | done | `76214f1` |
+| 3b — Expression + hold for every instrument | not started | |
 | 4 — Clock in (optional) | not started | |
 | 5 — MIDI out (optional) | not started | |
 
-Phases 1–3 are the bridge. Phases 4–5 are opt-in; do not build them speculatively — build 4 when transport drift actually bites, build 5 when there is real gear or software on the other end.
+Phases 1–3 are the bridge. Phase 3b is the playability gap a real keyboard exposed and should be built next. Phases 4–5 are opt-in; do not build them speculatively — build 4 when transport drift actually bites, build 5 when there is real gear or software on the other end.
+
+Knob mapping, transport buttons, a MIDI monitor and clock-out are **deferred** — see `specs/midi-control-surface.md`, which is a stash, not a plan.
 
 ---
 
@@ -153,6 +156,54 @@ Other CC numbers: ignore for now. Generic `CC → rack param` mapping is a bigge
 ```
 
 **Test:** extend `tests/rack-midi.test.js` — assert a `mod` event moves the `mod` ConstantSource offset and that bend of `1` lands at `bendRange/24`.
+
+---
+
+## Phase 3b — Expression + hold for every instrument
+
+Phase 3 gave racks mod and bend. Palette voices and pack sample voices have a
+no-op `send()` (`live-instrument.js:78`), so on a real keyboard the bend strip,
+the mod strip and the sustain pedal do nothing for two of the three instrument
+types. Fix the shared path once rather than per instrument type.
+
+### Hold (CC64) — pure
+
+**New module** `src/renderer/js/midi/midi-hold.js`:
+
+```js
+// Sustain is per channel. Note-offs arriving while held are deferred and
+// flushed when the pedal lifts; a re-struck held note still retriggers.
+export function holdReducer(state, event)  // -> { state, emit: [events] }
+```
+
+The reducer sits between `routeChannel` and instrument dispatch in `app.js`, so
+every instrument type gets the pedal for free and no instrument learns about
+CC64. Notes already held when the pedal goes down stay down.
+
+### Expression — instrument contract
+
+`send(event)` becomes real for all three types. Events stay the ones phase 3
+defined: `{ type:'mod', value }` (0–1) and `{ type:'pitch-bend', value }` (−1…1).
+
+| Type | Bend | Mod |
+|---|---|---|
+| Rack | already handled by `midi-in` `PB`/`MOD` outs | already handled |
+| Pack (`sample-instrument.js`) | `source.detune` on every live voice, ± `bendRange` semitones; retain the value so voices started mid-bend are in tune | one destination, default filter cutoff on a per-voice biquad |
+| Palette (`palettes.js`) | `detune` on the voice's oscillators | palette-declared destination, default cutoff |
+
+`bendRange` is per instrument, default ±2 semitones, stored on the track
+instrument. Do not scale bend twice — `midi-in` already applies its own param.
+
+### Aftertouch parsing
+
+`midi-message.js` gains `0xD0` → `{ kind:'channel-aftertouch', channel, pressure }`
+and `0xA0` → `{ kind:'poly-aftertouch', channel, pitch, pressure }`. Parse them
+even though nothing consumes them yet: a knob configured as aftertouch currently
+vanishes with no trace, which reads as a broken device.
+
+**Tests:** `tests/midi-hold.test.js` — pedal down, note-off deferred, pedal up
+flushes exactly once; retrigger while held does not double-emit. Extend
+`tests/midi-message.test.js` for the two aftertouch statuses.
 
 ---
 
