@@ -13,7 +13,7 @@ const chunk = (id, data) => {
 const list = (type, children) => chunk('LIST', [...fourCC(type), ...children.flat(Infinity)])
 const record = (name, ...data) => [...str(name, 20), ...data.flat()]
 
-function fixture() {
+function fixture({ envelope = false } = {}) {
   const info = list('INFO', [chunk('ifil', [...u16(2), ...u16(1)]), chunk('INAM', str('Tiny Piano', 11))])
   const pcm = new Int16Array([100, -200, 300, -400])
   const sampleBytes = [...new Uint8Array(pcm.buffer)]
@@ -22,8 +22,9 @@ function fixture() {
   const pbag = chunk('pbag', [...u16(0), ...u16(0), ...u16(1), ...u16(0)])
   const pgen = chunk('pgen', [...u16(41), ...u16(0)])
   const inst = chunk('inst', [record('Piano Inst', u16(0)), record('EOI', u16(1))])
-  const ibag = chunk('ibag', [...u16(0), ...u16(0), ...u16(3), ...u16(0)])
-  const igen = chunk('igen', [...u16(43), 60, 72, ...u16(44), 10, 120, ...u16(53), ...u16(0)])
+  const generatorRows = [...u16(43), 60, 72, ...u16(44), 10, 120, ...(envelope ? [...u16(34), ...u16(0), ...u16(37), ...u16(600)] : []), ...u16(53), ...u16(0)]
+  const ibag = chunk('ibag', [...u16(0), ...u16(0), ...u16(envelope ? 5 : 3), ...u16(0)])
+  const igen = chunk('igen', generatorRows)
   const shdr = chunk('shdr', [record('Piano C4', u32(0), u32(4), u32(1), u32(3), u32(44100), 60, 0, u16(0), u16(1)), record('EOS', u32(4), u32(4), u32(4), u32(4), u32(0), 0, 0, u16(0), u16(1))])
   const pdta = list('pdta', [phdr, pbag, pgen, inst, ibag, igen, shdr])
   const body = [...fourCC('sfbk'), ...info, ...sdta, ...pdta]
@@ -50,5 +51,10 @@ describe('SF2 importer', () => {
   it('writes a standard mono PCM WAV', () => {
     const wav = encodePcmWav(new Int16Array([1, -2]), 44100)
     expect(new DataView(wav).getUint32(40, true)).toBe(4)
+  })
+
+  it('preserves SF2 volume envelope generators for sampled playback', () => {
+    const zone = importSf2(fixture({ envelope: true }), { id: 'tiny-piano' }).manifest.patches[0].zones[0]
+    expect(zone.volumeEnvelope).toMatchObject({ attack: 1, sustain: 10 ** -3 })
   })
 })

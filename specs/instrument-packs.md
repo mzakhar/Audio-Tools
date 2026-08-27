@@ -22,7 +22,8 @@ Load large playable instrument libraries without making Synth startup, project l
 - Pack patches appear in track selectors. Missing selections remain saved, labeled, and silent. Bank Select/Program Change routes only MIDI-following pack tracks; channel 10 prefers GM percussion.
 - Samples decode on first use into bounded LRU cache. Timeline and offline bounce use packs; bounce preloads required samples and reports missing identifiers.
 - Manual pack and program choices now pin the patch by default; selected presets warm three representative octaves without eagerly decoding a whole bank.
-- SF2 loops shorter than 20 ms stay unlooped because their required SF2 volume-envelope behavior is not part of the Web Audio runtime.
+- Legacy packs without envelope metadata keep SF2 loops shorter than 20 ms unlooped to avoid raw buzz.
+- New `.sf2` imports retain basic volume envelopes so short sustain loops can play without becoming raw buzz; re-import older local packs to gain this metadata.
 - Deferred: home-server catalog, remote download, zip install, enable/disable/remove UI. No static HTTPS catalog source, signed artifact, or zip extractor exists here; adding one would invent distribution/trust policy. Local `.sf2` remains first path.
 
 ## Product decisions

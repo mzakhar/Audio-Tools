@@ -12,7 +12,7 @@ function setup() {
       return source
     },
     createGain: () => {
-      const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { setValueAtTime: vi.fn() } }
+      const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn(), setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn() } }
       gains.push(gain)
       return gain
     }
@@ -110,5 +110,18 @@ describe('sample instrument', () => {
     inst.noteOn(60)
     await Promise.resolve()
     expect(sources[0].loop).toBeUndefined()
+  })
+
+  it('loops a tiny SoundFont sustain under its volume envelope', async () => {
+    const { ctx, sources, gains, output } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', loopStart: 0.6, loopEnd: 0.606, volumeEnvelope: { attack: 0.1, sustain: 0.1, release: 0.2 } }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 3, sampleRate: 44100 })) }
+    })
+    inst.noteOn(60)
+    await Promise.resolve()
+    expect(sources[0].loop).toBe(true)
+    expect(gains[0].gain.linearRampToValueAtTime).toHaveBeenCalled()
+    inst.noteOff(60)
+    expect(sources[0].stop).toHaveBeenCalledWith(4.2)
   })
 })

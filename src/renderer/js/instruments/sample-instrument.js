@@ -20,7 +20,12 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     const voice = voices.get(pitch)
     if (!voice) return
     voices.delete(pitch)
-    try { voice.source.stop(time) } catch { /* already stopped */ }
+    const release = voice.release || 0
+    if (release > 0 && time >= ctx.currentTime) {
+      voice.gain.gain.cancelScheduledValues?.(time)
+      voice.gain.gain.setTargetAtTime?.(0, time, Math.max(0.005, release / 5))
+      try { voice.source.stop(time + release * 6) } catch { /* already stopped */ }
+    } else try { voice.source.stop(time) } catch { /* already stopped */ }
     if (time <= ctx.currentTime) {
       voice.source.disconnect()
       voice.gain.disconnect()
@@ -40,14 +45,25 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     // Earlier SF2 imports stored attenuation as zero/negative gain. Treat it
     // as unity so existing local packs become audible after this fix.
     const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
-    gain.gain.setValueAtTime(zoneGain * Math.max(0, Math.min(127, velocity)) / 127, time)
+    const amplitude = zoneGain * Math.max(0, Math.min(127, velocity)) / 127
+    const envelope = zone.volumeEnvelope
+    if (envelope) {
+      const delay = Math.max(0, envelope.delay || 0), attack = Math.max(0, envelope.attack || 0)
+      const hold = Math.max(0, envelope.hold || 0), decay = Math.max(0, envelope.decay || 0)
+      const sustain = amplitude * Math.max(0, Math.min(1, envelope.sustain ?? 1))
+      let at = time + delay
+      gain.gain.setValueAtTime(0, time)
+      gain.gain.setValueAtTime(0, at)
+      gain.gain.linearRampToValueAtTime?.(amplitude, at + attack)
+      at += attack + hold
+      gain.gain.linearRampToValueAtTime?.(sustain, at + decay)
+    } else gain.gain.setValueAtTime(amplitude, time)
     // SF2 loop offsets are sample frames; Web Audio loop points are seconds.
     // Accept already-converted packs and repair early installed packs here.
     const loopStart = zone.loopStart > buffer.duration ? zone.loopStart / buffer.sampleRate : zone.loopStart
     const loopEnd = zone.loopEnd > buffer.duration ? zone.loopEnd / buffer.sampleRate : zone.loopEnd
-    // Tiny SF2 loops rely on an SF2 volume envelope we do not render. Repeating
-    // them raw turns a natural attack into a harsh buzzy sustain.
-    if (Number.isFinite(loopStart) && Number.isFinite(loopEnd) && loopEnd - loopStart >= 0.02 && loopEnd <= buffer.duration) {
+    // Tiny SF2 loops need their volume envelope; raw repetition is harsh.
+    if (Number.isFinite(loopStart) && Number.isFinite(loopEnd) && (loopEnd - loopStart >= 0.02 || envelope) && loopEnd <= buffer.duration) {
       source.loop = true
       source.loopStart = loopStart
       source.loopEnd = loopEnd
@@ -59,7 +75,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
       analyser.connect(output)
     } else gain.connect(output)
     source.connect(gain)
-    const voice = { source, gain, analyser }
+    const voice = { source, gain, analyser, release: envelope?.release || 0 }
     voices.set(pitch, voice)
     source.onended = () => {
       if (voices.get(pitch) === voice) voices.delete(pitch)
