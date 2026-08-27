@@ -76,11 +76,27 @@ describe('unhandled', () => {
     expect(parseMidiMessage([0xf0, 0x7e, 0xf7])).toBe(null)
   })
 
-  it('returns null for aftertouch', () => {
-    expect(parseMidiMessage([0xa0, 60, 100])).toBe(null)
-  })
-
   it('parses a program change', () => {
     expect(parseMidiMessage([0xcf, 5])).toEqual({ kind: 'program-change', channel: 15, program: 5 })
+  })
+})
+
+describe('poly-aftertouch', () => {
+  it('parses pitch and pressure', () => {
+    expect(parseMidiMessage([0xa0, 60, 100])).toEqual({ kind: 'poly-aftertouch', channel: 0, pitch: 60, pressure: 100 })
+  })
+
+  it('channel nibble survives on channel 15', () => {
+    expect(parseMidiMessage([0xaf, 60, 100])).toEqual({ kind: 'poly-aftertouch', channel: 15, pitch: 60, pressure: 100 })
+  })
+})
+
+describe('channel-aftertouch', () => {
+  it('parses pressure', () => {
+    expect(parseMidiMessage([0xd0, 90])).toEqual({ kind: 'channel-aftertouch', channel: 0, pressure: 90 })
+  })
+
+  it('channel nibble survives on channel 15', () => {
+    expect(parseMidiMessage([0xdf, 90])).toEqual({ kind: 'channel-aftertouch', channel: 15, pressure: 90 })
   })
 })

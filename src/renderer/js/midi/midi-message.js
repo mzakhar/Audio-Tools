@@ -34,6 +34,14 @@ export function parseMidiMessage(bytes) {
     return { kind: 'pitch-bend', channel, value }
   }
 
+  if (type === 0xa0) {
+    return { kind: 'poly-aftertouch', channel, pitch: data1, pressure: data2 }
+  }
+
+  if (type === 0xd0) {
+    return { kind: 'channel-aftertouch', channel, pressure: data1 }
+  }
+
   if (status === 0xf8) return { kind: 'clock' }
   if (status === 0xfa) return { kind: 'start' }
   if (status === 0xfc) return { kind: 'stop' }

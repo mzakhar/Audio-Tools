@@ -64,6 +64,25 @@ something on the other end needs them.
 
 Web MIDI is secure-context only, so none of it works on the LAN http route.
 
+Phase 3b (sustain CC64 hold, bend/mod for pack and palette voices, aftertouch
+parsing) is the next MIDI work. Knob learn, transport buttons, MIDI monitor and
+clock are **deferred** in `specs/midi-control-surface.md` — that file is a stash,
+not a plan; do not build from it without a fresh decision.
+
+### UI shell and instrument selection (specced, not started)
+
+`specs/ui-shell.md` and `specs/instrument-browser.md` are one plan in two files.
+Rules they establish, which apply to any UI work from now on:
+
+- A control stays on screen only if it changes while you play. Everything else is
+  a native `<dialog>` (or `popover` for menus) on a shortcut, reachable from the
+  `⋯` menu. No new bar, rail or sidebar.
+- One selection concept: the armed MIDI track's `instrument`. The module-global
+  preview (`_previewPack` / `_previewInstrument`) is being deleted, not extended.
+- One instrument factory serves audition, live play and timeline playback.
+- Input (keys, pads, MIDI) and source (palette, pack, rack) are separate axes.
+  Palette tabs are not a source picker.
+
 Phase 4 integration:
 
 - MIDI tracks use `instrument: { type: 'palette', paletteKey }` or

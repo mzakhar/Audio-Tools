@@ -26,6 +26,17 @@ Load large playable instrument libraries without making Synth startup, project l
 - New `.sf2` imports retain basic volume envelopes so short sustain loops can play without becoming raw buzz; re-import older local packs to gain this metadata.
 - Deferred: home-server catalog, remote download, zip install, enable/disable/remove UI. No static HTTPS catalog source, signed artifact, or zip extractor exists here; adding one would invent distribution/trust policy. Local `.sf2` remains first path.
 
+## Progress — 2026-08-26
+
+- The sidebar inspector built in phase 4 is superseded before it grows further:
+  `specs/instrument-browser.md` replaces it with one overlay picker plus an
+  instrument settings dialog, and deletes the preview selection concept
+  (`_previewPack` / `_previewInstrument`) that never synced to any track.
+- Pack patches become reachable from the synth view, not only from arrange.
+- Pack administration (import, licences, disk use, remove) moves to a Library
+  dialog in `specs/ui-shell.md` phase 3 — the deferred home-server catalog work
+  below now has a place to land that is not a new top-level view.
+
 ## Product decisions
 
 - MIDI channels remain zero-indexed internally. MIDI channel 10 is `channel: 9`.
