@@ -16,6 +16,9 @@ const _pending = new Map()
 export function openDialog(id, { context = 'dialog', onClose } = {}) {
   const el = document.getElementById(id)
   if (!el || typeof el.showModal !== 'function') return false
+  // A second open would capture the dialog's own context as "previous" and
+  // leave a second close listener behind, stranding ShortcutManager forever.
+  if (el.open) return false
 
   const previousContext = ShortcutManager.getContext()
   const previousFocus = document.activeElement
@@ -28,7 +31,9 @@ export function openDialog(id, { context = 'dialog', onClose } = {}) {
     _pending.delete(id)
     ShortcutManager.setContext(previousContext)
     if (onClose) onClose()
-    if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus()
+    // The element that opened the dialog may have been re-rendered or hidden
+    // while it was open — falling back to nothing beats focusing a dead node.
+    if (previousFocus?.isConnected && !previousFocus.hidden && typeof previousFocus.focus === 'function') previousFocus.focus()
     el.removeEventListener('close', restore)
   }
 

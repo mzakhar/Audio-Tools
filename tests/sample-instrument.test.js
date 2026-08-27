@@ -125,6 +125,35 @@ describe('sample instrument', () => {
     expect(sources[0].stop).toHaveBeenCalledWith(4.2)
   })
 
+  it('keeps a released voice connected until its source ends', async () => {
+    const { ctx, sources, gains, output } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', volumeEnvelope: { attack: 0.01, sustain: 1, release: 0.5 } }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 3, sampleRate: 44100 })) }
+    })
+    inst.noteOn(60, 100)
+    await Promise.resolve(); await Promise.resolve()
+    inst.noteOff(60)
+    expect(gains[0].gain.setTargetAtTime).toHaveBeenCalled()
+    expect(sources[0].stop).toHaveBeenCalledWith(6)
+    expect(sources[0].disconnect).not.toHaveBeenCalled()
+    expect(gains[0].disconnect).not.toHaveBeenCalled()
+    sources[0].onended()
+    expect(sources[0].disconnect).toHaveBeenCalled()
+    expect(gains[0].disconnect).toHaveBeenCalled()
+  })
+
+  it('dispose cuts a released voice immediately instead of leaving it ringing', async () => {
+    const { ctx, sources, output } = setup()
+    const inst = sampleInstrumentFor({ zones: [{ keyLo: 0, keyHi: 127, rootKey: 60, sampleId: 'sample', volumeEnvelope: { release: 0.5 } }] }, {
+      ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({ duration: 3, sampleRate: 44100 })) }
+    })
+    inst.noteOn(60, 100)
+    await Promise.resolve(); await Promise.resolve()
+    inst.dispose()
+    expect(sources[0].stop).toHaveBeenCalledWith(3)
+    expect(sources[0].disconnect).toHaveBeenCalled()
+  })
+
   it('exposes setBend/setMod that are safe to call before any note', async () => {
     const { ctx, output } = setup()
     const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({})) } })

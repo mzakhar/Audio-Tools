@@ -50,6 +50,11 @@ describe('commandItems', () => {
     expect(find(commandItems({ mode: 'synth', recording: true }), 'record').label).toBe('Stop recording')
   })
 
+  it('gates import-pack on a host that can import, enabled by default', () => {
+    expect(find(commandItems({}), 'import-pack').enabled).toBe(true)
+    expect(find(commandItems({ canImportPacks: false }), 'import-pack').enabled).toBe(false)
+  })
+
   it('mixer only visible in arrange', () => {
     expect(find(commandItems({ mode: 'arrange' }), 'mixer').visible).toBe(true)
     expect(find(commandItems({ mode: 'synth' }), 'mixer').visible).toBe(false)

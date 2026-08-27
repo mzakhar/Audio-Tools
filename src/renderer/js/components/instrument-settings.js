@@ -152,6 +152,9 @@ export class InstrumentSettings {
     select.value = instrument.rackId
     select.onchange = () => this.set({ ...instrument, rackId: select.value })
     this.bodyEl.append(field('Rack', select))
+    if (!racks.some(rack => rack.id === instrument.rackId)) {
+      this.bodyEl.append(note(`Missing rack ${instrument.rackId}. Pick another rack to restore audio.`))
+    }
   }
 
   choosePatch(pack, patch, programFollow, extra = {}) {

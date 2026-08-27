@@ -11,10 +11,11 @@ const DEFAULTS = {
   projectOpen: false,
   recording: false,
   midiInput: null,
+  canImportPacks: true,
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, midiInput } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, midiInput, canImportPacks } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -97,7 +98,9 @@ export function commandItems(opts = {}) {
       label: 'Import pack',
       shortcut: null,
       group: 'add',
-      enabled: true,
+      // The browser build has no SF2 importer behind it — a live-looking menu
+      // item that no-ops is worse than a disabled one.
+      enabled: !!canImportPacks,
       visible: true,
     },
     {

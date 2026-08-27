@@ -51,6 +51,9 @@ const _liveInstruments = new Map() // trackId → { sig, inst }
 let _packCatalog = []
 let _channelPrograms = null
 let _holdState                        // sustain-pedal state, one shared object, keyed internally by channel
+// `${channel}:${pitch}` → trackId[]. A note-off must reach whatever played the
+// note-on: arming another track mid-hold would otherwise strand the voice.
+const _soundingRoutes = new Map()
 const _sampleStores = new WeakMap()
 
 function packFor(packId, version) {
@@ -138,7 +141,12 @@ function ensureMidiTrack() {
 
 async function refreshPackCatalog() {
   if (!window.electronFS?.listInstrumentPacks) return
-  _packCatalog = (await window.electronFS.listInstrumentPacks()).map(entry => compilePackManifest(entry.manifest))
+  // compilePackManifest throws on an invalid manifest. One bad pack must not
+  // empty the whole catalog and mute every pack track in the project.
+  _packCatalog = (await window.electronFS.listInstrumentPacks()).flatMap(entry => {
+    try { return [compilePackManifest(entry.manifest)] }
+    catch (err) { console.warn('Skipping unreadable instrument pack:', entry?.manifest?.id ?? entry, err); return [] }
+  })
   renderInstrumentSlot()
   _arrangementView?.render()
   _instrumentBrowser?.refresh()
@@ -151,6 +159,11 @@ function disposeLiveInstruments() {
     try { entry.inst.dispose() } catch (err) {}
   }
   _liveInstruments.clear()
+  // The pedal state outlives nothing: a channel still marked held would
+  // swallow every future note-off, and the deferred pitches it is holding
+  // belong to instruments that no longer exist.
+  _holdState = undefined
+  _soundingRoutes.clear()
 }
 
 let _arrangementView = null
@@ -209,7 +222,10 @@ function renderCommands() {
     mode: _currentMode,
     projectOpen: _projectOpen,
     recording: _audioRecording,
-    midiInput: _midiInputName
+    midiInput: _midiInputName,
+    // No SoundFont import outside Electron — the menu item must look dead
+    // because it is dead, not silently no-op.
+    canImportPacks: !!window.electronFS?.importSf2Pack
   })
   for (const item of items) {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
@@ -280,7 +296,9 @@ function buildAppMenu() {
 /** Mixer drawer open/closed. Session state — never written to the project. */
 function toggleMixer(force) {
   const bar = document.getElementById('mixer-bar')
-  if (!bar) return
+  // #mixer-bar lives inside #arrange-view, so toggling it from another view
+  // arms a drawer that pops open the next time arrange is shown.
+  if (!bar || _currentMode !== 'arrange') return
   const open = force ?? !bar.classList.contains('open')
   bar.classList.toggle('open', open)
   document.getElementById('mixer-toggle-btn')?.setAttribute('aria-pressed', open ? 'true' : 'false')
@@ -613,6 +631,7 @@ function initCommandBar() {
     } else {
       Sequencer.play()
     }
+    syncTransportPressed()
   })
   document.getElementById('global-stop-btn')?.addEventListener('click', () => {
     if (_currentMode === 'arrange') {
@@ -620,6 +639,7 @@ function initCommandBar() {
     } else {
       Sequencer.stop()
     }
+    syncTransportPressed()
   })
 
   // Everything that is not live lives in the ⋯ menu or a dialog.
@@ -1153,6 +1173,13 @@ function initMidi() {
         if (track?.instrument?.type !== 'pack' || track.instrument.programFollow === 'pinned') continue
         const pack = packFor(track.instrument.packId, track.instrument.packVersion)
         const resolved = pack && resolvePatch(pack, result.change, { channel: detail.channel })
+        // A controller that re-sends its program on connect would otherwise
+        // flush the undo stack with dispatches that change nothing.
+        const nextPatchId = resolved?.patch?.id || track.instrument.patchId
+        const had = track.instrument.received
+        if (nextPatchId === track.instrument.patchId && had &&
+            had.bankMsb === result.change.bankMsb && had.bankLsb === result.change.bankLsb &&
+            had.program === result.change.program) continue
         ProjectStore.dispatch(SetTrackInstrumentProgram(trackId, {
           ...(resolved?.selection || { packId: track.instrument.packId, packVersion: track.instrument.packVersion, patchId: track.instrument.patchId }),
           ...result.change,
@@ -1174,7 +1201,8 @@ function initMidi() {
       // A hardware octave button has to be visible: scroll the key window to
       // the note instead of letting it disappear. Pads send percussion notes
       // that have nothing to do with the keys, so they are exempt.
-      if (detail.source !== 'pad') Keyboard.ensureVisible(detail.pitch)
+      // Channel 10 is percussion: its note numbers are drum slots, not pitches.
+      if (detail.source !== 'pad' && detail.channel !== 9) Keyboard.ensureVisible(detail.pitch)
     }
     const state = ProjectStore.getState()
     const midiTracks = state.tracks.filter(t => t.type === 'midi')
@@ -1187,16 +1215,24 @@ function initMidi() {
       }
     }
 
-    const ids = routeChannel(midiTracks, detail.channel, _midiTargetTrackId)
+    const routeKey = `${detail.channel}:${detail.pitch}`
+    const ids = detail.kind === 'note-off'
+      ? (_soundingRoutes.get(routeKey) || routeChannel(midiTracks, detail.channel, _midiTargetTrackId))
+      : routeChannel(midiTracks, detail.channel, _midiTargetTrackId)
+    if (detail.kind === 'note-on') _soundingRoutes.set(routeKey, ids)
+    else if (detail.kind === 'note-off') _soundingRoutes.delete(routeKey)
 
     for (const trackId of ids) {
       const track = state.tracks.find(t => t.id === trackId)
       if (!track) continue
 
-      const sig = JSON.stringify(track.instrument ?? null)
+      // The output node is baked into the instrument at build time, so a move
+      // to another mixer channel has to invalidate it too.
+      const sig = JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null])
       let entry = _liveInstruments.get(trackId)
       if (entry && entry.sig !== sig) {
         entry.inst.dispose()
+        _liveInstruments.delete(trackId)   // the rebuild below may return null
         entry = null
       }
       if (!entry) {
@@ -1221,6 +1257,9 @@ function initMidi() {
 
   // Keep device list in sync when devices connect/disconnect
   document.addEventListener('midi-device-change', (e) => {
+    // Whatever was held on the old device can never be released from it:
+    // drop the live instruments and the pedal state together.
+    disposeLiveInstruments()
     updateMidiDeviceSelect(e.detail.inputs)
   })
 
@@ -1291,7 +1330,20 @@ function initPianoRoll() {
 }
 
 // ─── Shortcuts ────────────────────────────────────────────────────────────────
-let _isPlaying = false
+/** True while either transport is actually running — never a shadow copy. */
+function isTransportPlaying() {
+  return _currentMode === 'arrange' ? !!TimelinePlayer._isPlaying : Sequencer.isPlaying()
+}
+
+/** Play's pressed state is derived, so a disabled button cannot desync it. */
+function syncTransportPressed() {
+  document.getElementById('global-play-btn')?.setAttribute('aria-pressed', isTransportPlaying() ? 'true' : 'false')
+}
+
+/** A modal owns the keyboard: global shortcuts must not fire behind it. */
+function modalOpen() {
+  return !!document.querySelector('dialog[open]')
+}
 
 function initShortcuts() {
   ShortcutManager.init()
@@ -1311,7 +1363,7 @@ function initShortcuts() {
   ShortcutManager.register({ key: 'b', ctrl: true },              () => runCommand('bounce'))
   ShortcutManager.register({ key: 'l', ctrl: true },              () => runCommand('library'))
   ShortcutManager.register({ key: 'i', ctrl: true },              () => runCommand('instrument-browser'))
-  ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => runCommand('mixer'))
+  ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => { if (!modalOpen()) runCommand('mixer') })
 
   // Number row: pads on the synth view, 909 voices on the 909 view. Bound to
   // a context so a modal dialog never swallows them.
@@ -1327,32 +1379,34 @@ function initShortcuts() {
   })
   ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' ? _currentMode : 'global')
 
-  // Mode switching
-  ShortcutManager.register({ key: 'f1' }, () => switchMode('synth'))
-  ShortcutManager.register({ key: 'f2' }, () => switchMode('arrange'))
-  ShortcutManager.register({ key: 'f3' }, () => switchMode('rack'))
-  ShortcutManager.register({ key: 'f4' }, () => switchMode('tr909'))
+  // Mode switching. Blocked behind a modal: switchMode() rewrites the shortcut
+  // context, which the dialog would then restore on top of when it closes.
+  for (const [key, mode] of [['f1', 'synth'], ['f2', 'arrange'], ['f3', 'rack'], ['f4', 'tr909']]) {
+    ShortcutManager.register({ key }, () => { if (!modalOpen()) switchMode(mode) })
+  }
 
   // Transport — Space = play/stop toggle (mode-aware)
-  ShortcutManager.register({ key: ' ' }, () => {
+  ShortcutManager.register({ key: ' ' }, (e) => {
+    if (modalOpen()) return
+    // Space is also "activate" for a focused control; the transport must not
+    // steal it from a button the user tabbed to.
+    const tag = document.activeElement?.tagName
+    if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') {
+      document.activeElement.click()
+      return
+    }
     const playBtn = document.getElementById('global-play-btn')
     const stopBtn = document.getElementById('global-stop-btn')
-    if (_isPlaying) {
-      stopBtn?.click()
-      _isPlaying = false
-      playBtn?.setAttribute('aria-pressed', 'false')
-    } else {
-      playBtn?.click()
-      _isPlaying = true
-      playBtn?.setAttribute('aria-pressed', 'true')
-    }
+    if (isTransportPlaying()) stopBtn?.click()
+    else playBtn?.click()
+    syncTransportPressed()
   })
 
   // Stop always resets
   ShortcutManager.register({ key: ' ', shift: true }, () => {
+    if (modalOpen()) return
     document.getElementById('global-stop-btn')?.click()
-    _isPlaying = false
-    document.getElementById('global-play-btn')?.setAttribute('aria-pressed', 'false')
+    syncTransportPressed()
   })
 }
 
@@ -1430,7 +1484,18 @@ function boot() {
   })
 
   // Subscribe store to keep mixer in sync
-  ProjectStore.subscribe(state => { syncMixerStrips(state); syncInstrumentUi() })
+  ProjectStore.subscribe(state => {
+    syncMixerStrips(state)
+    syncInstrumentUi()
+    // A removed track must go quiet immediately. Pruning only inside the MIDI
+    // handler left a deleted track sounding until the next incoming event —
+    // with no controller attached, forever.
+    for (const [trackId, entry] of [..._liveInstruments]) {
+      if (state.tracks.some(track => track.id === trackId)) continue
+      try { entry.inst.dispose() } catch (err) {}
+      _liveInstruments.delete(trackId)
+    }
+  })
   refreshPackCatalog().catch(error => console.warn('Could not load instrument packs:', error))
 }
 

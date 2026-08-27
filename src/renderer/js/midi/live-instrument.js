@@ -74,8 +74,11 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
         RackEngine.sendEvent(handle, moduleId, 'note', { type: 'note-off', note: pitch, time: ctx.currentTime })
       },
       send(event) {
-        ensureMounted()
+        // Never mounts: a wheel nudge must not start every oscillator in a rack
+        // that has not played a note. bendRange is midi-in's own scaling here —
+        // applying it again would double the bend.
         if (!moduleId) return
+        if (event?.type === 'mod' && modOff) return
         RackEngine.sendEvent(handle, moduleId, 'note', event)
       },
       dispose() {

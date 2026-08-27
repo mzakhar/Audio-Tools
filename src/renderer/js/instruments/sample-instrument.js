@@ -55,16 +55,21 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     if (!voice) return
     voices.delete(pitch)
     const release = voice.release || 0
-    if (release > 0 && time >= ctx.currentTime) {
+    // A released voice keeps its nodes until source.onended — disconnecting it
+    // here would cut the release tail dead and click. dispose() wants the tail
+    // gone, so it takes the immediate branch.
+    if (release > 0 && time >= ctx.currentTime && !disposed) {
       voice.gain.gain.cancelScheduledValues?.(time)
       voice.gain.gain.setTargetAtTime?.(0, time, Math.max(0.005, release / 5))
       try { voice.source.stop(time + release * 6) } catch { /* already stopped */ }
-    } else try { voice.source.stop(time) } catch { /* already stopped */ }
-    if (time <= ctx.currentTime) {
-      voice.source.disconnect()
-      voice.gain.disconnect()
-      voice.analyser?.disconnect()
-      disconnectExpression(voice.source)
+    } else {
+      try { voice.source.stop(time) } catch { /* already stopped */ }
+      if (time <= ctx.currentTime) {
+        voice.source.disconnect()
+        voice.gain.disconnect()
+        voice.analyser?.disconnect()
+        disconnectExpression(voice.source)
+      }
     }
   }
 

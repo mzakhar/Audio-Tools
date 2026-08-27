@@ -73,4 +73,28 @@ describe('dialog', () => {
     expect(closed).toBe(true)
     expect(document.activeElement).toBe(trigger)
   })
+
+  it('refuses a second open and leaves one restore behind', () => {
+    const el = makeDialog('d4')
+    ShortcutManager.setContext('synth')
+
+    expect(openDialog('d4', { context: 'dialog' })).toBe(true)
+    expect(openDialog('d4', { context: 'dialog' })).toBe(false)  // already open
+    closeDialog('d4')
+
+    // A second listener from the refused open would restore 'dialog' here.
+    expect(ShortcutManager.getContext()).toBe('synth')
+    expect(el.open).toBe(false)
+  })
+
+  it('does not focus a trigger that was removed while the dialog was open', () => {
+    makeDialog('d5')
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    openDialog('d5')
+    trigger.remove()
+    expect(() => closeDialog('d5')).not.toThrow()
+  })
 })

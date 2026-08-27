@@ -11,6 +11,7 @@
 
 import { KEY_MAP, keyLayout, noteToName } from './key-layout.js'
 import { windowForNote, shiftWindow } from './keyboard-range.js'
+import ShortcutManager from './shortcuts.js'
 
 // C3 = MIDI 48, C5 = MIDI 72 — defaults, not constants any more.
 const DEFAULT_START = 48
@@ -131,7 +132,10 @@ function renderRange() {
 function setWindow({ start, end }) {
   if (start === startNote && end === endNote) return false
   // A shifting window would otherwise strand held notes under keys that are no
-  // longer on screen, and nothing would ever send their note-off.
+  // longer on screen, and nothing would ever send their note-off. Rather than
+  // cut them, refuse to move while anything is held — an automatic follow must
+  // never truncate a note the player is still holding.
+  if (pressedKeys.size || heldKeys.size) return false
   for (const note of [...pressedKeys]) fireNoteOff(note)
   activeMouseNote.val = null
   render(null, { start, end })
@@ -214,6 +218,10 @@ function onTouchEnd(e) {
 const heldKeys = new Map() // key → MIDI note
 window.addEventListener('keydown', (e) => {
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+  // Only the synth view plays from the PC keyboard. Without this, letter keys
+  // sound notes (and auto-provision a track) from inside every dialog, and
+  // from the arrange, rack and 909 views where the keyboard is not on screen.
+  if (ShortcutManager.getContext() !== 'synth') return
   // Don't capture if focus is on an input
   if (document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return
 

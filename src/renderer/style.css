@@ -1511,6 +1511,15 @@ button { font-family: var(--font-mono); }
 }
 #command-bar [hidden],
 #app-menu [hidden] { display: none !important; }
+/* Last in the row and never shrunk — it is the only way to reach everything
+   that lost its dedicated button. */
+#app-menu-btn { flex-shrink: 0; margin-left: auto; }
+@media (max-width: 620px) {
+  /* Narrow windows drop the readouts, not the controls. */
+  #command-bar .cmd-label, #command-bar #master-vol-display { display: none; }
+  #command-bar #master-vol { width: 60px; }
+  #project-name { max-width: 90px; }
+}
 
 #project-name {
   color: var(--accent);
@@ -1570,7 +1579,11 @@ button { font-family: var(--font-mono); }
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  flex-shrink: 0;
+  /* The token is the one item on the right that may shrink: the ⋯ button
+     behind it is the only route to New/Open/Save/Bounce/Library/Theme, so it
+     must never be the thing clipped off a narrow window. */
+  flex-shrink: 1;
+  min-width: 0;
 }
 .cmd-token:hover { border-color: var(--border); color: var(--text); }
 .cmd-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

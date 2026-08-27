@@ -214,9 +214,13 @@ export class InstrumentBrowser {
   assign(row, newTrack) {
     if (!row) return
     const track = newTrack ? this.deps.addTrack?.() : this.deps.ensureTrack?.()
-    if (track) this.deps.store.dispatch(SetTrackInstrument(track.id, row.instrument))
-    this.recent = [row.key, ...this.recent.filter(key => key !== row.key)].slice(0, RECENT_MAX)
-    writeList(RECENT_KEY, this.recent)
+    // RECENT is a list of what was played, not of what was highlighted — an
+    // assignment that never landed on a track does not belong in it.
+    if (track) {
+      this.deps.store.dispatch(SetTrackInstrument(track.id, row.instrument))
+      this.recent = [row.key, ...this.recent.filter(key => key !== row.key)].slice(0, RECENT_MAX)
+      writeList(RECENT_KEY, this.recent)
+    }
     this.stopAudition()
     closeDialog(BROWSER_DIALOG_ID)
   }
