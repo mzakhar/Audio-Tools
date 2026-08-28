@@ -34,6 +34,8 @@ import { openDialog, closeDialog } from './ui/dialog.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
+import { createPackStore } from './instruments/pack-store-idb.js'
+import { importPackFromFile } from './instruments/pack-import-web.js'
 import { createAuditioner } from './instruments/auditioner.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
@@ -60,12 +62,36 @@ function packFor(packId, version) {
   return _packCatalog.find(pack => pack.id === packId && pack.version === version) || null
 }
 
-function sampleStoreFor(pack, ctx) {
+/** IndexedDB pack storage, when this build has one. Private windows can refuse. */
+let _webPacks
+function webPackStore() {
+  if (_webPacks === undefined) {
+    try { _webPacks = createPackStore() } catch { _webPacks = null }
+  }
+  return _webPacks
+}
+
+function canImportPacks() {
+  return !!window.electronFS?.importSf2Pack || !!webPackStore()
+}
+
+/** Catalog entries carry `origin`, so a pack is always read back from where it lives. */
+function sampleLoaderFor(pack) {
+  if (pack.origin === 'idb') {
+    const store = webPackStore()
+    return store ? sampleId => store.readSample(pack.id, pack.version, sampleId) : null
+  }
   if (!window.electronFS?.readInstrumentSample) return null
+  return sampleId => window.electronFS.readInstrumentSample(pack.id, pack.version, sampleId)
+}
+
+function sampleStoreFor(pack, ctx) {
+  const load = sampleLoaderFor(pack)
+  if (!load) return null
   let stores = _sampleStores.get(ctx)
   if (!stores) _sampleStores.set(ctx, stores = new Map())
-  const key = `${pack.id}@${pack.version}`
-  if (!stores.has(key)) stores.set(key, createSampleStore({ ctx, load: sampleId => window.electronFS.readInstrumentSample(pack.id, pack.version, sampleId) }))
+  const key = `${pack.origin || 'fs'}:${pack.id}@${pack.version}`
+  if (!stores.has(key)) stores.set(key, createSampleStore({ ctx, load }))
   return stores.get(key)
 }
 
@@ -139,12 +165,30 @@ function ensureMidiTrack() {
   return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
 }
 
+/** One import entry point: native dialog under Electron, file input otherwise. */
+async function importPack(onProgress) {
+  const pack = window.electronFS?.importSf2Pack
+    ? await window.electronFS.importSf2Pack()
+    : await importPackFromFile({ store: webPackStore(), onProgress })
+  if (pack) await refreshPackCatalog()
+  return pack
+}
+
+async function listPacksFrom(source, origin) {
+  try { return (await source()).map(entry => ({ ...entry, origin })) }
+  catch (err) { console.warn(`Could not list ${origin} instrument packs:`, err); return [] }
+}
+
 async function refreshPackCatalog() {
-  if (!window.electronFS?.listInstrumentPacks) return
+  const sources = []
+  if (window.electronFS?.listInstrumentPacks) sources.push(listPacksFrom(() => window.electronFS.listInstrumentPacks(), 'fs'))
+  const store = webPackStore()
+  if (store) sources.push(listPacksFrom(() => store.listPacks(), 'idb'))
+  if (!sources.length) return
   // compilePackManifest throws on an invalid manifest. One bad pack must not
   // empty the whole catalog and mute every pack track in the project.
-  _packCatalog = (await window.electronFS.listInstrumentPacks()).flatMap(entry => {
-    try { return [compilePackManifest(entry.manifest)] }
+  _packCatalog = (await Promise.all(sources)).flat().flatMap(entry => {
+    try { return [{ ...compilePackManifest(entry.manifest), origin: entry.origin, bytes: entry.bytes || 0 }] }
     catch (err) { console.warn('Skipping unreadable instrument pack:', entry?.manifest?.id ?? entry, err); return [] }
   })
   renderInstrumentSlot()
@@ -223,9 +267,9 @@ function renderCommands() {
     projectOpen: _projectOpen,
     recording: _audioRecording,
     midiInput: _midiInputName,
-    // No SoundFont import outside Electron — the menu item must look dead
-    // because it is dead, not silently no-op.
-    canImportPacks: !!window.electronFS?.importSf2Pack
+    // Electron imports through IPC, the browser through a file input plus
+    // IndexedDB. Dead only when neither backend exists.
+    canImportPacks: canImportPacks()
   })
   for (const item of items) {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
@@ -1472,8 +1516,16 @@ function boot() {
   })
   _libraryDialog = new LibraryDialog({
     packCatalog: () => _packCatalog,
-    canImport: () => !!window.electronFS?.importSf2Pack,
-    importPack: async () => { await runCommand('import-pack') }
+    canImport: canImportPacks,
+    importPack: onProgress => importPack(onProgress),
+    // Electron packs live on disk and the IPC has no delete; only browser
+    // packs can be removed from here.
+    removePack: async pack => {
+      if (pack.origin !== 'idb') return
+      await webPackStore()?.removePack(pack.id, pack.version)
+      await refreshPackCatalog()
+    },
+    usage: () => webPackStore()?.usage() ?? null
   })
   document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
   document.addEventListener('open-library', () => _libraryDialog.open())

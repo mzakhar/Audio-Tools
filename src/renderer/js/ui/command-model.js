@@ -98,8 +98,8 @@ export function commandItems(opts = {}) {
       label: 'Import pack',
       shortcut: null,
       group: 'add',
-      // The browser build has no SF2 importer behind it — a live-looking menu
-      // item that no-ops is worse than a disabled one.
+      // True when either backend exists (Electron IPC, or IndexedDB in the
+      // browser). A live-looking item that no-ops is worse than a disabled one.
       enabled: !!canImportPacks,
       visible: true,
     },

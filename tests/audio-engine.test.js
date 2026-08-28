@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-vi.mock('../src/renderer/js/worklets/recorder-processor.js?url', () => ({ default: 'blob:fake' }))
+// The worklet is served as a public asset now — nothing to mock, addModule is stubbed by the fake context.
 
 const stubNode = () => ({
   gain: { value: 0, setTargetAtTime: vi.fn() },

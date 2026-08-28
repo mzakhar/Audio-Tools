@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { encodePcmWav, importSf2 } from '../src/main/sf2-import.js'
+import { encodePcmWav, importSf2 } from '../src/shared/sf2-import.js'
 import { validatePackManifest } from '../src/renderer/js/instruments/pack-registry.js'
+import { parseSf2Message } from '../src/renderer/js/workers/sf2-worker.js'
 
 const fourCC = (value) => [...value].map(c => c.charCodeAt(0))
 const u16 = value => [value & 255, value >>> 8]
@@ -56,5 +57,20 @@ describe('SF2 importer', () => {
   it('preserves SF2 volume envelope generators for sampled playback', () => {
     const zone = importSf2(fixture({ envelope: true }), { id: 'tiny-piano' }).manifest.patches[0].zones[0]
     expect(zone.volumeEnvelope).toMatchObject({ attack: 1, sustain: 10 ** -3 })
+  })
+
+  it('posts back the message shape the browser importer expects', () => {
+    const bytes = fixture().buffer
+    const result = parseSf2Message({ id: 7, bytes, name: 'tiny-piano' })
+    expect(result.type).toBe('done')
+    expect(result.id).toBe(7)
+    expect(result.manifest.id).toBe('tiny-piano')
+    expect(result.samples.every(sample => typeof sample.id === 'string' && sample.wav instanceof ArrayBuffer)).toBe(true)
+    // The importer transfers result.samples[].wav, so they must be real buffers.
+    expect(validatePackManifest(result.manifest).ok).toBe(true)
+  })
+
+  it('reports a parse failure as an error message, never a throw', () => {
+    expect(parseSf2Message({ id: 1, bytes: new Uint8Array([1, 2, 3]).buffer })).toMatchObject({ type: 'error', id: 1 })
   })
 })

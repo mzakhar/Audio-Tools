@@ -66,7 +66,7 @@ export function packInstrumentLabel(instrument, catalog) {
 }
 
 // Layout constants
-const TRACK_HEADER_W = 160  // px — left sidebar with track names
+const TRACK_HEADER_W = 210  // px — left sidebar: name, mute/solo, channel, instrument
 const RULER_H        = 32   // px — top ruler bar
 const TRACK_H        = 72   // px — height per track row
 const DEFAULT_PPB    = 40   // pixels per beat at default zoom
