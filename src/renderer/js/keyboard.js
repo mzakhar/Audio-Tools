@@ -16,7 +16,8 @@ import ShortcutManager from './shortcuts.js'
 // C3 = MIDI 48, C5 = MIDI 72 — defaults, not constants any more.
 const DEFAULT_START = 48
 const DEFAULT_END   = 72
-const WHITE_KEY_W = 44
+const WHITE_KEY_W = 44          // floor: never smaller than this
+const MAX_WHITE_KEY_W = 88      // ceiling: full-width board, the way the pads fill their row
 const WHITE_KEY_H = 130
 const BLACK_KEY_W = 28
 const BLACK_KEY_H = 80
@@ -25,7 +26,8 @@ let container = null
 let containerId = null
 let startNote = DEFAULT_START
 let endNote   = DEFAULT_END
-let touchBound = false // render() runs again on every octave shift
+let touchBound = false
+let resizeBound = false // render() runs again on every octave shift
 const pressedKeys = new Set() // MIDI notes currently held
 const activeMouseNote = { val: null } // currently held mouse note
 
@@ -66,6 +68,20 @@ function buildKeyboardLabel(note) {
   return ''
 }
 
+/** White keys in the window — the divisor for a responsive key width. */
+function whiteKeyCount(start, end) {
+  let count = 0
+  for (let note = start; note <= end; note++) if (![1, 3, 6, 8, 10].includes(note % 12)) count++
+  return count || 1
+}
+
+/** Key sizes for the available width, clamped so keys stay playable. */
+function keyMetrics(available, whites) {
+  const whiteW = Math.max(WHITE_KEY_W, Math.min(MAX_WHITE_KEY_W, Math.floor((available - 4) / whites)))
+  const whiteH = Math.round(whiteW * (WHITE_KEY_H / WHITE_KEY_W))
+  return { whiteW, whiteH, blackW: Math.round(whiteW * (BLACK_KEY_W / WHITE_KEY_W)), blackH: Math.round(whiteH * (BLACK_KEY_H / WHITE_KEY_H)) }
+}
+
 function render(id, { start, end } = {}) {
   if (id) containerId = id
   if (start != null) startNote = start
@@ -75,7 +91,10 @@ function render(id, { start, end } = {}) {
   container.innerHTML = ''
   container.style.position = 'relative'
 
-  const layout = keyLayout({ start: startNote, end: endNote, whiteW: WHITE_KEY_W, whiteH: WHITE_KEY_H, blackW: BLACK_KEY_W, blackH: BLACK_KEY_H })
+  // Keys fill the width they are given rather than floating at a fixed 44 px:
+  // on a wide window a 25-key board was a small island in the middle.
+  const metrics = keyMetrics(container.parentElement?.clientWidth ?? 0, whiteKeyCount(startNote, endNote))
+  const layout = keyLayout({ start: startNote, end: endNote, ...metrics })
   container.style.width = layout.width + 'px'
   container.style.height = layout.height + 'px'
 
@@ -96,6 +115,17 @@ function render(id, { start, end } = {}) {
 
     attachMouseEvents(div, key.note)
     container.appendChild(div)
+  }
+
+  if (!resizeBound && typeof ResizeObserver === 'function' && container.parentElement) {
+    resizeBound = true
+    let last = container.parentElement.clientWidth
+    new ResizeObserver(() => {
+      const width = container.parentElement.clientWidth
+      if (Math.abs(width - last) < 8) return   // ignore the reflow our own render causes
+      last = width
+      render()
+    }).observe(container.parentElement)
   }
 
   // Touch events live on the container, which survives a re-render — bind once

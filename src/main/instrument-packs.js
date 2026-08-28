@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
 import { basename, join, relative, resolve } from 'path'
-import { importSf2 } from './sf2-import.js'
+import { importSf2 } from '../shared/sf2-import.js'
 import { validatePackManifest } from '../renderer/js/instruments/pack-registry.js'
 
 const MAX_SF2_BYTES = 256 * 1024 * 1024

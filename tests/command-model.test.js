@@ -52,6 +52,8 @@ describe('commandItems', () => {
 
   it('gates import-pack on a host that can import, enabled by default', () => {
     expect(find(commandItems({}), 'import-pack').enabled).toBe(true)
+    // Either backend counts: Electron IPC or browser IndexedDB storage.
+    expect(find(commandItems({ canImportPacks: true }), 'import-pack').enabled).toBe(true)
     expect(find(commandItems({ canImportPacks: false }), 'import-pack').enabled).toBe(false)
   })
 

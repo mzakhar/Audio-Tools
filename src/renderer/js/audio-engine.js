@@ -2,7 +2,12 @@
  * audio-engine.js
  * Single shared AudioContext, master chain, reverb send.
  */
-import recorderProcessorUrl from './worklets/recorder-processor.js?url'
+// The worklet is a public asset, copied verbatim, not a bundled module: `?url`
+// built to a bare string with no emitted file and `new URL(...)` inlined it as
+// a data: URI, and a module script cannot load from data: — both killed
+// recording in every browser build. Resolving against document.baseURI keeps
+// the sub-path deploy (http://themachine/synth/) working too.
+const recorderProcessorUrl = new URL('worklets/recorder-processor.js', document.baseURI).href
 import { buildImpulseResponse } from './utils/impulse.js'
 
 const AudioEngine = {
