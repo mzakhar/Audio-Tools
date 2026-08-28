@@ -1,7 +1,7 @@
 /**
  * sequencer.js
- * 16-step sequencer with per-track palette assignment.
- * Each track independently plays any palette (classic/fm/pad/drum).
+ * 16-step sequencer. Rows follow armed palette; sound selection lives in
+ * instrument slot, not a second per-row model.
  */
 import AudioEngine from './audio-engine.js'
 import Palettes from './palettes.js'
@@ -10,7 +10,6 @@ import { LookaheadScheduler } from './rack/scheduler.js'
 // ─── Constants ─────────────────────────────────────────────────────────────
 const STEPS = 16
 
-const PALETTE_LABELS = { classic: 'CLSC', fm: 'FM', drum: 'DRUM', pad: 'PAD' }
 const DRUM_NAMES = ['Kick', 'Snare', 'Hi-Hat', 'Clap']
 
 // Chromatic notes C2–C6
@@ -38,14 +37,14 @@ function makeTrack(paletteKey, drumIndex, note) {
 
 function defaultTracks() {
   return [
-    makeTrack('drum', 0, 60),
-    makeTrack('drum', 1, 60),
-    makeTrack('drum', 2, 60),
-    makeTrack('drum', 3, 60),
+    makeTrack('classic', 0, 36),
+    makeTrack('classic', 1, 38),
+    makeTrack('classic', 2, 42),
+    makeTrack('classic', 3, 46),
     makeTrack('classic', -1, 60),
     makeTrack('classic', -1, 64),
-    makeTrack('fm',      -1, 67),
-    makeTrack('pad',     -1, 72),
+    makeTrack('classic', -1, 67),
+    makeTrack('classic', -1, 72),
   ]
 }
 
@@ -95,37 +94,10 @@ function renderTrackRow(trackIdx) {
   const ctrl = document.createElement('div')
   ctrl.className = 'seq-track-ctrl'
 
-  // Palette select
-  const palSel = document.createElement('select')
-  palSel.className = 'track-sel track-pal-sel'
-  ;['classic','fm','drum','pad'].forEach(key => {
-    const o = document.createElement('option')
-    o.value = key
-    o.textContent = PALETTE_LABELS[key]
-    if (key === track.paletteKey) o.selected = true
-    palSel.appendChild(o)
-  })
-
   // Note/drum select
   const noteSel = document.createElement('select')
   noteSel.className = 'track-sel track-note-sel'
   buildNoteSelect(noteSel, track)
-
-  palSel.addEventListener('change', () => {
-    track.paletteKey = palSel.value
-    if (palSel.value === 'drum') {
-      track.drumIndex = 0
-    } else {
-      track.drumIndex = -1
-    }
-    row.dataset.palette = track.paletteKey
-    if (track.paletteKey === 'drum') {
-      row.dataset.drum = track.drumIndex
-    } else {
-      delete row.dataset.drum
-    }
-    buildNoteSelect(noteSel, track)
-  })
 
   noteSel.addEventListener('change', () => {
     if (track.paletteKey === 'drum') {
@@ -146,7 +118,6 @@ function renderTrackRow(trackIdx) {
     renderAll()
   })
 
-  ctrl.appendChild(palSel)
   ctrl.appendChild(noteSel)
   ctrl.appendChild(removeBtn)
   row.appendChild(ctrl)
@@ -251,8 +222,18 @@ function setBPM(v) {
   bpm = Math.max(40, Math.min(220, parseInt(v)))
 }
 
+function setPalette(paletteKey = 'classic') {
+  if (!Palettes[paletteKey] || tracks.every(track => track.paletteKey === paletteKey)) return
+  tracks.forEach((track, index) => {
+    track.paletteKey = paletteKey
+    track.drumIndex = paletteKey === 'drum' ? index % DRUM_NAMES.length : -1
+  })
+  renderAll()
+}
+
 function addTrack() {
-  tracks.push(makeTrack('classic', -1, 60))
+  const paletteKey = tracks[0]?.paletteKey || 'classic'
+  tracks.push(makeTrack(paletteKey, paletteKey === 'drum' ? tracks.length % DRUM_NAMES.length : -1, 60))
   const idx = tracks.length - 1
   renderTrackRow(idx)
 }
@@ -303,7 +284,7 @@ function highlightStep(step) {
     .forEach(c => c.classList.add('playing'))
 }
 
-const Sequencer = { init, play, stop, clear, setBPM, addTrack,
+const Sequencer = { init, play, stop, clear, setBPM, setPalette, addTrack,
   getBPM() { return bpm },
   isPlaying() { return isPlaying }
 }

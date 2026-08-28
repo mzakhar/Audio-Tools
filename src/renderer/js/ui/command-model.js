@@ -48,7 +48,7 @@ export function commandItems(opts = {}) {
     {
       id: 'new',
       label: 'New',
-      shortcut: 'Ctrl+N',
+      shortcut: 'Ctrl+Shift+N',
       group: 'project',
       enabled: true,
       visible: true,
@@ -56,7 +56,7 @@ export function commandItems(opts = {}) {
     {
       id: 'open',
       label: 'Open',
-      shortcut: 'Ctrl+O',
+      shortcut: 'Ctrl+Shift+O',
       group: 'project',
       enabled: true,
       visible: true,
@@ -122,7 +122,7 @@ export function commandItems(opts = {}) {
     {
       id: 'library',
       label: 'Library',
-      shortcut: 'Ctrl+L',
+      shortcut: 'Ctrl+Shift+L',
       group: 'setup',
       enabled: true,
       visible: true,
