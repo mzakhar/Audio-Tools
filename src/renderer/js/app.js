@@ -45,6 +45,7 @@ import { padBank } from './instruments/pad-map.js'
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
 const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
+const MIDI_DEVICE_KEY = 'synth_midi_input'
 function getLastDir(key)       { return localStorage.getItem(key) || undefined }
 function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 
@@ -143,9 +144,10 @@ function packState(instrument) {
   return window.electronFS?.readInstrumentSample ? 'ready' : 'unavailable'
 }
 
-function addMidiTrack(name = 'MIDI') {
+function addMidiTrack(name = 'MIDI', instrument) {
   ProjectStore.dispatch(AddTrack('midi', name))
   const track = ProjectStore.getState().tracks.at(-1)
+  if (track && instrument) ProjectStore.dispatch(SetTrackInstrument(track.id, instrument))
   if (track) _midiTargetTrackId = track.id
   syncMixerStrips(ProjectStore.getState())
   syncInstrumentUi()
@@ -157,9 +159,9 @@ function addMidiTrack(name = 'MIDI') {
  * no MIDI track provisions one — a person playing notes wants somewhere to
  * record them. One track, once; never one per note.
  */
-function ensureMidiTrack() {
+function ensureMidiTrack(instrument) {
   const plan = armPlan(ProjectStore.getState().tracks, _midiTargetTrackId)
-  if (plan.provision) return addMidiTrack()
+  if (plan.provision) return addMidiTrack('MIDI', instrument)
   _midiTargetTrackId = plan.trackId
   syncInstrumentUi()
   return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
@@ -374,6 +376,7 @@ function syncInstrumentUi() {
   _slotSig = sig
   renderInstrumentSlot()
   renderKnobPanel()
+  Sequencer.setPalette(armedInstrument().paletteKey || 'classic')
   _padGrid?.render()
 }
 
@@ -387,7 +390,7 @@ function renderInstrumentSlot() {
   nameEl.textContent = trackInstrumentLabel(instrument, _packCatalog)
   const channelEl = document.getElementById('slot-channel')
   if (channelEl) {
-    channelEl.textContent = !track ? 'no track'
+    channelEl.textContent = !track ? 'new track on first note'
       : track.midiChannel == null ? 'omni'
       : 'ch ' + (track.midiChannel + 1)
   }
@@ -429,7 +432,7 @@ function updateGlobalPlayAvailability() {
 
 function padNote(note, on) {
   ensureAudio()
-  const target = ensureMidiTrack()
+  const target = ensureMidiTrack({ type: 'palette', paletteKey: 'drum' })
   if (!target) return
   const channel = target.midiChannel ?? 0
   const detail = on
@@ -995,10 +998,8 @@ function initProjectCommands() {
   }
 
   COMMANDS['import-pack'] = (async () => {
-    if (!window.electronFS?.importSf2Pack) return
     try {
-      const pack = await window.electronFS.importSf2Pack()
-      if (pack) await refreshPackCatalog()
+      await importPack()
     } catch (error) {
       alert(`Could not import SoundFont:\n${error.message}`)
     }
@@ -1086,14 +1087,17 @@ function updateMidiDeviceSelect(inputs) {
   const sel = document.getElementById('midi-device-select')
   if (!sel) return
   const current = sel.value
+  const saved = localStorage.getItem(MIDI_DEVICE_KEY)
   while (sel.options.length > 1) sel.remove(1)
   inputs.forEach(({ id, name }) => {
     const opt = document.createElement('option')
     opt.value = id; opt.textContent = name
     sel.appendChild(opt)
   })
-  if (inputs.find(i => i.id === current)) sel.value = current
-  else if (inputs.length) sel.value = inputs[0].id
+  const preferred = [current, saved].find(id => inputs.some(input => input.id === id))
+    || inputs.find(input => !/clock|thru/i.test(input.name || ''))?.id
+    || inputs[0]?.id
+  sel.value = preferred || ''
   MidiController.selectInput(sel.value)
   syncMidiToken(sel)
 }
@@ -1136,6 +1140,7 @@ function initMidi() {
 
   deviceSel?.addEventListener('change', () => {
     MidiController.selectInput(deviceSel.value)
+    if (deviceSel.value) localStorage.setItem(MIDI_DEVICE_KEY, deviceSel.value)
     if (recBtn) recBtn.disabled = !deviceSel.value
     syncMidiToken(deviceSel)
   })
@@ -1402,13 +1407,13 @@ function initShortcuts() {
 
   // Project
   ShortcutManager.register({ key: 's', ctrl: true }, () => runCommand('save'))
-  ShortcutManager.register({ key: 'n', ctrl: true }, () => runCommand('new'))
-  ShortcutManager.register({ key: 'o', ctrl: true }, () => runCommand('open'))
+  ShortcutManager.register({ key: 'n', ctrl: true, shift: true }, () => runCommand('new'))
+  ShortcutManager.register({ key: 'o', ctrl: true, shift: true }, () => runCommand('open'))
 
   // Dialogs and drawers — every one is also in the ⋯ menu.
   ShortcutManager.register({ key: 'm', ctrl: true },              () => runCommand('midi-setup'))
   ShortcutManager.register({ key: 'b', ctrl: true },              () => runCommand('bounce'))
-  ShortcutManager.register({ key: 'l', ctrl: true },              () => runCommand('library'))
+  ShortcutManager.register({ key: 'l', ctrl: true, shift: true }, () => runCommand('library'))
   ShortcutManager.register({ key: 'i', ctrl: true },              () => runCommand('instrument-browser'))
   ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => { if (!modalOpen()) runCommand('mixer') })
 
@@ -1466,6 +1471,7 @@ function boot() {
   Keyboard.render('keyboard')
   initPads()
   Sequencer.init('seq-tracks')
+  Sequencer.setPalette(armedInstrument().paletteKey || 'classic')
   const tr909Container = document.getElementById('tr909-view')
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 
