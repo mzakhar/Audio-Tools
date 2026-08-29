@@ -226,14 +226,17 @@ repo deploys nothing.** A deploy is a change to the fleet file.
 
 1. Merge the Audio-Tools PR, then wait for `Publish container image` to pass for
    that merge commit.
-2. Resolve the digest that `:main` now points at:
+2. Resolve that commit's digest from its immutable `sha-<full-sha>` tag. Do
+   **not** read `:main` — it moves as soon as any later commit builds, so
+   reading it races every other merge:
 
    ```sh
+   SHA=$(git rev-parse HEAD)
    TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:mzakhar/audio-tools:pull&service=ghcr.io" \
      | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
    curl -sI -H "Authorization: Bearer $TOKEN" \
      -H "Accept: application/vnd.oci.image.index.v1+json" \
-     "https://ghcr.io/v2/mzakhar/audio-tools/manifests/main" | grep -i docker-content-digest
+     "https://ghcr.io/v2/mzakhar/audio-tools/manifests/sha-$SHA" | grep -i docker-content-digest
    ```
 
 3. In `E:\Projects\homelab-fleet`, branch, update
@@ -252,7 +255,18 @@ ssh mzakhar@themachine 'kubectl -n synth get deploy synth -o jsonpath="{.spec.te
 ssh mzakhar@themachine 'kubectl -n synth logs deploy/synth --tail=50'
 ```
 
-The strongest check is that the served bundle matches the one you built: compare
-the `assets/index-*.js` filename in `out/renderer/index.html` against the
-deployed page. Matching hashes prove the new image is live; a green Flux status
-alone does not.
+A green Flux status does not prove the new code is serving. Two checks that do:
+
+- The running image digest equals the `sha-<commit>` digest you pinned.
+- The live bundle contains something that commit introduced:
+
+  ```sh
+  ASSET=$(curl -s https://synth.zakharhome.org/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js')
+  curl -s "https://synth.zakharhome.org/$ASSET" | grep -c 'a string the change introduced'
+  ```
+
+**Do not** compare the deployed `index-*.js` hash against a local `npm run build`.
+Vite's chunk hash is content-derived, and a Windows checkout with CRLF line
+endings builds different bytes than the Linux `node:20-alpine` container, so the
+hashes legitimately differ for identical source — `npm ci` does not change this.
+That mismatch already caused one false "the deploy shipped stale code" alarm.
