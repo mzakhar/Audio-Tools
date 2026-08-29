@@ -32,10 +32,11 @@ import { applyTheme, savedTheme, THEMES } from './theme.js'
 import { commandItems } from './ui/command-model.js'
 import { openDialog, closeDialog } from './ui/dialog.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
-import { compilePackManifest, resolvePatch } from './instruments/pack-registry.js'
+import { compilePackManifest, resolvePatch, packPatchState } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
 import { createPackStore } from './instruments/pack-store-idb.js'
 import { importPackFromFile } from './instruments/pack-import-web.js'
+import { canBrowseFolders, createFolderLibrary } from './instruments/soundfont-folder-web.js'
 import { createAuditioner } from './instruments/auditioner.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
@@ -137,11 +138,12 @@ function instrumentDeps({ output, trackId } = {}) {
 
 const _auditioner = createAuditioner({ ensureAudio, buildDeps: () => instrumentDeps() })
 
-/** 'ready' | 'unavailable' | 'missing' for a pack instrument descriptor. */
+/** 'ready' | 'unavailable' | 'missing' for a pack instrument descriptor.
+ *  A pack is only playable from the origin it was installed to, so the sample
+ *  loader answers this — asking for Electron alone called every browser pack
+ *  unavailable. */
 function packState(instrument) {
-  const pack = packFor(instrument.packId, instrument.packVersion)
-  if (!pack?.byId?.get(instrument.patchId)) return 'missing'
-  return window.electronFS?.readInstrumentSample ? 'ready' : 'unavailable'
+  return packPatchState(packFor(instrument.packId, instrument.packVersion), instrument.patchId, sampleLoaderFor)
 }
 
 function addMidiTrack(name = 'MIDI', instrument) {
@@ -204,6 +206,34 @@ function sequencerPlayNote(note, velocity, time) {
     _seqPlayer = { sig, play, packInstruments }
   }
   _seqPlayer.play({ pitch: note, velocity }, time, time + SEQ_GATE)
+}
+
+/**
+ * One folder-library interface over both origins: Electron IPC, or the browser's
+ * directory handles. Null where neither exists (the LAN http route), and that is
+ * what hides the browse UI — see specs/soundfont-library.md phase 5.
+ */
+let _folderLibrary
+function folderLibrary() {
+  if (_folderLibrary !== undefined) return _folderLibrary
+  const fs = window.electronFS
+  // Electron folders are plain paths; the browser half already speaks { id, name, granted }.
+  const listed = paths => (paths || []).map(path => ({ id: path, name: path, granted: true }))
+  if (fs?.scanSoundFontFolders) {
+    _folderLibrary = {
+      listFolders: async () => listed(await fs.listSoundFontFolders()),
+      addFolder: async () => { const paths = await fs.addSoundFontFolder(); return paths ? listed(paths) : null },
+      removeFolder: async id => listed(await fs.removeSoundFontFolder(id)),
+      requestAccess: async () => true,
+      scan: async () => { const result = await fs.scanSoundFontFolders(); return { ...result, folders: listed(result.folders) } },
+      importPreset: (path, presetIndex) => fs.importSf2Preset(path, presetIndex)
+    }
+  } else if (canBrowseFolders()) {
+    try { _folderLibrary = createFolderLibrary({ packStore: webPackStore() }) } catch { _folderLibrary = null }
+  } else {
+    _folderLibrary = null
+  }
+  return _folderLibrary
 }
 
 /** One import entry point: native dialog under Electron, file input otherwise. */
@@ -1568,7 +1598,20 @@ function boot() {
       await webPackStore()?.removePack(pack.id, pack.version)
       await refreshPackCatalog()
     },
-    usage: () => webPackStore()?.usage() ?? null
+    usage: () => webPackStore()?.usage() ?? null,
+    folders: folderLibrary,
+    importPreset: async (bankPath, presetIndex, onProgress) => {
+      const pack = await folderLibrary()?.importPreset(bankPath, presetIndex, { onProgress })
+      if (pack) await refreshPackCatalog()
+      return pack
+    },
+    // Importing is the audition path, so the imported preset lands on the armed
+    // track straight away; a second activation only re-arms.
+    armPack: (packId, packVersion, patchId) => {
+      const instrument = { type: 'pack', packId, packVersion, patchId, programFollow: 'pinned' }
+      const track = ensureMidiTrack(instrument)
+      if (track) ProjectStore.dispatch(SetTrackInstrument(track.id, instrument))
+    }
   })
   document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
   document.addEventListener('open-library', () => _libraryDialog.open())

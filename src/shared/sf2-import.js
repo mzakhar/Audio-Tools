@@ -7,7 +7,7 @@
 // one malformed sample must never cost a bank its other five hundred presets.
 
 import { chunks, fail, name, text } from './riff.js'
-import { bankTitle, parseInfo } from './sf2-index.js'
+import { bankTitle, packIdForBank, parseInfo } from './sf2-index.js'
 
 // sfSampleType: 1 mono, 2 right, 4 left, 8 linked. 0x10 marks SF3 Ogg Vorbis
 // data; 0x8000 marks a sample that lives in E-mu ROM and not in this file.
@@ -201,7 +201,7 @@ export function importSf2(input, { id, version = '1.0.0', presets = null, licens
   const bankInfo = parseInfo(view, info)
   const sourceName = bankInfo.name || 'Imported SoundFont'
   // INAM collides across 101 of 500 real banks, so identity stays the filename.
-  const packId = idFor(id || sourceName, 'imported-sf2')
+  const packId = packIdForBank(id || sourceName)
   const title = bankTitle(bankInfo, id) || sourceName
   // Fallbacks for a program change that names an address this bank does not
   // have: without them an unmapped program resolves to nothing and plays

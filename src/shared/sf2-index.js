@@ -26,6 +26,16 @@ export function parseInfo(view, infoChunk) {
   return info
 }
 
+/**
+ * The pack id a bank file converts to. Identity comes from the filename because
+ * INAM collides across 101 of 500 real banks. Shared so the browse UI can tell
+ * whether a preset is already installed without re-deriving the importer's slug.
+ */
+export function packIdForBank(fileName, fallback = 'imported-sf2') {
+  const slug = String(fileName || '').replace(/\.sf[23]$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return slug || fallback
+}
+
 /** Display title only. Collision handling (appending IENG) belongs to the caller. */
 export function bankTitle(info, fileName = '') {
   const named = (info?.name || '').trim()

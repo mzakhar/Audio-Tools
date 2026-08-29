@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodePcmWav, importSf2 } from '../src/shared/sf2-import.js'
+import { packIdForBank } from '../src/shared/sf2-index.js'
 import { validatePackManifest } from '../src/renderer/js/instruments/pack-registry.js'
 import { parseSf2Message } from '../src/renderer/js/workers/sf2-worker.js'
 import { chunk, fourCC, list, multiPresetFixture, record, str, u16, u32 } from './helpers/sf2-bytes.js'
@@ -53,6 +54,14 @@ describe('SF2 importer', () => {
     expect(wav.getUint32(40, true)).toBe(8)
     expect(new Int16Array(result.samples[0].wav, 44)).toEqual(new Int16Array([100, -200, 300, -400]))
     expect(validatePackManifest(result.manifest)).toEqual({ ok: true, errors: [] })
+  })
+
+  it('derives its pack id through the shared slug the browse UI uses', () => {
+    // The Library rows mark a preset "imported" by re-deriving this id. If the
+    // two ever disagree, the marker silently lies about what is installed.
+    for (const fileName of ['ChoriumRevB.sf2', 'Merlin GM Gold Plus 3.81.sf2', "Lil'Sness (V1.00).SF3"]) {
+      expect(importSf2(fixture(), { id: fileName }).manifest.id).toBe(packIdForBank(fileName))
+    }
   })
 
   it('rejects truncated and structurally invalid files', () => {

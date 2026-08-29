@@ -125,3 +125,14 @@ function resolved(pack, address, patch, source) {
     },
   }
 }
+
+/**
+ * 'ready' | 'unavailable' | 'missing' for one patch of a compiled pack.
+ * Readability is a property of the pack's origin — a browser pack plays without
+ * Electron and an Electron pack does not play without it — so the caller hands
+ * over the loader lookup rather than a "have we got Electron" flag.
+ */
+export function packPatchState(pack, patchId, loaderFor) {
+  if (!pack?.byId?.get(patchId)) return 'missing'
+  return loaderFor(pack) ? 'ready' : 'unavailable'
+}

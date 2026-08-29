@@ -2131,6 +2131,22 @@ dialog.ib-dialog[open] { width: min(640px, 94vw); }
 .lib-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .lib-name { font-size: 11px; color: var(--text); }
 .lib-counts, .lib-licence { font-size: 9px; color: var(--text-dim); }
+.lib-browse { display: flex; flex-direction: column; gap: 6px; }
+.lib-folders { display: flex; flex-direction: column; gap: 4px; }
+.lib-search {
+  width: 100%;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+/* A preset row is a button so Enter activates it natively. */
+.lib-preset { text-align: left; cursor: pointer; font-family: inherit; }
+.lib-preset:hover { border-color: var(--accent); }
+.lib-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lib-state { grid-column: 2; font-family: var(--font-mono); font-size: 9px; color: var(--accent); }
 
 .ib-chip:focus-visible, .is-tab:focus-visible, .ib-fav:focus-visible,
 .track-instrument-chip:focus-visible, .track-instrument-gear:focus-visible {

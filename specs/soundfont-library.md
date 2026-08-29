@@ -17,8 +17,8 @@ owns only the "many banks on disk" problem.
 | 1 — Bank index (`sf2-index.js`) | done |
 | 2 — Per-preset import | done |
 | 3 — Folder library (Electron) | done |
-| 4 — Folder library (browser) | not started |
-| 5 — Browse and search UI | not started |
+| 4 — Folder library (browser) | done |
+| 5 — Browse and search UI | done |
 
 `specs/music-discovery-agent.md` adds an optional research UI above this local
 index. It must call the phase-5 preset handoff rather than create another
