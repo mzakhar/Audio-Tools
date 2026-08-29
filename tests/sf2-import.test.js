@@ -2,17 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { encodePcmWav, importSf2 } from '../src/shared/sf2-import.js'
 import { validatePackManifest } from '../src/renderer/js/instruments/pack-registry.js'
 import { parseSf2Message } from '../src/renderer/js/workers/sf2-worker.js'
-
-const fourCC = (value) => [...value].map(c => c.charCodeAt(0))
-const u16 = value => [value & 255, value >>> 8]
-const u32 = value => [value & 255, value >>> 8, value >>> 16, value >>> 24]
-const str = (value, length) => [...value.slice(0, length), ...'\0'.repeat(length)].slice(0, length).map(c => c.charCodeAt(0))
-const chunk = (id, data) => {
-  const flat = data.flat(Infinity)
-  return [...fourCC(id), ...u32(flat.length), ...flat, ...(flat.length & 1 ? [0] : [])]
-}
-const list = (type, children) => chunk('LIST', [...fourCC(type), ...children.flat(Infinity)])
-const record = (name, ...data) => [...str(name, 20), ...data.flat()]
+import { chunk, fourCC, list, multiPresetFixture, record, str, u16, u32 } from './helpers/sf2-bytes.js'
 
 function fixture({ envelope = false, sampleType = 1, raw = null } = {}) {
   const info = list('INFO', [chunk('ifil', [...u16(2), ...u16(1)]), chunk('INAM', str('Tiny Piano', 11))])
@@ -146,6 +136,44 @@ describe('SF2 importer', () => {
 
   it('reports a parse failure as an error message, never a throw', () => {
     expect(parseSf2Message({ id: 1, bytes: new Uint8Array([1, 2, 3]).buffer })).toMatchObject({ type: 'error', id: 1 })
+  })
+})
+
+describe('per-preset import', () => {
+  it('emits only the chosen preset, with zones identical to the whole-bank import', () => {
+    const whole = importSf2(multiPresetFixture(), { id: 'two-presets' })
+    const one = importSf2(multiPresetFixture(), { id: 'two-presets', presets: [1] })
+    expect(whole.manifest.patches).toHaveLength(2)
+    expect(one.manifest.patches).toHaveLength(1)
+    expect(one.samples).toHaveLength(1)
+    expect(one.samples.length).toBeLessThan(whole.samples.length)
+    // Strict subset: nothing is emitted that a whole-bank import would not emit.
+    const all = new Set(whole.samples.map(sample => sample.id))
+    expect(one.samples.every(sample => all.has(sample.id))).toBe(true)
+    expect(one.manifest.patches[0].zones).toEqual(whole.manifest.patches[1].zones)
+  })
+
+  it('keys patch ids on the phdr index so a partial import matches a whole one', () => {
+    const whole = importSf2(multiPresetFixture(), { id: 'two-presets' })
+    const one = importSf2(multiPresetFixture(), { id: 'two-presets', presets: [1] })
+    expect(whole.manifest.patches.map(patch => patch.id)).toEqual(['sf2-0', 'sf2-1'])
+    expect(one.manifest.patches[0].id).toBe('sf2-1')
+    expect(one.manifest.patches[0].address).toEqual(whole.manifest.patches[1].address)
+  })
+
+  it('fails rather than emitting an empty pack when no chosen preset is playable', () => {
+    expect(() => importSf2(multiPresetFixture(), { id: 'two-presets', presets: [9] })).toThrow('no playable preset zones')
+  })
+})
+
+describe('imported pack metadata', () => {
+  it('titles the pack through bankTitle and keeps the id from the filename', () => {
+    const bytes = multiPresetFixture({ info: { INAM: 'User Bank', IENG: 'Someone', ICOP: 'Public domain' } })
+    const pack = importSf2(bytes, { id: 'chorium-rev-b' })
+    // Generic INAM falls back to the filename, exactly as the index row does.
+    expect(pack.manifest.name).toBe('chorium-rev-b')
+    expect(pack.manifest.id).toBe('chorium-rev-b')
+    expect(pack.manifest.source.info).toMatchObject({ name: 'User Bank', author: 'Someone', copyright: 'Public domain', comment: '' })
   })
 })
 

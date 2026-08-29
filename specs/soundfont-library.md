@@ -14,8 +14,8 @@ owns only the "many banks on disk" problem.
 | Phase | State |
 |---|---|
 | 0 — Non-mono, ROM, SF3 samples | done |
-| 1 — Bank index (`sf2-index.js`) | not started |
-| 2 — Per-preset import | not started |
+| 1 — Bank index (`sf2-index.js`) | done |
+| 2 — Per-preset import | done |
 | 3 — Folder library (Electron) | not started |
 | 4 — Folder library (browser) | not started |
 | 5 — Browse and search UI | not started |
@@ -150,7 +150,7 @@ succeeded, 0 failed, 681,874 zones and 6,564 merged stereo samples.
 New pure module `src/shared/sf2-index.js`:
 
 ```js
-readBankIndex(view, { fileName }) → {
+readBankIndex(read, { fileName, byteLength }) → {   // read(offset, length) → Promise<Uint8Array>
   title,             // per the naming rules above
   info: { name, author, date, product, copyright, comment, software },
   presets: [{ bank, program, name }]   // from phdr, terminal record dropped

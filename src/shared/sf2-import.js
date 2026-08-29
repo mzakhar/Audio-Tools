@@ -6,6 +6,9 @@
 // A zone the reader cannot honour is dropped, not fatal: one ROM reference or
 // one malformed sample must never cost a bank its other five hundred presets.
 
+import { chunks, fail, name, text } from './riff.js'
+import { bankTitle, parseInfo } from './sf2-index.js'
+
 // sfSampleType: 1 mono, 2 right, 4 left, 8 linked. 0x10 marks SF3 Ogg Vorbis
 // data; 0x8000 marks a sample that lives in E-mu ROM and not in this file.
 const RIGHT_SAMPLE = 2, LEFT_SAMPLE = 4, OGG_SAMPLE = 0x10, ROM_SAMPLE = 0x8000
@@ -14,13 +17,6 @@ const RIGHT_SAMPLE = 2, LEFT_SAMPLE = 4, OGG_SAMPLE = 0x10, ROM_SAMPLE = 0x8000
 const MIN_RATE = 400, MAX_RATE = 192000
 const usableRate = rate => Number.isInteger(rate) && rate >= MIN_RATE && rate <= MAX_RATE
 
-const text = (view, off, len) => {
-  let value = ''
-  for (let i = 0; i < len; i++) value += String.fromCharCode(view.getUint8(off + i))
-  return value
-}
-const name = (view, off, len) => text(view, off, len).replace(/\0.*$/, '').trim()
-const fail = message => { throw new Error(`Invalid SF2: ${message}`) }
 const idFor = (value, fallback) => (value || fallback).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || fallback
 const signed16 = value => value > 0x7fff ? value - 0x10000 : value
 const timecentsToSeconds = value => {
@@ -38,18 +34,6 @@ function volumeEnvelope(g) {
     sustain: Math.pow(10, -Math.max(0, g.get(37) ?? 0) / 200),
     release: timecentsToSeconds(g.get(38) ?? 0xd120)
   }
-}
-
-function chunks(view, start, end) {
-  const found = []
-  for (let at = start; at < end;) {
-    if (at + 8 > end) fail('truncated chunk header')
-    const id = text(view, at, 4), size = view.getUint32(at + 4, true), data = at + 8, next = data + size + (size & 1)
-    if (next > end) fail(`truncated ${id} chunk`)
-    found.push({ id, data, size })
-    at = next
-  }
-  return found
 }
 
 function records(view, chunk, size, label) {
@@ -84,7 +68,7 @@ export function encodePcmWav(samples, sampleRate, channels = 1) {
 }
 
 /** Parse SF2 (16-bit PCM) or SF3 (Ogg Vorbis) sample data into one pack. */
-export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'LicenseRef-Imported', noticeFile: 'NOTICE.txt' } } = {}) {
+export function importSf2(input, { id, version = '1.0.0', presets = null, license = { spdx: 'LicenseRef-Imported', noticeFile: 'NOTICE.txt' } } = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.byteLength < 12) fail('file is too short')
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -95,7 +79,7 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
   const info = lists.find(l => l.type === 'INFO'), sdta = lists.find(l => l.type === 'sdta'), pdta = lists.find(l => l.type === 'pdta')
   if (!info || !sdta || !pdta) fail('missing INFO, sdta, or pdta list')
   const byId = list => Object.fromEntries(list.children.map(c => [c.id, c]))
-  const infoChunks = byId(info), dataChunks = byId(sdta), tables = byId(pdta)
+  const dataChunks = byId(sdta), tables = byId(pdta)
   const smpl = dataChunks.smpl
   if (!smpl) fail('missing smpl')
   const phdr = records(view, tables.phdr, 38, 'phdr'), pbag = records(view, tables.pbag, 4, 'pbag'), pgen = records(view, tables.pgen, 4, 'pgen')
@@ -161,8 +145,12 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
     return emitted.get(key)
   }
   const loopSeconds = (sample, frame) => ((sample.type & OGG_SAMPLE) ? frame : frame - sample.start) / sample.rate
+  // Per-preset import is just a skip: sample emission keys off the zones that
+  // were kept, so the emitted sample set shrinks with the preset list.
+  const wanted = Array.isArray(presets) ? new Set(presets) : null
   const patches = []
   for (let p = 0; p < phdr.length - 1; p++) {
+    if (wanted && !wanted.has(p)) continue
     const at = phdr[p], first = view.getUint16(at + 24, true), last = view.getUint16(phdr[p + 1] + 24, true)
     if (first > last || last > presetBags.length) fail('preset bag index out of range')
     const zones = [], seen = new Set()
@@ -210,8 +198,11 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
     }
   }
   if (!patches.length) fail('no playable preset zones')
-  const sourceName = infoChunks.INAM ? name(view, infoChunks.INAM.data, infoChunks.INAM.size) : 'Imported SoundFont'
+  const bankInfo = parseInfo(view, info)
+  const sourceName = bankInfo.name || 'Imported SoundFont'
+  // INAM collides across 101 of 500 real banks, so identity stays the filename.
   const packId = idFor(id || sourceName, 'imported-sf2')
+  const title = bankTitle(bankInfo, id) || sourceName
   // Fallbacks for a program change that names an address this bank does not
   // have: without them an unmapped program resolves to nothing and plays
   // silence. Prefer GM program 0, else simply the first patch of each kind.
@@ -219,5 +210,5 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
   const percussion = patches.filter(patch => patch.channelProfile === 'gm-percussion')
   const defaultPatchId = (melodic.find(patch => patch.address.program === 0 && patch.address.bankLsb === 0) || melodic[0] || patches[0]).id
   const defaultDrumPatchId = percussion[0]?.id
-  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, defaultPatchId, ...(defaultDrumPatchId ? { defaultDrumPatchId } : {}), patches }, samples: [...emitted.values()].map(({ id: sampleId, wav, ext }) => ({ id: sampleId, wav, ext })) }
+  return { manifest: { schemaVersion: 1, id: packId, version, name: title, license, source: { format: 'sf2', name: sourceName, info: bankInfo }, defaultPatchId, ...(defaultDrumPatchId ? { defaultDrumPatchId } : {}), patches }, samples: [...emitted.values()].map(({ id: sampleId, wav, ext }) => ({ id: sampleId, wav, ext })) }
 }
