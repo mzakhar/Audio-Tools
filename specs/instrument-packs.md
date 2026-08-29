@@ -37,6 +37,20 @@ Load large playable instrument libraries without making Synth startup, project l
   dialog in `specs/ui-shell.md` phase 3 — the deferred home-server catalog work
   below now has a place to land that is not a new top-level view.
 
+## Progress — 2026-08-29
+
+- The importer no longer rejects stereo (`sfSampleType` 2/4), ROM (`0x8000`) or
+  SF3 Ogg Vorbis (`0x10`) samples, and drops an unusable zone instead of failing
+  the whole bank. Roughly half of a real 495-bank collection was unimportable
+  before this; all 384 sub-80 MB banks in it now import.
+- Stereo pairs merge into one interleaved sample at import, because `zoneFor()`
+  plays only the first matching zone. Pack samples on disk are now `.wav` or
+  `.ogg`; the manifest names neither and the reader tries both.
+- Browsing a folder of banks rather than importing them one at a time is specced
+  separately in `specs/soundfont-library.md` — the collection that motivated it
+  is 46 GB, so whole-bank import is the wrong unit and per-preset import is the
+  plan. Read that file before touching import scale.
+
 ## Product decisions
 
 - MIDI channels remain zero-indexed internally. MIDI channel 10 is `channel: 9`.

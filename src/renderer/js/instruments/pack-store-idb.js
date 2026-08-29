@@ -15,12 +15,13 @@ const SAMPLES = 'samples'
 const packKey = (id, version) => `${id}@${version}`
 const sampleKey = (id, version, sampleId) => `${packKey(id, version)}/${sampleId}`
 
-const request = req => new Promise((resolve, reject) => {
+/** Shared with the folder library, which keeps its own database, not its own plumbing. */
+export const request = req => new Promise((resolve, reject) => {
   req.onsuccess = () => resolve(req.result)
   req.onerror = () => reject(req.error || new Error('IndexedDB request failed'))
 })
 
-const done = tx => new Promise((resolve, reject) => {
+export const done = tx => new Promise((resolve, reject) => {
   tx.oncomplete = () => resolve()
   tx.onabort = tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'))
 })
@@ -43,9 +44,30 @@ function sampleEntries(samples) {
   const raw = Array.isArray(samples) ? samples.map(item => [item.id, item.wav]) : Object.entries(samples || {})
   return raw.map(([id, value]) => {
     const buffer = toBuffer(value)
-    if (!id || !buffer) throw new TypeError(`Sample ${id} is not WAV bytes`)
+    if (!id || !buffer) throw new TypeError(`Sample ${id} is not audio bytes`)
     return [id, buffer]
   })
+}
+
+/**
+ * Append the patches of a per-preset import to a pack that already exists.
+ * Behaviourally identical to the Electron `mergeIntoPack`: patches merge by id,
+ * re-importing a preset changes nothing, and the defaults always name a patch
+ * that is present. Returns null when there is nothing to add.
+ */
+function mergeManifests(existing, incoming) {
+  const present = new Set(existing.patches.map(patch => patch.id))
+  const added = incoming.patches.filter(patch => !present.has(patch.id))
+  if (!added.length) return null
+  const merged = { ...existing, patches: [...existing.patches, ...added] }
+  const ids = new Set(merged.patches.map(patch => patch.id))
+  if (!ids.has(merged.defaultPatchId)) merged.defaultPatchId = merged.patches[0].id
+  if (!merged.defaultDrumPatchId || !ids.has(merged.defaultDrumPatchId)) {
+    const drum = incoming.defaultDrumPatchId
+    if (drum && ids.has(drum)) merged.defaultDrumPatchId = drum
+    else delete merged.defaultDrumPatchId
+  }
+  return merged
 }
 
 export function createPackStore({ idb = typeof indexedDB === 'undefined' ? null : indexedDB } = {}) {
@@ -77,6 +99,40 @@ export function createPackStore({ idb = typeof indexedDB === 'undefined' ? null 
         await done(tx)
       } catch (error) { throw storageError(error) }
       return { id: record.id, version: record.version, manifest, bytes }
+    },
+
+    /**
+     * Per-preset import: merge into the pack of the same id@version, or create
+     * it. One transaction covers samples and manifest, so unlike the Electron
+     * path there is no write order to get right — IndexedDB commits both or
+     * neither.
+     */
+    async appendPack(manifest, samples) {
+      const key = packKey(manifest.id, manifest.version)
+      const database = await db()
+      const existing = await request(database.transaction(PACKS, 'readonly').objectStore(PACKS).get(key))
+      if (!existing?.manifest) return this.savePack(manifest, samples)
+      const merged = mergeManifests(existing.manifest, manifest)
+      if (!merged) return { id: existing.id, version: existing.version, manifest: existing.manifest, bytes: existing.bytes || 0 }
+      const validation = validatePackManifest(merged)
+      if (!validation.ok) throw new Error(`Merged pack is invalid: ${validation.errors.join('; ')}`)
+      const entries = sampleEntries(samples)
+      const bytes = (existing.bytes || 0) + entries.reduce((total, [, buffer]) => total + bytesOf(buffer), 0)
+      const record = {
+        id: existing.id,
+        version: existing.version,
+        manifest: merged,
+        bytes,
+        sampleIds: [...new Set([...(existing.sampleIds || []), ...entries.map(([id]) => id)])]
+      }
+      try {
+        const tx = database.transaction([PACKS, SAMPLES], 'readwrite')
+        const store = tx.objectStore(SAMPLES)
+        tx.objectStore(PACKS).put(record, key)
+        for (const [id, buffer] of entries) store.put(buffer, sampleKey(manifest.id, manifest.version, id))
+        await done(tx)
+      } catch (error) { throw storageError(error) }
+      return { id: record.id, version: record.version, manifest: merged, bytes }
     },
 
     /** Only valid packs; corrupt storage stays invisible rather than crashing the catalog. */

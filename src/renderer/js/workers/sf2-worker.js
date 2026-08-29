@@ -3,16 +3,17 @@
  * Parses a SoundFont off the main thread. Dual-use: exports parseSf2Message()
  * for testing; wires self.onmessage when in worker context.
  *
- * Message in:  { type: 'parse', id: string, bytes: ArrayBuffer, name: string }
+ * Message in:  { type: 'parse', id: string, bytes: ArrayBuffer, name: string,
+ *                presets?: number[] }   // phdr indices; omitted means whole bank
  * Message out: { type: 'done', id, manifest, samples: [{ id, wav: ArrayBuffer }] }
  *              { type: 'error', id, message: string }
  */
 
 import { importSf2 } from '../../../shared/sf2-import.js'
 
-export function parseSf2Message({ id, bytes, name } = {}) {
+export function parseSf2Message({ id, bytes, name, presets = null } = {}) {
   try {
-    const { manifest, samples } = importSf2(new Uint8Array(bytes), { id: name })
+    const { manifest, samples } = importSf2(new Uint8Array(bytes), { id: name, presets })
     return { type: 'done', id, manifest, samples }
   } catch (error) {
     return { type: 'error', id, message: error?.message || 'Could not read SoundFont' }

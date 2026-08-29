@@ -22,7 +22,8 @@ export function pickSf2File() {
   })
 }
 
-function parseInWorker(bytes, name) {
+/** `presets` is a list of phdr indices; null converts the whole bank. */
+export function parseInWorker(bytes, name, presets = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/sf2-worker.js', import.meta.url), { type: 'module' })
     const close = () => worker.terminate()
@@ -32,7 +33,7 @@ function parseInWorker(bytes, name) {
       else reject(new Error(event.data?.message || 'Could not read SoundFont'))
     }
     worker.onerror = error => { close(); reject(new Error(error?.message || 'SoundFont parser failed to start')) }
-    worker.postMessage({ type: 'parse', id: 1, bytes, name }, [bytes])
+    worker.postMessage({ type: 'parse', id: 1, bytes, name, presets }, [bytes])
   })
 }
 
@@ -44,7 +45,7 @@ export async function importPackFromFile({ store, file, onProgress = () => {} } 
   if (!store) throw new Error('This browser cannot store instrument packs (IndexedDB is unavailable).')
   const chosen = file || await pickSf2File()
   if (!chosen) return null
-  if (!/\.sf[23]$/i.test(chosen.name)) throw new Error('Choose a .sf2 file')
+  if (!/\.sf[23]$/i.test(chosen.name)) throw new Error('Choose a .sf2 or .sf3 file')
   if (chosen.size > MAX_SF2_BYTES) {
     throw new Error(`That SoundFont is ${Math.round(chosen.size / 1048576)} MB. The browser build accepts up to ${MAX_SF2_BYTES / 1048576} MB — use the desktop app for larger files.`)
   }
