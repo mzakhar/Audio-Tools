@@ -20,6 +20,10 @@ owns only the "many banks on disk" problem.
 | 4 — Folder library (browser) | not started |
 | 5 — Browse and search UI | not started |
 
+`specs/music-discovery-agent.md` adds an optional research UI above this local
+index. It must call the phase-5 preset handoff rather than create another
+importer or read sample bytes for remote recommendations.
+
 ## The measurement this plan is built on
 
 Taken from `E:\Audio Projects\Packs\500-soundfonts-full-gm-sets` (the archive.org

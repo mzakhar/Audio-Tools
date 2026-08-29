@@ -4,7 +4,7 @@
 
 import { lstat, mkdir, open, readFile, readdir, writeFile } from 'fs/promises'
 import { basename, isAbsolute, join, relative, resolve } from 'path'
-import { readBankIndex } from '../shared/sf2-index.js'
+import { readBankIndex, withDisplayTitles } from '../shared/sf2-index.js'
 
 const FOLDERS_FILE = 'soundfont-folders.json'
 const INDEX_FILE = 'soundfont-index.json'
@@ -53,13 +53,6 @@ async function indexBank(path, folder, stat) {
  * 101 of 500 real banks share an INAM, so disambiguate the duplicates only:
  * append the author, else the filename. Non-colliding titles stay untouched.
  */
-function withDisplayTitles(banks) {
-  const counts = new Map()
-  for (const bank of banks) counts.set(bank.title, (counts.get(bank.title) || 0) + 1)
-  return banks.map(bank => counts.get(bank.title) > 1
-    ? { ...bank, title: `${bank.title} — ${bank.info?.author || bank.fileName}` }
-    : bank)
-}
 
 export async function listSoundFontFolders(userData) {
   const saved = await readState(statePath(userData, FOLDERS_FILE))

@@ -22,7 +22,8 @@ export function pickSf2File() {
   })
 }
 
-function parseInWorker(bytes, name) {
+/** `presets` is a list of phdr indices; null converts the whole bank. */
+export function parseInWorker(bytes, name, presets = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/sf2-worker.js', import.meta.url), { type: 'module' })
     const close = () => worker.terminate()
@@ -32,7 +33,7 @@ function parseInWorker(bytes, name) {
       else reject(new Error(event.data?.message || 'Could not read SoundFont'))
     }
     worker.onerror = error => { close(); reject(new Error(error?.message || 'SoundFont parser failed to start')) }
-    worker.postMessage({ type: 'parse', id: 1, bytes, name }, [bytes])
+    worker.postMessage({ type: 'parse', id: 1, bytes, name, presets }, [bytes])
   })
 }
 

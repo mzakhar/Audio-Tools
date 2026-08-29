@@ -35,6 +35,19 @@ export function bankTitle(info, fileName = '') {
 }
 
 /**
+ * Disambiguate only the titles that actually collide, with the author, else the
+ * filename. 30 of 500 real banks collide, so the other 470 keep a short name.
+ * Needs the whole folder, which is why bankTitle() cannot do it alone.
+ */
+export function withDisplayTitles(banks) {
+  const counts = new Map()
+  for (const bank of banks) counts.set(bank.title, (counts.get(bank.title) || 0) + 1)
+  return banks.map(bank => counts.get(bank.title) > 1
+    ? { ...bank, title: `${bank.title} — ${bank.info?.author || bank.fileName}` }
+    : bank)
+}
+
+/**
  * Bank metadata from positional reads.
  * @param {(offset: number, length: number) => Promise<Uint8Array>} read
  */
