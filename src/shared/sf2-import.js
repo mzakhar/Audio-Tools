@@ -150,5 +150,12 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
   if (!patches.length) fail('no playable PCM preset zones')
   const sourceName = infoChunks.INAM ? name(view, infoChunks.INAM.data, infoChunks.INAM.size) : 'Imported SoundFont'
   const packId = idFor(id || sourceName, 'imported-sf2')
-  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, patches }, samples: [...emitted.values()].map(({ id: sampleId, wav }) => ({ id: sampleId, wav })) }
+  // Fallbacks for a program change that names an address this bank does not
+  // have: without them an unmapped program resolves to nothing and plays
+  // silence. Prefer GM program 0, else simply the first patch of each kind.
+  const melodic = patches.filter(patch => patch.channelProfile !== 'gm-percussion')
+  const percussion = patches.filter(patch => patch.channelProfile === 'gm-percussion')
+  const defaultPatchId = (melodic.find(patch => patch.address.program === 0 && patch.address.bankLsb === 0) || melodic[0] || patches[0]).id
+  const defaultDrumPatchId = percussion[0]?.id
+  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, defaultPatchId, ...(defaultDrumPatchId ? { defaultDrumPatchId } : {}), patches }, samples: [...emitted.values()].map(({ id: sampleId, wav }) => ({ id: sampleId, wav })) }
 }
