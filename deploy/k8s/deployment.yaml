@@ -17,12 +17,12 @@ spec:
     spec:
       containers:
         - name: synth
-          # Pinned by digest so the manifest itself is the deploy trigger: with a
-          # mutable :main tag Flux re-applies an identical spec and nothing rolls,
-          # which is why deploys needed a manual rollout restart. Bump this digest
-          # to deploy; the tag is kept for readability only.
-          image: ghcr.io/mzakhar/audio-tools:main@sha256:631e5524d8a63695e35f27f8851574bec3ce557e28a61fea44c77a5eaca9f074
-          imagePullPolicy: IfNotPresent
+          # Floating tag on purpose. The deployed digest is pinned in the fleet
+          # repo, homelab-fleet clusters/themachine/apps/synth.yaml, as a
+          # Kustomization images override — that override wins over whatever is
+          # written here, so editing this line does not deploy anything.
+          image: ghcr.io/mzakhar/audio-tools:main
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
