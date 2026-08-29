@@ -43,7 +43,7 @@ function sampleEntries(samples) {
   const raw = Array.isArray(samples) ? samples.map(item => [item.id, item.wav]) : Object.entries(samples || {})
   return raw.map(([id, value]) => {
     const buffer = toBuffer(value)
-    if (!id || !buffer) throw new TypeError(`Sample ${id} is not WAV bytes`)
+    if (!id || !buffer) throw new TypeError(`Sample ${id} is not audio bytes`)
     return [id, buffer]
   })
 }

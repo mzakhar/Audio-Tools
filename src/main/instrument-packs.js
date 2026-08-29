@@ -18,8 +18,8 @@ function safePart(value, label) {
   return value
 }
 
-function sampleFile(sampleId) {
-  return `${safePart(sampleId, 'sample id')}.wav`
+function sampleFile(sampleId, ext = 'wav') {
+  return `${safePart(sampleId, 'sample id')}.${ext === 'ogg' ? 'ogg' : 'wav'}`
 }
 
 export function instrumentPackRoot(userData) {
@@ -31,6 +31,18 @@ async function regularFile(path) {
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('Instrument pack contains a non-file asset')
 }
 
+/** A pack's samples are WAV from SF2 and Ogg from SF3; the manifest names neither. */
+async function assetPath(dir, sampleId) {
+  for (const ext of ['wav', 'ogg']) {
+    const path = within(join(dir, 'audio', sampleFile(sampleId, ext)), dir)
+    try {
+      await regularFile(path)
+      return path
+    } catch { /* Try the other encoding before giving up. */ }
+  }
+  throw new Error(`Instrument pack is missing sample ${sampleId}`)
+}
+
 async function validatePackDirectory(root, dir, id, version) {
   within(dir, root)
   const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'))
@@ -38,7 +50,9 @@ async function validatePackDirectory(root, dir, id, version) {
   if (!validation.ok) throw new Error(`Invalid installed pack: ${validation.errors.join('; ')}`)
   if (manifest.id !== id || manifest.version !== version) throw new Error('Installed pack identity mismatch')
   await regularFile(within(join(dir, manifest.license.noticeFile), dir))
-  for (const patch of manifest.patches) for (const zone of patch.zones || []) await regularFile(within(join(dir, 'audio', sampleFile(zone.sampleId)), dir))
+  // Banks reuse one sample across many zones; stat each asset once, not once per zone.
+  const sampleIds = new Set(manifest.patches.flatMap(patch => (patch.zones || []).map(zone => zone.sampleId)))
+  for (const sampleId of sampleIds) await assetPath(dir, sampleId)
   return { id, version, manifest }
 }
 
@@ -65,17 +79,16 @@ export async function readInstrumentSample(userData, id, version, sampleId) {
   const root = instrumentPackRoot(userData)
   const pack = await validateInstalled(root, id, version)
   if (!pack.manifest.patches.some(patch => (patch.zones || []).some(zone => zone.sampleId === sampleId))) throw new Error('Sample is not declared by this pack')
-  const path = within(join(root, pack.id, pack.version, 'audio', sampleFile(sampleId)), root)
-  const bytes = await readFile(path)
+  const bytes = await readFile(await assetPath(within(join(root, pack.id, pack.version), root), sampleId))
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 }
 
 /** Convert one local PCM SF2 and atomically publish it under Electron userData. */
 export async function importSf2Pack(userData, sourcePath) {
-  if (typeof sourcePath !== 'string' || !sourcePath.toLowerCase().endsWith('.sf2')) throw new Error('Choose a .sf2 file')
+  if (typeof sourcePath !== 'string' || !/\.sf[23]$/i.test(sourcePath)) throw new Error('Choose a .sf2 or .sf3 file')
   const source = resolve(sourcePath), info = await lstat(source)
-  if (!info.isFile() || info.size > MAX_SF2_BYTES) throw new Error('Invalid or oversized .sf2 file')
-  const converted = importSf2(await readFile(source), { id: basename(source, '.sf2') })
+  if (!info.isFile() || info.size > MAX_SF2_BYTES) throw new Error('Invalid or oversized SoundFont file')
+  const converted = importSf2(await readFile(source), { id: basename(source).replace(/\.sf[23]$/i, '') })
   if (converted.samples.length > MAX_SAMPLES) throw new Error('SoundFont has too many samples')
   const sampleBytes = converted.samples.reduce((total, sample) => total + sample.wav.byteLength, 0)
   if (sampleBytes > MAX_PACK_BYTES) throw new Error('Converted pack is too large')

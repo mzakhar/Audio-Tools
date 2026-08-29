@@ -44,7 +44,7 @@ export async function importPackFromFile({ store, file, onProgress = () => {} } 
   if (!store) throw new Error('This browser cannot store instrument packs (IndexedDB is unavailable).')
   const chosen = file || await pickSf2File()
   if (!chosen) return null
-  if (!/\.sf[23]$/i.test(chosen.name)) throw new Error('Choose a .sf2 file')
+  if (!/\.sf[23]$/i.test(chosen.name)) throw new Error('Choose a .sf2 or .sf3 file')
   if (chosen.size > MAX_SF2_BYTES) {
     throw new Error(`That SoundFont is ${Math.round(chosen.size / 1048576)} MB. The browser build accepts up to ${MAX_SF2_BYTES / 1048576} MB — use the desktop app for larger files.`)
   }

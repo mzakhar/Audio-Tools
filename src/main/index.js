@@ -159,7 +159,7 @@ ipcMain.handle('instrumentPacks:list', () => listInstrumentPacks(app.getPath('us
 
 ipcMain.handle('instrumentPacks:importSf2', async () => {
   const { filePaths, canceled } = await dialog.showOpenDialog({
-    filters: [{ name: 'SoundFont 2', extensions: ['sf2'] }],
+    filters: [{ name: 'SoundFont', extensions: ['sf2', 'sf3'] }],
     properties: ['openFile'],
   })
   if (canceled || !filePaths[0]) return null

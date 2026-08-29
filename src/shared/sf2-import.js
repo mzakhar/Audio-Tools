@@ -1,6 +1,18 @@
 // Small, deliberately conservative SF2 reader for the import path. It reads
-// uncompressed 16-bit SoundFont 2 files and converts their playable zones to
-// Synth's manifest + ordinary WAV samples; it is not a SoundFont runtime.
+// 16-bit SoundFont 2 files and SF3 files (Ogg Vorbis sample data) and converts
+// their playable zones to Synth's manifest + ordinary audio samples; it is not
+// a SoundFont runtime.
+//
+// A zone the reader cannot honour is dropped, not fatal: one ROM reference or
+// one malformed sample must never cost a bank its other five hundred presets.
+
+// sfSampleType: 1 mono, 2 right, 4 left, 8 linked. 0x10 marks SF3 Ogg Vorbis
+// data; 0x8000 marks a sample that lives in E-mu ROM and not in this file.
+const RIGHT_SAMPLE = 2, LEFT_SAMPLE = 4, OGG_SAMPLE = 0x10, ROM_SAMPLE = 0x8000
+// The SF2 spec's own recommended floor. Real banks ship samples near 3 kHz, and
+// a rate outside this range costs that one sample, never the import.
+const MIN_RATE = 400, MAX_RATE = 192000
+const usableRate = rate => Number.isInteger(rate) && rate >= MIN_RATE && rate <= MAX_RATE
 
 const text = (view, off, len) => {
   let value = ''
@@ -59,18 +71,19 @@ function generators(view, list, start, end) {
 function range(value) { return value === undefined ? [0, 127] : [value & 255, value >>> 8] }
 function mergeRanges(a, b) { return [Math.max(a[0], b[0]), Math.min(a[1], b[1])] }
 
-export function encodePcmWav(samples, sampleRate) {
-  if (!(samples instanceof Int16Array) || !Number.isInteger(sampleRate) || sampleRate < 4000 || sampleRate > 192000) fail('invalid PCM sample')
+export function encodePcmWav(samples, sampleRate, channels = 1) {
+  if (!(samples instanceof Int16Array) || !usableRate(sampleRate)) fail('invalid PCM sample')
+  if (channels !== 1 && channels !== 2) fail('invalid channel count')
   const wav = new ArrayBuffer(44 + samples.byteLength), view = new DataView(wav)
   const write = (at, value) => { for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i)) }
   write(0, 'RIFF'); view.setUint32(4, 36 + samples.byteLength, true); write(8, 'WAVE'); write(12, 'fmt ')
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, samples.byteLength, true)
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true); view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2 * channels, true); view.setUint16(32, 2 * channels, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, samples.byteLength, true)
   new Int16Array(wav, 44).set(samples)
   return wav
 }
 
-/** Parse only standard PCM SF2 data. Throws before returning partial output. */
+/** Parse SF2 (16-bit PCM) or SF3 (Ogg Vorbis) sample data into one pack. */
 export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'LicenseRef-Imported', noticeFile: 'NOTICE.txt' } } = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.byteLength < 12) fail('file is too short')
@@ -84,33 +97,75 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
   const byId = list => Object.fromEntries(list.children.map(c => [c.id, c]))
   const infoChunks = byId(info), dataChunks = byId(sdta), tables = byId(pdta)
   const smpl = dataChunks.smpl
-  if (!smpl || smpl.size % 2) fail('missing or malformed smpl')
+  if (!smpl) fail('missing smpl')
   const phdr = records(view, tables.phdr, 38, 'phdr'), pbag = records(view, tables.pbag, 4, 'pbag'), pgen = records(view, tables.pgen, 4, 'pgen')
   const inst = records(view, tables.inst, 22, 'inst'), ibag = records(view, tables.ibag, 4, 'ibag'), igen = records(view, tables.igen, 4, 'igen'), shdr = records(view, tables.shdr, 46, 'shdr')
   if (phdr.length < 2 || inst.length < 2 || shdr.length < 2 || !pbag.length || !ibag.length) fail('missing terminal records')
   const presetBags = pbag.map(at => ({ gen: view.getUint16(at, true) })), instrumentBags = ibag.map(at => ({ gen: view.getUint16(at, true) }))
   if (presetBags.some(b => b.gen > pgen.length) || instrumentBags.some(b => b.gen > igen.length)) fail('bag generator index out of range')
   const samples = shdr.slice(0, -1).map(at => ({
-    name: name(view, at, 20), start: view.getUint32(at + 20, true), end: view.getUint32(at + 24, true), loopStart: view.getUint32(at + 28, true), loopEnd: view.getUint32(at + 32, true), rate: view.getUint32(at + 36, true), rootKey: view.getUint8(at + 40), pitchCorrection: view.getInt8(at + 41), type: view.getUint16(at + 44, true)
+    name: name(view, at, 20), start: view.getUint32(at + 20, true), end: view.getUint32(at + 24, true), loopStart: view.getUint32(at + 28, true), loopEnd: view.getUint32(at + 32, true), rate: view.getUint32(at + 36, true), rootKey: view.getUint8(at + 40), pitchCorrection: view.getInt8(at + 41), link: view.getUint16(at + 42, true), type: view.getUint16(at + 44, true)
   }))
-  const pcm = new Int16Array(bytes.buffer, bytes.byteOffset + smpl.data, smpl.size / 2)
+  // smpl carries 16-bit frames in SF2 and whole Ogg streams in SF3, so it is a
+  // frame array only when its byte length actually divides into frames.
+  const pcm = smpl.size % 2 ? null : new Int16Array(bytes.buffer, bytes.byteOffset + smpl.data, smpl.size / 2)
+  const kindOf = sample => sample.type & ~(ROM_SAMPLE | OGG_SAMPLE)
+  /** The sample record when its bytes are actually in this file, else null. */
+  const playable = index => {
+    const sample = samples[index]
+    if (!sample || !usableRate(sample.rate) || (sample.type & ROM_SAMPLE)) return null
+    // SF3 start/end are byte offsets of an Ogg stream inside smpl, and its loop
+    // points are frames relative to the sample rather than absolute.
+    if (sample.type & OGG_SAMPLE) return sample.start < sample.end && sample.end <= smpl.size ? sample : null
+    return pcm && sample.start < sample.end && sample.end <= pcm.length ? sample : null
+  }
+  // Junk loop points are common and cost the sample only its loop, not its zone.
+  const hasLoop = sample => sample.loopEnd > sample.loopStart &&
+    ((sample.type & OGG_SAMPLE) || (sample.loopStart >= sample.start && sample.loopEnd <= sample.end))
+  /** Index of the uncompressed other half of a stereo pair, else -1. */
+  const stereoPartner = index => {
+    const sample = samples[index], kind = kindOf(sample)
+    if ((kind !== LEFT_SAMPLE && kind !== RIGHT_SAMPLE) || (sample.type & OGG_SAMPLE) || sample.link === index) return -1
+    const other = playable(sample.link)
+    if (!other || kindOf(other) !== (kind === LEFT_SAMPLE ? RIGHT_SAMPLE : LEFT_SAMPLE)) return -1
+    // A mismatched rate is a broken link, not a pair; play that side as mono.
+    return other.rate === sample.rate ? sample.link : -1
+  }
+  const interleave = (sample, partner) => {
+    const mine = pcm.slice(sample.start, sample.end)
+    if (!partner) return mine
+    const theirs = pcm.slice(partner.start, partner.end)
+    const left = kindOf(sample) === LEFT_SAMPLE ? mine : theirs, right = left === mine ? theirs : mine
+    // Real pairs are sometimes a few frames apart; the short side pads with silence.
+    const frames = Math.max(left.length, right.length)
+    const out = new Int16Array(frames * 2)
+    for (let i = 0; i < frames; i++) { out[i * 2] = left[i] || 0; out[i * 2 + 1] = right[i] || 0 }
+    return out
+  }
   const emitted = new Map()
   const sampleFor = index => {
-    const sample = samples[index]
-    if (!sample) fail('sample index out of range')
-    if (sample.type !== 1) fail(`unsupported non-mono sample ${sample.name || index}`)
-    if (!sample.rate || sample.start >= sample.end || sample.end > pcm.length || sample.loopStart < sample.start || sample.loopEnd > sample.end || sample.loopStart > sample.loopEnd) fail(`invalid sample bounds ${sample.name || index}`)
-    if (!emitted.has(index)) {
-      const sampleId = `${idFor(sample.name, `sample-${index}`)}-${index}`
-      emitted.set(index, { id: sampleId, wav: encodePcmWav(pcm.slice(sample.start, sample.end), sample.rate), sample })
+    const sample = playable(index)
+    if (!sample) return null
+    // A stereo pair is stored as two mono runs, and zoneFor() plays only the
+    // first matching zone — interleaving here is what makes both sides audible.
+    const partner = stereoPartner(index)
+    const key = partner < 0 ? index : Math.min(index, partner)
+    if (!emitted.has(key)) {
+      const sampleId = `${idFor(sample.name, `sample-${key}`)}-${key}`
+      const compressed = sample.type & OGG_SAMPLE
+      const wav = compressed
+        ? bytes.slice(smpl.data + sample.start, smpl.data + sample.end).buffer
+        : encodePcmWav(interleave(sample, partner < 0 ? null : samples[partner]), sample.rate, partner < 0 ? 1 : 2)
+      emitted.set(key, { id: sampleId, wav, ext: compressed ? 'ogg' : 'wav', sample })
     }
-    return emitted.get(index)
+    return emitted.get(key)
   }
+  const loopSeconds = (sample, frame) => ((sample.type & OGG_SAMPLE) ? frame : frame - sample.start) / sample.rate
   const patches = []
   for (let p = 0; p < phdr.length - 1; p++) {
     const at = phdr[p], first = view.getUint16(at + 24, true), last = view.getUint16(phdr[p + 1] + 24, true)
     if (first > last || last > presetBags.length) fail('preset bag index out of range')
-    const zones = []
+    const zones = [], seen = new Set()
     let presetGlobal = new Map()
     for (let b = first; b < last; b++) {
       const next = b + 1 < presetBags.length ? presetBags[b + 1].gen : pgen.length
@@ -127,13 +182,20 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
         const g = new Map([...presetGlobal, ...pg, ...instrumentGlobal, ...ig])
         const key = mergeRanges(range(pg.get(43)), range(ig.get(43))), velocity = mergeRanges(range(pg.get(44)), range(ig.get(44)))
         if (key[0] > key[1] || velocity[0] > velocity[1]) continue
-        const found = sampleFor(sampleIndex), sample = found.sample
+        const found = sampleFor(sampleIndex)
+        if (!found) continue
+        const sample = found.sample
         const rootKey = g.get(58) ?? sample.rootKey
-        if (rootKey > 127) fail('invalid root key')
-        const loop = (g.get(54) ?? 0) & 1
+        if (rootKey > 127) continue
+        // Merging a stereo pair leaves its second zone pointing at the same
+        // interleaved sample over the same range, where it can never be picked.
+        const identity = `${found.id}:${key[0]}:${key[1]}:${velocity[0]}:${velocity[1]}`
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        const loop = ((g.get(54) ?? 0) & 1) && hasLoop(sample)
         const attenuation = g.get(48) ?? 0 // SoundFont centibels.
         const envelope = volumeEnvelope(g)
-        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: signed16(g.get(51) ?? 0) * 100 + signed16(g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(envelope ? { volumeEnvelope: envelope } : {}), ...(loop ? { loopStart: (sample.loopStart - sample.start) / sample.rate, loopEnd: (sample.loopEnd - sample.start) / sample.rate } : {}) })
+        zones.push({ keyLo: key[0], keyHi: key[1], velocityLo: velocity[0], velocityHi: velocity[1], rootKey, sampleId: found.id, tune: signed16(g.get(51) ?? 0) * 100 + signed16(g.get(52) ?? 0) + sample.pitchCorrection, gain: Math.pow(10, -attenuation / 200), ...(envelope ? { volumeEnvelope: envelope } : {}), ...(loop ? { loopStart: loopSeconds(sample, sample.loopStart), loopEnd: loopSeconds(sample, sample.loopEnd) } : {}) })
       }
     }
     if (zones.length) {
@@ -147,7 +209,7 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
       })
     }
   }
-  if (!patches.length) fail('no playable PCM preset zones')
+  if (!patches.length) fail('no playable preset zones')
   const sourceName = infoChunks.INAM ? name(view, infoChunks.INAM.data, infoChunks.INAM.size) : 'Imported SoundFont'
   const packId = idFor(id || sourceName, 'imported-sf2')
   // Fallbacks for a program change that names an address this bank does not
@@ -157,5 +219,5 @@ export function importSf2(input, { id, version = '1.0.0', license = { spdx: 'Lic
   const percussion = patches.filter(patch => patch.channelProfile === 'gm-percussion')
   const defaultPatchId = (melodic.find(patch => patch.address.program === 0 && patch.address.bankLsb === 0) || melodic[0] || patches[0]).id
   const defaultDrumPatchId = percussion[0]?.id
-  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, defaultPatchId, ...(defaultDrumPatchId ? { defaultDrumPatchId } : {}), patches }, samples: [...emitted.values()].map(({ id: sampleId, wav }) => ({ id: sampleId, wav })) }
+  return { manifest: { schemaVersion: 1, id: packId, version, name: sourceName, license, source: { format: 'sf2', name: sourceName }, defaultPatchId, ...(defaultDrumPatchId ? { defaultDrumPatchId } : {}), patches }, samples: [...emitted.values()].map(({ id: sampleId, wav, ext }) => ({ id: sampleId, wav, ext })) }
 }
