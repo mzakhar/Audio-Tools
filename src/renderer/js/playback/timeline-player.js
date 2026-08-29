@@ -26,7 +26,8 @@ export function rackInstrument(handle, moduleId) {
   }
 }
 
-function instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments }) {
+/** Shared by the timeline and the step sequencer: one scheduled note contract. */
+export function instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)

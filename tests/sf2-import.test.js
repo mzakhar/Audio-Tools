@@ -74,3 +74,15 @@ describe('SF2 importer', () => {
     expect(parseSf2Message({ id: 1, bytes: new Uint8Array([1, 2, 3]).buffer })).toMatchObject({ type: 'error', id: 1 })
   })
 })
+
+describe('imported packs carry GM fallbacks', () => {
+  it('names a default melodic patch and a default drum patch', () => {
+    const pack = importSf2(fixture(), { id: 'fallbacks' })
+    expect(pack.manifest.defaultPatchId).toBeTruthy()
+    expect(pack.manifest.patches.some(patch => patch.id === pack.manifest.defaultPatchId)).toBe(true)
+    // A bank with no percussion preset must not claim a drum default it lacks.
+    const percussion = pack.manifest.patches.filter(patch => patch.channelProfile === 'gm-percussion')
+    if (percussion.length) expect(pack.manifest.defaultDrumPatchId).toBe(percussion[0].id)
+    else expect(pack.manifest.defaultDrumPatchId).toBeUndefined()
+  })
+})

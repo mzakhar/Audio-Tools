@@ -1373,7 +1373,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 .seq-track-ctrl {
-  width: 112px;
+  width: 164px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1395,6 +1395,7 @@ input[type=range]::-moz-range-thumb {
 }
 .track-sel:focus { border-color: var(--accent); }
 
+.track-kind-sel { width: 46px; flex-shrink: 0; }
 .track-note-sel { flex: 1; min-width: 0; }
 
 .track-remove-btn {
@@ -1448,14 +1449,10 @@ input[type=range]::-moz-range-thumb {
   box-shadow: 0 0 10px #fff, 0 0 20px currentColor;
 }
 
-/* Per-palette active colors */
-[data-palette="classic"] .seq-cell.active { background: #00e5ff; border-color: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
-[data-palette="fm"]      .seq-cell.active { background: #aa44ff; border-color: #aa44ff; box-shadow: 0 0 6px #aa44ff; }
-[data-palette="pad"]     .seq-cell.active { background: #4488ff; border-color: #4488ff; box-shadow: 0 0 6px #4488ff; }
-[data-palette="drum"][data-drum="0"] .seq-cell.active { background: #ff4444; border-color: #ff4444; box-shadow: 0 0 6px #ff4444; }
-[data-palette="drum"][data-drum="1"] .seq-cell.active { background: #ffaa00; border-color: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
-[data-palette="drum"][data-drum="2"] .seq-cell.active { background: #39ff14; border-color: #39ff14; box-shadow: 0 0 6px #39ff14; }
-[data-palette="drum"][data-drum="3"] .seq-cell.active { background: #ff00aa; border-color: #ff00aa; box-shadow: 0 0 6px #ff00aa; }
+/* Per-row active colors — rows differ by kind, pad rows by bank */
+[data-kind="note"] .seq-cell.active           { background: #00e5ff; border-color: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
+[data-kind="pad"][data-bank="A"] .seq-cell.active { background: #ff4444; border-color: #ff4444; box-shadow: 0 0 6px #ff4444; }
+[data-kind="pad"][data-bank="B"] .seq-cell.active { background: #ffaa00; border-color: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
 
 /* ─── Sequencer Controls ───────────────────────────────────────────────────── */
 #sequencer-controls {

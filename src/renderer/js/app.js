@@ -19,7 +19,7 @@ import AudioStore from './audio-store.js'
 import { ArrangementView } from './components/arrangement-view.js'
 import { MixerStrip } from './components/mixer-strip.js'
 import MixerEngine from './audio/mixer-engine.js'
-import TimelinePlayer from './playback/timeline-player.js'
+import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
@@ -165,6 +165,45 @@ function ensureMidiTrack(instrument) {
   _midiTargetTrackId = plan.trackId
   syncInstrumentUi()
   return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
+}
+
+// ─── Step sequencer voice ──────────────────────────────────────────────────
+// Sequencer rows carry a note and nothing else; the sound is whatever the slot
+// holds. Scheduling stays in the timeline's note contract so the sequencer and
+// the arrangement cannot drift apart.
+const SEQ_GATE = 0.18        // seconds a step sounds for
+let _seqPlayer = null        // { sig, play, packInstruments }
+
+function disposeSeqPlayer() {
+  for (const instance of _seqPlayer?.packInstruments || []) {
+    try { instance.dispose() } catch (err) {}
+  }
+  _seqPlayer = null
+}
+
+function sequencerPlayNote(note, velocity, time) {
+  const ctx = AudioEngine.getContext()
+  if (!ctx) return
+  const track = armedTrack()
+  const instrument = armedInstrument()
+  const sig = JSON.stringify([instrument ?? null, track?.mixerChannelId ?? null])
+  if (_seqPlayer && _seqPlayer.sig !== sig) disposeSeqPlayer()
+  if (!_seqPlayer) {
+    const output = MixerEngine.getOutput(track?.mixerChannelId) || AudioEngine.getMasterInput()
+    const packInstruments = []
+    const play = scheduledInstrumentFor({ instrument }, {
+      palettes: Palettes,
+      ctx,
+      output,
+      rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
+      packFor,
+      sampleStoreFor,
+      packInstruments
+    })
+    if (!play) return
+    _seqPlayer = { sig, play, packInstruments }
+  }
+  _seqPlayer.play({ pitch: note, velocity }, time, time + SEQ_GATE)
 }
 
 /** One import entry point: native dialog under Electron, file input otherwise. */
@@ -376,7 +415,6 @@ function syncInstrumentUi() {
   _slotSig = sig
   renderInstrumentSlot()
   renderKnobPanel()
-  Sequencer.setPalette(armedInstrument().paletteKey || 'classic')
   _padGrid?.render()
 }
 
@@ -1470,8 +1508,7 @@ function boot() {
   applyTheme(savedTheme())
   Keyboard.render('keyboard')
   initPads()
-  Sequencer.init('seq-tracks')
-  Sequencer.setPalette(armedInstrument().paletteKey || 'classic')
+  Sequencer.init('seq-tracks', { playNote: sequencerPlayNote })
   const tr909Container = document.getElementById('tr909-view')
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
 

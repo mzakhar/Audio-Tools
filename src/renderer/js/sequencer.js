@@ -1,16 +1,20 @@
 /**
  * sequencer.js
- * 16-step sequencer. Rows follow armed palette; sound selection lives in
- * instrument slot, not a second per-row model.
+ * 16-step sequencer. Every row plays the armed instrument — a row only picks
+ * *which* note, either a GM percussion pad or a pitch. Sound making is
+ * injected (`playNote`), never built here: the scheduler hands out future
+ * AudioContext timestamps, so a DOM event would lose the timing.
  */
 import AudioEngine from './audio-engine.js'
-import Palettes from './palettes.js'
 import { LookaheadScheduler } from './rack/scheduler.js'
+import { padBank, padToNote, noteToPad } from './instruments/pad-map.js'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const STEPS = 16
+const VELOCITY = 0.85
 
-const DRUM_NAMES = ['Kick', 'Snare', 'Hi-Hat', 'Clap']
+// Every pad of both banks, flattened for the row picker.
+const PADS = ['A', 'B'].flatMap(bank => padBank(bank).map(pad => ({ ...pad, bank })))
 
 // Chromatic notes C2–C6
 const CHROMATIC_NOTES = []
@@ -27,30 +31,25 @@ for (let midi = 36; midi <= 84; midi++) {
 let bpm = 120
 let isPlaying = false
 let schedulerLoop = null
+let playNote = null
 
 let tracks = []
 let containerEl = null
 
-function makeTrack(paletteKey, drumIndex, note) {
-  return { paletteKey, drumIndex, note, steps: new Array(STEPS).fill(false) }
+function makeTrack(kind, note) {
+  return { kind, note, steps: new Array(STEPS).fill(false) }
 }
 
 function defaultTracks() {
-  return [
-    makeTrack('classic', 0, 36),
-    makeTrack('classic', 1, 38),
-    makeTrack('classic', 2, 42),
-    makeTrack('classic', 3, 46),
-    makeTrack('classic', -1, 60),
-    makeTrack('classic', -1, 64),
-    makeTrack('classic', -1, 67),
-    makeTrack('classic', -1, 72),
-  ]
+  // Bank A slots: 1 kick, 2 snare, 5 closed hat, 4 clap.
+  const pads = [1, 2, 5, 4].map(slot => makeTrack('pad', padToNote('A', slot)))
+  return pads.concat([60, 64, 67, 72].map(note => makeTrack('note', note)))
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────────
-function init(containerId) {
+function init(containerId, { playNote: player } = {}) {
   containerEl = document.getElementById(containerId)
+  playNote = player || null
   tracks = defaultTracks()
   renderAll()
 }
@@ -87,25 +86,36 @@ function renderTrackRow(trackIdx) {
   const track = tracks[trackIdx]
   const row = document.createElement('div')
   row.className = 'seq-track-row'
-  row.dataset.palette = track.paletteKey
-  if (track.paletteKey === 'drum') row.dataset.drum = track.drumIndex
+  row.dataset.kind = track.kind
+  if (track.kind === 'pad') row.dataset.bank = noteToPad(track.note)?.bank || 'A'
 
   // Controls
   const ctrl = document.createElement('div')
   ctrl.className = 'seq-track-ctrl'
 
-  // Note/drum select
+  // Row kind: pad (GM percussion) or pitched note
+  const kindSel = document.createElement('select')
+  kindSel.className = 'track-sel track-kind-sel'
+  ;[['pad', 'PAD'], ['note', 'NOTE']].forEach(([value, label]) => {
+    const o = document.createElement('option')
+    o.value = value
+    o.textContent = label
+    if (value === track.kind) o.selected = true
+    kindSel.appendChild(o)
+  })
+  kindSel.addEventListener('change', () => {
+    track.kind = kindSel.value
+    track.note = track.kind === 'pad' ? padToNote('A', 1) : 60
+    renderAll()
+  })
+
+  // Value picker for that kind
   const noteSel = document.createElement('select')
   noteSel.className = 'track-sel track-note-sel'
   buildNoteSelect(noteSel, track)
-
   noteSel.addEventListener('change', () => {
-    if (track.paletteKey === 'drum') {
-      track.drumIndex = parseInt(noteSel.value)
-      row.dataset.drum = track.drumIndex
-    } else {
-      track.note = parseInt(noteSel.value)
-    }
+    track.note = parseInt(noteSel.value)
+    if (track.kind === 'pad') row.dataset.bank = noteToPad(track.note)?.bank || 'A'
   })
 
   // Remove button
@@ -118,6 +128,7 @@ function renderTrackRow(trackIdx) {
     renderAll()
   })
 
+  ctrl.appendChild(kindSel)
   ctrl.appendChild(noteSel)
   ctrl.appendChild(removeBtn)
   row.appendChild(ctrl)
@@ -141,23 +152,16 @@ function renderTrackRow(trackIdx) {
 
 function buildNoteSelect(sel, track) {
   sel.innerHTML = ''
-  if (track.paletteKey === 'drum') {
-    DRUM_NAMES.forEach((name, i) => {
-      const o = document.createElement('option')
-      o.value = i
-      o.textContent = name
-      if (i === track.drumIndex) o.selected = true
-      sel.appendChild(o)
-    })
-  } else {
-    CHROMATIC_NOTES.forEach((midi, i) => {
-      const o = document.createElement('option')
-      o.value = midi
-      o.textContent = NOTE_NAMES_CHROM[i]
-      if (midi === track.note) o.selected = true
-      sel.appendChild(o)
-    })
-  }
+  const options = track.kind === 'pad'
+    ? PADS.map(pad => [pad.note, `${pad.bank}${pad.slot} ${pad.label}`])
+    : CHROMATIC_NOTES.map((midi, i) => [midi, NOTE_NAMES_CHROM[i]])
+  options.forEach(([value, label]) => {
+    const o = document.createElement('option')
+    o.value = value
+    o.textContent = label
+    if (value === track.note) o.selected = true
+    sel.appendChild(o)
+  })
 }
 
 // ─── Scheduler ──────────────────────────────────────────────────────────────
@@ -166,24 +170,9 @@ function stepDuration() {
 }
 
 function scheduleStep(step, time) {
-  const ctx = AudioEngine.getContext()
-  if (!ctx) return
-  const out = AudioEngine.getMasterInput()
-  const noteDur = stepDuration() * 0.85
-  const vel = 0.85
-
+  if (!playNote) return
   tracks.forEach(track => {
-    if (!track.steps[step]) return
-    const palette = Palettes[track.paletteKey]
-    if (!palette) return
-    if (track.paletteKey === 'drum') {
-      palette.createDrumVoice(ctx, out, track.drumIndex, vel, time)
-    } else {
-      const freq = 440 * Math.pow(2, (track.note - 69) / 12)
-      const voice = palette.createVoice(ctx, out, freq, vel, time)
-      const stopMs = (time - ctx.currentTime + noteDur) * 1000
-      setTimeout(() => { try { voice.stop(ctx.currentTime) } catch(e){} }, Math.max(0, stopMs))
-    }
+    if (track.steps[step]) playNote(track.note, VELOCITY, time)
   })
 }
 
@@ -222,20 +211,9 @@ function setBPM(v) {
   bpm = Math.max(40, Math.min(220, parseInt(v)))
 }
 
-function setPalette(paletteKey = 'classic') {
-  if (!Palettes[paletteKey] || tracks.every(track => track.paletteKey === paletteKey)) return
-  tracks.forEach((track, index) => {
-    track.paletteKey = paletteKey
-    track.drumIndex = paletteKey === 'drum' ? index % DRUM_NAMES.length : -1
-  })
-  renderAll()
-}
-
 function addTrack() {
-  const paletteKey = tracks[0]?.paletteKey || 'classic'
-  tracks.push(makeTrack(paletteKey, paletteKey === 'drum' ? tracks.length % DRUM_NAMES.length : -1, 60))
-  const idx = tracks.length - 1
-  renderTrackRow(idx)
+  tracks.push(makeTrack('note', 60))
+  renderTrackRow(tracks.length - 1)
 }
 
 // ─── Playhead ───────────────────────────────────────────────────────────────
@@ -284,8 +262,9 @@ function highlightStep(step) {
     .forEach(c => c.classList.add('playing'))
 }
 
-const Sequencer = { init, play, stop, clear, setBPM, setPalette, addTrack,
+const Sequencer = { init, play, stop, clear, setBPM, addTrack,
   getBPM() { return bpm },
-  isPlaying() { return isPlaying }
+  isPlaying() { return isPlaying },
+  getTracks() { return tracks }
 }
 export default Sequencer
