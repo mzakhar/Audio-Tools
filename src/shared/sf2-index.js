@@ -14,6 +14,12 @@ const EMPTY_INFO = { name: '', author: '', date: '', product: '', copyright: '',
 // filename; repairing such a string is not worth attempting.
 const GENERIC_NAME = /^(untitled|new soundfont|soundfont|gm|default|bank|user bank)$/i
 const FILE_IN_NAME = /\.sf[23]/i
+// SF2 stores names as bytes with no encoding field, so a CJK bank read as
+// Latin-1 comes out as mojibake ("¶Ì¸èÐÐ Grand GM Soundfont"). 13 of 500 real
+// banks are like this and none are UTF-8 — they are GBK/EUC-KR, which cannot be
+// decoded without an encoding table. A run of high characters is the tell; one
+// or two are an accented European name and stay. The filename is the better
+// title either way, which is what the fallback already does.
 
 /** INFO LIST chunk (the one holding the 'INFO' fourCC) to its text fields. */
 export function parseInfo(view, infoChunk) {
@@ -24,6 +30,15 @@ export function parseInfo(view, infoChunk) {
     if (field) info[field] = name(view, chunk.data, chunk.size)
   }
   return info
+}
+
+function undecodable(value) {
+  let run = 0
+  for (let i = 0; i < value.length; i++) {
+    run = value.charCodeAt(i) > 127 ? run + 1 : 0
+    if (run >= 3) return true
+  }
+  return false
 }
 
 /**
@@ -40,7 +55,7 @@ export function packIdForBank(fileName, fallback = 'imported-sf2') {
 export function bankTitle(info, fileName = '') {
   const named = (info?.name || '').trim()
   const base = String(fileName || '').replace(/\.sf[23]$/i, '').trim()
-  const usable = named && !GENERIC_NAME.test(named) && !FILE_IN_NAME.test(named)
+  const usable = named && !GENERIC_NAME.test(named) && !FILE_IN_NAME.test(named) && !undecodable(named)
   return usable ? named : (base || named)
 }
 
@@ -48,13 +63,24 @@ export function bankTitle(info, fileName = '') {
  * Disambiguate only the titles that actually collide, with the author, else the
  * filename. 30 of 500 real banks collide, so the other 470 keep a short name.
  * Needs the whole folder, which is why bankTitle() cannot do it alone.
+ *
+ * The author only helps when it is itself unique: the collection holds banks
+ * sharing a title AND an author, where suffixing the author would leave two
+ * rows a person still cannot tell apart.
  */
 export function withDisplayTitles(banks) {
-  const counts = new Map()
+  const counts = new Map(), authors = new Map()
+  const authorKey = bank => JSON.stringify([bank.title, bank.info?.author || ''])
   for (const bank of banks) counts.set(bank.title, (counts.get(bank.title) || 0) + 1)
-  return banks.map(bank => counts.get(bank.title) > 1
-    ? { ...bank, title: `${bank.title} — ${bank.info?.author || bank.fileName}` }
-    : bank)
+  for (const bank of banks) {
+    if (counts.get(bank.title) > 1) authors.set(authorKey(bank), (authors.get(authorKey(bank)) || 0) + 1)
+  }
+  return banks.map(bank => {
+    if (counts.get(bank.title) < 2) return bank
+    const author = bank.info?.author || ''
+    const suffix = author && authors.get(authorKey(bank)) === 1 ? author : bank.fileName
+    return { ...bank, title: `${bank.title} — ${suffix}` }
+  })
 }
 
 /**

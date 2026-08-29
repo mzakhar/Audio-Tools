@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bankTitle, parseInfo, readBankIndex } from '../src/shared/sf2-index.js'
+import { bankTitle, parseInfo, readBankIndex, withDisplayTitles } from '../src/shared/sf2-index.js'
 import { chunk, fourCC, list, multiPresetFixture, str, u16, u32 } from './helpers/sf2-bytes.js'
 
 /** A read() that answers from a buffer and records every range it was asked for. */
@@ -113,5 +113,48 @@ describe('readBankIndex', () => {
     const body = [...fourCC('sfbk'), ...list('INFO', [chunk('INAM', str('X', 2))]), ...list('sdta', [chunk('smpl', [0, 0])]), ...list('pdta', [chunk('pbag', [...u16(0), ...u16(0)])])]
     const bytes = new Uint8Array([...fourCC('RIFF'), ...u32(body.length), ...body])
     await expect(readBankIndex(reader(bytes).read, { byteLength: bytes.byteLength })).rejects.toThrow('malformed phdr')
+  })
+})
+
+describe('display titles across a folder', () => {
+  const bank = (title, author, fileName) => ({ title, fileName, info: { author } })
+
+  it('leaves a title alone unless it actually collides', () => {
+    const rows = withDisplayTitles([bank('Chorium', 'openwrld', 'a.sf2'), bank('Merlin', 'Tim', 'b.sf2')])
+    expect(rows.map(row => row.title)).toEqual(['Chorium', 'Merlin'])
+  })
+
+  it('disambiguates a collision with the author', () => {
+    const rows = withDisplayTitles([bank('User Bank', 'Ann', 'a.sf2'), bank('User Bank', 'Bob', 'b.sf2')])
+    expect(rows.map(row => row.title)).toEqual(['User Bank — Ann', 'User Bank — Bob'])
+  })
+
+  it('falls back to the filename when the author collides too', () => {
+    // Real case: two banks in the collection share a title AND an author, so
+    // suffixing the author leaves two rows a person cannot tell apart.
+    const rows = withDisplayTitles([bank('General Midi', 'Yanick', 'x.sf2'), bank('General Midi', 'Yanick', 'y.sf2')])
+    expect(rows.map(row => row.title)).toEqual(['General Midi — x.sf2', 'General Midi — y.sf2'])
+    expect(new Set(rows.map(row => row.title)).size).toBe(2)
+  })
+
+  it('uses the filename for a colliding bank that has no author', () => {
+    const rows = withDisplayTitles([bank('GM', '', 'a.sf2'), bank('GM', 'Bob', 'b.sf2')])
+    expect(rows.map(row => row.title)).toEqual(['GM — a.sf2', 'GM — Bob'])
+  })
+})
+
+describe('names that cannot be decoded', () => {
+  const high = codes => codes.map(code => String.fromCharCode(code)).join('')
+
+  it('prefers the filename over a name that is mojibake', () => {
+    // A GBK bank name read as Latin-1: a run of high bytes, no way to recover it
+    // without an encoding table. 13 of 500 real banks look like this.
+    const garbled = high([0xb6, 0xcc, 0xb8, 0xe8]) + ' Grand GM'
+    expect(bankTitle({ name: garbled }, 'DGX 62M GM.sf2')).toBe('DGX 62M GM')
+  })
+
+  it('keeps an accented European name', () => {
+    // One or two high characters are a real name, not a decoding failure.
+    expect(bankTitle({ name: 'Bj' + high([0xf6]) + 'rn Piano' }, 'x.sf2')).toBe('Bj' + high([0xf6]) + 'rn Piano')
   })
 })
