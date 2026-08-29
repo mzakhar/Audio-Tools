@@ -14,4 +14,9 @@ contextBridge.exposeInMainWorld('electronFS', {
   listInstrumentPacks: () => ipcRenderer.invoke('instrumentPacks:list'),
   importSf2Pack: () => ipcRenderer.invoke('instrumentPacks:importSf2'),
   readInstrumentSample: (packId, version, sampleId) => ipcRenderer.invoke('instrumentPacks:readSample', packId, version, sampleId),
+  addSoundFontFolder: () => ipcRenderer.invoke('instrumentPacks:addFolder'),
+  listSoundFontFolders: () => ipcRenderer.invoke('instrumentPacks:listFolders'),
+  removeSoundFontFolder: (folderPath) => ipcRenderer.invoke('instrumentPacks:removeFolder', folderPath),
+  scanSoundFontFolders: () => ipcRenderer.invoke('instrumentPacks:scanFolders'),
+  importSf2Preset: (sourcePath, presetIndex) => ipcRenderer.invoke('instrumentPacks:importPreset', sourcePath, presetIndex),
 })

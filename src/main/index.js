@@ -2,7 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, resolve, dirname, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { importSf2Pack, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
+import { importSf2Pack, importSf2Preset, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
+import { addSoundFontFolder, listSoundFontFolders, removeSoundFontFolder, scanSoundFontFolders } from './soundfont-folders.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -168,4 +169,24 @@ ipcMain.handle('instrumentPacks:importSf2', async () => {
 
 ipcMain.handle('instrumentPacks:readSample', (_event, packId, version, sampleId) => {
   return readInstrumentSample(app.getPath('userData'), packId, version, sampleId)
+})
+
+// Registered bank folders are read-only inputs picked by the user, so they sit
+// outside the pack root by design; everything written still goes under userData.
+ipcMain.handle('instrumentPacks:addFolder', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  if (canceled || !filePaths[0]) return null
+  return addSoundFontFolder(app.getPath('userData'), filePaths[0])
+})
+
+ipcMain.handle('instrumentPacks:listFolders', () => listSoundFontFolders(app.getPath('userData')))
+
+ipcMain.handle('instrumentPacks:removeFolder', (_event, folderPath) => {
+  return removeSoundFontFolder(app.getPath('userData'), folderPath)
+})
+
+ipcMain.handle('instrumentPacks:scanFolders', () => scanSoundFontFolders(app.getPath('userData')))
+
+ipcMain.handle('instrumentPacks:importPreset', (_event, sourcePath, presetIndex) => {
+  return importSf2Preset(app.getPath('userData'), sourcePath, presetIndex)
 })

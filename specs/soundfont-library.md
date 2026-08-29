@@ -16,7 +16,7 @@ owns only the "many banks on disk" problem.
 | 0 — Non-mono, ROM, SF3 samples | done |
 | 1 — Bank index (`sf2-index.js`) | done |
 | 2 — Per-preset import | done |
-| 3 — Folder library (Electron) | not started |
+| 3 — Folder library (Electron) | done |
 | 4 — Folder library (browser) | not started |
 | 5 — Browse and search UI | not started |
 
@@ -186,7 +186,7 @@ problem when taken whole.
 samples the whole-bank import emits, and its zones are byte-identical to the
 same preset's zones in the whole-bank manifest.
 
-## 3 — Folder library (Electron)
+## 3 — Folder library (Electron) — done
 
 - Renderer IPC: `packs:addFolder(path)`, `packs:listFolders()`,
   `packs:removeFolder(path)`, `packs:importPreset(path, presetIndex)`.
