@@ -5,6 +5,7 @@ import { packPatchState } from '../src/renderer/js/instruments/pack-registry.js'
 
 const MARKUP = `
 <dialog id="${LIBRARY_DIALOG_ID}">
+  <div class="dlg-body">
   <button id="lib-import-btn"></button>
   <div id="lib-list"></div>
   <div id="lib-browse" hidden>
@@ -13,6 +14,7 @@ const MARKUP = `
     <div id="lib-folders"></div>
     <input type="search" id="lib-search">
     <div id="lib-results"></div>
+  </div>
   </div>
 </dialog>`
 
@@ -29,7 +31,7 @@ function manyBanks(count = 500) {
     bank(`bank${index}.sf2`, `Bank ${index}`, [preset('Acoustic Grand Piano', 0), preset('Warm Pad', 89), preset('Slap Bass', 36)]))
 }
 
-function setup({ banks = [], packs = [], folders = [{ id: 'folder', name: 'Packs', granted: true }], library = true } = {}) {
+function setup({ banks = [], packs = [], folders = [{ id: 'folder', name: 'Packs', granted: true }], library = true, discovery = null } = {}) {
   document.body.innerHTML = MARKUP
   const el = document.getElementById(LIBRARY_DIALOG_ID)
   el.showModal = () => { el.open = true }
@@ -49,7 +51,8 @@ function setup({ banks = [], packs = [], folders = [{ id: 'folder', name: 'Packs
     importPack: vi.fn(),
     folders: () => (library ? lib : null),
     importPreset: vi.fn((path, presetIndex) => lib.importPreset(path, presetIndex)),
-    armPack: vi.fn()
+    armPack: vi.fn(),
+    discovery: () => discovery
   }
   const dialog = new LibraryDialog(deps)
   return { dialog, deps, lib, el }
@@ -162,6 +165,98 @@ describe('LibraryDialog browse', () => {
     expect(results().length).toBe(3)      // not yet filtered
     await new Promise(done => setTimeout(done, 200))
     expect(results().length).toBe(1)
+  })
+})
+
+describe('LibraryDialog discovery', () => {
+  const candidate = { assetName: 'Soul Vocal', sourceUrl: 'https://freesound.org/soul', creator: 'Ada', sourceId: 'freesound', evidence: [{ url: 'https://freesound.org/soul' }], fitNote: 'Fits hard house.' }
+
+  it('does not render discovery controls without a trusted API', () => {
+    setup()
+    expect(document.getElementById('lib-discovery')).toBeNull()
+  })
+
+  it('keeps local setup available without configured credentials', async () => {
+    setup({ discovery: { configure: vi.fn(), available: async () => false } })
+    await Promise.resolve()
+    expect(document.getElementById('lib-discovery')).not.toBeNull()
+    expect(document.getElementById('discovery-run').disabled).toBe(true)
+  })
+
+  it('sends transient connection settings and clears keys immediately', async () => {
+    let resolve
+    const configure = vi.fn(() => new Promise(done => { resolve = done }))
+    setup({ discovery: { configure, available: () => true, onEvent: () => {}, run: async () => 'run-1' } })
+    document.getElementById('discovery-freesound-key').value = 'freesound-secret'
+    document.getElementById('discovery-openai-key').value = 'openai-secret'
+    document.getElementById('discovery-openai-model').value = 'test-model'
+    document.getElementById('discovery-configure').click()
+    expect(configure).toHaveBeenCalledWith({ freesoundToken: 'freesound-secret', openaiKey: 'openai-secret', model: 'test-model' })
+    expect(document.getElementById('discovery-freesound-key').value).toBe('')
+    expect(document.getElementById('discovery-openai-key').value).toBe('')
+    resolve()
+    await Promise.resolve()
+    expect(document.getElementById('discovery-status').textContent).toBe('Keys stored locally. Search verifies Freesound.')
+  })
+
+  it('connects with Ctrl+Enter from a setup input', async () => {
+    const configure = vi.fn(async () => {})
+    setup({ discovery: { configure, available: () => true, onEvent: () => {}, run: async () => 'run-1' } })
+    const input = document.getElementById('discovery-freesound-key')
+    input.value = 'freesound-secret'
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
+    await Promise.resolve()
+    expect(configure).toHaveBeenCalledWith(expect.objectContaining({ freesoundToken: 'freesound-secret' }))
+    expect(document.getElementById('discovery-configure').getAttribute('aria-keyshortcuts')).toContain('Control+Enter')
+  })
+
+  it('renders source-linked candidates and saves only after a click', async () => {
+    let emit
+    const discovery = {
+      configure: vi.fn(), available: vi.fn(async () => true), run: vi.fn(async () => 'run-1'),
+      onEvent: vi.fn(listener => { emit = listener }), open: vi.fn(), saveLead: vi.fn()
+    }
+    const { dialog } = setup({ discovery })
+    document.getElementById('discovery-query').value = 'soulful hard house'
+    document.getElementById('discovery-run').click()
+    await Promise.resolve()
+    expect(discovery.run).toHaveBeenCalledWith(expect.objectContaining({ text: 'soulful hard house' }))
+    emit({ runId: 'run-1', type: 'candidate', candidate })
+    expect(document.querySelector('#discovery-results .lib-name').textContent).toBe('Soul Vocal')
+    document.querySelector('#discovery-results button').click()
+    expect(discovery.open).toHaveBeenCalledWith(candidate)
+    document.querySelectorAll('#discovery-results button')[1].click()
+    await vi.waitFor(() => expect(discovery.saveLead).toHaveBeenCalledWith(expect.objectContaining({ candidate })))
+    await vi.waitFor(() => expect(document.getElementById('discovery-leads').textContent).toContain('1 saved lead'))
+    dialog.cancelDiscovery()
+  })
+
+  it('does not leave FIND active when final arrives before run resolves', async () => {
+    let emit
+    let resolveRun
+    const run = vi.fn(() => new Promise(resolve => { resolveRun = resolve }))
+    setup({ discovery: {
+      configure: vi.fn(), available: () => true, run,
+      onEvent: listener => { emit = listener }
+    } })
+    document.getElementById('discovery-run').click()
+    emit({ type: 'final', candidates: [candidate] })
+    resolveRun('run-1')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(document.getElementById('discovery-run').disabled).toBe(false)
+    expect(document.getElementById('discovery-status').textContent).toBe('1 sound found.')
+  })
+
+  it('cancels an active investigation', () => {
+    const cancel = vi.fn()
+    const { dialog } = setup({ discovery: { configure: vi.fn(), available: () => true, onEvent: () => {}, run: async () => 'run-1', cancel } })
+    document.getElementById('discovery-run').click()
+    return Promise.resolve().then(() => {
+      dialog.cancelDiscovery()
+      expect(cancel).toHaveBeenCalledWith('run-1')
+    expect(document.getElementById('discovery-status').textContent).toBe('Search cancelled.')
+    })
   })
 })
 

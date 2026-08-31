@@ -1,12 +1,40 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } from 'electron'
 import { join, resolve, dirname, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { importSf2Pack, importSf2Preset, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
 import { addSoundFontFolder, listSoundFontFolders, removeSoundFontFolder, scanSoundFontFolders } from './soundfont-folders.js'
+import { loadConnections, saveConnections } from './music-discovery/connections.js'
+import { createDiscoveryService } from './music-discovery/index.js'
+import { listLeads, saveLead } from './music-discovery/leads.js'
+import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
+import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
+let discoveryService = null
+
+async function discovery() {
+  if (!discoveryService) discoveryService = createDiscoveryService({
+    connections: await loadConnections(app.getPath('userData'), safeStorage),
+    freesound: await loadFreesound(app.getPath('userData'), safeStorage),
+  })
+  return discoveryService
+}
+
+async function configureDiscovery({ freesoundToken, openaiKey, model }) {
+  if (typeof freesoundToken !== 'string' || typeof openaiKey !== 'string') throw new Error('Both API keys are required')
+  const userData = app.getPath('userData')
+  await Promise.all([
+    saveFreesound(userData, freesoundToken, safeStorage),
+    saveConnections(userData, [{
+      id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com',
+      model: typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.6-luna', auth: openaiKey,
+      capabilities: { structuredOutput: true }
+    }], safeStorage)
+  ])
+  discoveryService = null
+}
 
 // Auto-updater — only active in packaged builds (not dev)
 function getAutoUpdater() {
@@ -190,3 +218,26 @@ ipcMain.handle('instrumentPacks:scanFolders', () => scanSoundFontFolders(app.get
 ipcMain.handle('instrumentPacks:importPreset', (_event, sourcePath, presetIndex) => {
   return importSf2Preset(app.getPath('userData'), sourcePath, presetIndex)
 })
+
+ipcMain.handle('musicDiscovery:available', async () => (await discovery()).available())
+
+ipcMain.handle('musicDiscovery:configure', async (_event, config) => {
+  await configureDiscovery(config || {})
+  return (await discovery()).available()
+})
+
+ipcMain.handle('musicDiscovery:run', async (event, request) => {
+  const service = await discovery()
+  return service.start(request || {}, payload => event.sender.send('musicDiscovery:event', payload))
+})
+
+ipcMain.handle('musicDiscovery:cancel', async (_event, runId) => (await discovery()).cancel(runId))
+
+ipcMain.handle('musicDiscovery:open', async (_event, candidate) => {
+  const url = safeOpenUrl(candidate)
+  if (!url) throw new Error('Unsafe discovery link')
+  await shell.openExternal(url)
+})
+
+ipcMain.handle('musicDiscovery:listLeads', () => listLeads(app.getPath('userData')))
+ipcMain.handle('musicDiscovery:saveLead', (_event, lead) => saveLead(app.getPath('userData'), lead || {}))

@@ -63,6 +63,11 @@ export class LibraryDialog {
    *          folders() → folder library or null, importPreset(path, presetIndex, onProgress), armPack(packId, packVersion, patchId) } */
   constructor(deps) {
     this.deps = deps
+    this.discovery = deps.discovery?.() || null
+    this.discoveryRun = null
+    this.discoveryBrief = null
+    this.candidates = []
+    this.savedLeads = []
     this.status = ''
     this.usage = null
     this.rows = []          // every indexed preset, in phdr order per bank
@@ -75,6 +80,7 @@ export class LibraryDialog {
     this.listEl = this.el.querySelector('#lib-list')
     this.importBtn = this.el.querySelector('#lib-import-btn')
     this.importBtn.addEventListener('click', () => this.runImport())
+    this.setupDiscovery()
     this.browseEl = this.el.querySelector('#lib-browse')
     if (!this.browseEl) return
     // Neither Electron nor showDirectoryPicker (the LAN http route): there is
@@ -97,6 +103,195 @@ export class LibraryDialog {
 
   library() {
     return this.deps.folders?.() || null
+  }
+
+  /** Discovery is absent until a trusted host API exists. No dead controls. */
+  setupDiscovery() {
+    if (!this.discovery?.configure) return
+    const body = this.el.querySelector('.dlg-body')
+    if (!body) return
+    const section = document.createElement('section')
+    section.className = 'lib-browse'
+    section.id = 'lib-discovery'
+    section.innerHTML = `<h3>FIND SOUNDS</h3>
+      <div class="discovery-config"><label>Freesound key <input id="discovery-freesound-key" type="password" autocomplete="off"></label><label>OpenAI key (ranking later) <input id="discovery-openai-key" type="password" autocomplete="off"></label><label>Model <input id="discovery-openai-model" type="text" value="gpt-5.6-luna"></label><button id="discovery-configure" class="midi-btn" type="button" title="Save keys (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">SAVE KEYS <span aria-hidden="true">CTRL+↵</span></button></div>
+      <div class="dlg-row"><label>Role <select id="discovery-role"><option value="sample-loop">Sample / loop</option><option value="drum-pack">Drum pack</option><option value="playable-preset">Playable preset</option></select></label>
+      <label>BPM <input id="discovery-tempo-min" type="number" min="20" max="300" placeholder="min" aria-label="Minimum tempo">–<input id="discovery-tempo-max" type="number" min="20" max="300" placeholder="max" aria-label="Maximum tempo"></label></div>
+      <div class="dlg-row"><label><input id="discovery-loop" type="checkbox"> Loop</label><label><input id="discovery-vocals" type="checkbox"> Vocals okay</label><label>Budget <select id="discovery-budget"><option value="either">Either</option><option value="free">Free</option><option value="paid">Paid</option></select></label><label><input id="discovery-local" type="checkbox" checked> Local</label><label><input id="discovery-web" type="checkbox" checked> Web</label></div>
+      <label class="sr-only" for="discovery-query">What are you looking for?</label><input id="discovery-query" class="lib-search" type="search" placeholder="Soulful hard-house base" aria-label="Sound brief">
+      <div class="dlg-row"><button id="discovery-run" class="midi-btn" type="button">FIND</button><button id="discovery-cancel" class="midi-btn" type="button" hidden>CANCEL</button></div>
+      <p id="discovery-status" class="instrument-empty" role="status"></p><div id="discovery-results" class="lib-list"></div><div id="discovery-leads" class="lib-list"></div>`
+    body.insertBefore(section, this.browseEl || null)
+    this.discoveryEl = section
+    this.discoveryStatusEl = section.querySelector('#discovery-status')
+    this.discoveryResultsEl = section.querySelector('#discovery-results')
+    this.discoveryLeadsEl = section.querySelector('#discovery-leads')
+    this.discoveryRunBtn = section.querySelector('#discovery-run')
+    this.discoveryCancelBtn = section.querySelector('#discovery-cancel')
+    this.discoveryConfigureBtn = section.querySelector('#discovery-configure')
+    this.discoveryRunBtn.addEventListener('click', () => this.runDiscovery())
+    this.discoveryCancelBtn.addEventListener('click', () => this.cancelDiscovery())
+    this.discoveryConfigureBtn.addEventListener('click', () => this.configureDiscovery())
+    section.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault()
+        this.configureDiscovery()
+      }
+    })
+    Promise.resolve(this.discovery.available?.()).then(available => {
+      if (available) this.refreshLeads()
+      else { this.discoveryRunBtn.disabled = true; this.setDiscoveryStatus('Connect Freesound and OpenAI to search.') }
+    }).catch(() => { this.discoveryRunBtn.disabled = true })
+  }
+
+  async configureDiscovery() {
+    if (!this.discoveryEl) return
+    const value = id => this.discoveryEl.querySelector(id).value
+    const config = {
+      freesoundToken: value('#discovery-freesound-key'),
+      openaiKey: value('#discovery-openai-key'),
+      model: value('#discovery-openai-model')
+    }
+    this.discoveryEl.querySelector('#discovery-freesound-key').value = ''
+    this.discoveryEl.querySelector('#discovery-openai-key').value = ''
+    this.discoveryConfigureBtn.disabled = true
+    try {
+      await this.discovery.configure(config)
+      this.setDiscoveryStatus('Keys stored locally. Search verifies Freesound.')
+      this.discoveryRunBtn.disabled = false
+      this.refreshLeads()
+    } catch {
+      this.setDiscoveryStatus('Connection failed.')
+    } finally {
+      this.discoveryConfigureBtn.disabled = false
+    }
+  }
+
+  discoveryInput() {
+    const value = id => this.discoveryEl.querySelector(id).value
+    const checked = id => this.discoveryEl.querySelector(id).checked
+    const min = value('#discovery-tempo-min')
+    const max = value('#discovery-tempo-max')
+    return {
+      text: value('#discovery-query'), target: value('#discovery-role'),
+      ...(min || max ? { tempo: { min: Number(min), max: Number(max) } } : {}),
+      loop: checked('#discovery-loop') ? 'loop' : 'either', vocalsAllowed: checked('#discovery-vocals'), budget: value('#discovery-budget'),
+      sources: ['local', 'web'].filter(source => checked(`#discovery-${source}`))
+    }
+  }
+
+  async runDiscovery() {
+    if (!this.discoveryEl || this.discoveryRun) return
+    this.subscribeDiscovery()
+    this.discoveryStarting = true
+    this.discoveryFinished = false
+    this.candidates = []
+    this.discoveryBrief = this.discoveryInput()
+    this.setDiscoveryStatus('Searching…')
+    this.renderDiscovery()
+    try {
+      const runId = await this.discovery.run(this.discoveryBrief)
+      this.discoveryStarting = false
+      this.discoveryRun = this.discoveryFinished ? null : runId
+      this.renderDiscovery()
+      return
+    } catch (error) {
+      this.discoveryStarting = false
+      this.setDiscoveryStatus(`Search failed: ${error.message}`)
+      this.discoveryRun = null
+      this.renderDiscovery()
+    }
+  }
+
+  cancelDiscovery() {
+    this.discovery.cancel?.(this.discoveryRun)
+    this.discoveryRun = null
+    this.setDiscoveryStatus('Search cancelled.')
+    this.renderDiscovery()
+  }
+
+  subscribeDiscovery() {
+    if (this.unsubscribeDiscovery || !this.discovery?.onEvent) return
+    this.unsubscribeDiscovery = this.discovery.onEvent(event => {
+      if (this.discoveryStarting || event?.runId === this.discoveryRun) this.onDiscoveryEvent(event)
+    })
+  }
+
+  async refreshLeads() {
+    try { this.savedLeads = await this.discovery.listLeads?.() || []; this.renderDiscovery() } catch {}
+  }
+
+  onDiscoveryEvent(event = {}) {
+    if (event.type === 'candidate' && event.candidate) this.candidates.push(event.candidate)
+    if (event.type === 'final') {
+      this.candidates = event.candidates || this.candidates
+      this.discoveryFinished = true
+      this.discoveryRun = null
+      this.setDiscoveryStatus(`${this.candidates.length} sound${this.candidates.length === 1 ? '' : 's'} found.`)
+      this.unsubscribeDiscovery?.()
+      this.unsubscribeDiscovery = null
+    }
+    if (event.type === 'error') {
+      this.discoveryFinished = true
+      this.discoveryRun = null
+      this.unsubscribeDiscovery?.()
+      this.unsubscribeDiscovery = null
+      this.setDiscoveryStatus(`Search failed: ${event.message || 'Unknown error'}`)
+    }
+    else if (event.type === 'status') this.setDiscoveryStatus(event.message || event.stage || 'Searching…')
+    this.renderDiscovery()
+  }
+
+  setDiscoveryStatus(value) {
+    if (this.discoveryStatusEl) this.discoveryStatusEl.textContent = value
+  }
+
+  renderDiscovery() {
+    if (!this.discoveryEl) return
+    const active = !!this.discoveryRun
+    this.discoveryRunBtn.disabled = active
+    this.discoveryCancelBtn.hidden = !active
+    this.discoveryResultsEl.innerHTML = ''
+    for (const candidate of this.candidates.slice(0, 5)) {
+      if (!candidate?.assetName || !candidate?.sourceUrl) continue
+      this.discoveryResultsEl.append(this.discoveryRow(candidate))
+    }
+    this.discoveryLeadsEl.innerHTML = ''
+    if (this.savedLeads.length) this.discoveryLeadsEl.append(this.note(`${this.savedLeads.length} saved lead${this.savedLeads.length === 1 ? '' : 's'}.`))
+  }
+
+  discoveryRow(candidate) {
+    const row = document.createElement('div')
+    row.className = 'lib-row'
+    const name = document.createElement('span')
+    name.className = 'lib-name'
+    name.textContent = candidate.assetName
+    const detail = document.createElement('span')
+    detail.className = 'lib-counts'
+    detail.textContent = [candidate.creator, candidate.sourceId, candidate.sourceUrl].filter(Boolean).join(' · ')
+    row.append(name, detail)
+    const note = candidate.fitNote
+    if (note) { const fit = document.createElement('span'); fit.className = 'lib-licence'; fit.textContent = note; row.append(fit) }
+    const evidence = candidate.evidence?.map(item => item.note || item.title).filter(Boolean).join(' · ')
+    if (evidence) { const source = document.createElement('span'); source.className = 'lib-licence'; source.textContent = evidence; row.append(source) }
+    const open = document.createElement('button')
+    open.className = 'midi-btn lib-remove'; open.type = 'button'; open.textContent = 'OPEN'
+    open.addEventListener('click', () => this.discovery.open?.(candidate))
+    const save = document.createElement('button')
+    save.className = 'midi-btn lib-remove'; save.type = 'button'; save.textContent = 'SAVE LEAD'
+    save.hidden = !this.discovery.saveLead
+    save.addEventListener('click', async () => {
+      save.disabled = true
+      try {
+        const lead = await this.discovery.saveLead?.({ brief: this.discoveryBrief, candidate })
+        if (this.discovery.listLeads) await this.refreshLeads()
+        else { this.savedLeads.push(lead || { candidate }); this.renderDiscovery() }
+      }
+      catch (error) { this.setDiscoveryStatus(`Save failed: ${error.message}`) }
+      finally { save.disabled = false }
+    })
+    row.append(open, save)
+    return row
   }
 
   async addFolder() {

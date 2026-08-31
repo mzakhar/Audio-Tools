@@ -26,6 +26,26 @@ Settled: a hosted OpenAI-compatible provider with a user-supplied key; the first
 web sources are Freesound and the provider's generic web search; Electron and
 web are both targets, but web ships only after the access gate below is met.
 
+## Progress — 2026-08-30
+
+- Cloudflare Access now protects `synth.zakharhome.org` with the family OIDC
+  policy. This authorizes a future server-held-key route; it is not the proxy.
+- Pure brief/candidate validation, canonical URL checks, deterministic ranking,
+  and trusted local-preset classification are shipped with focused tests.
+- Electron encrypts named provider connections via `safeStorage`; submitted
+  keys cross the narrow configure IPC once, then the renderer clears them.
+- Library has a setup-first **Find sounds** section with brief, progress,
+  source-linked cards, safe Open, and explicit saved leads. Its
+  existing SoundFont search remains the local import-and-arm path.
+- Generic model output alone remains rejected as ungrounded. Freesound is the
+  current trusted evidence source; OpenAI review/ranking is the next adapter.
+- Freesound metadata search is now the first trusted source: fixed host,
+  token header, one bounded query, at most 30 returned rows, no result-page
+  fetching and no downloads. The Library setup form clears submitted keys
+  immediately; Electron encrypts them before persistence. `Ctrl/Cmd+Enter`
+  connects, setup reports where keys went, search has a 15-second source
+  timeout, and the dialog scrolls vertically rather than horizontally.
+
 ## Product decisions
 
 - **Discover, do not generate.** The output is a shortlist of existing samples,

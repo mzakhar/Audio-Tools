@@ -20,3 +20,18 @@ contextBridge.exposeInMainWorld('electronFS', {
   scanSoundFontFolders: () => ipcRenderer.invoke('instrumentPacks:scanFolders'),
   importSf2Preset: (sourcePath, presetIndex) => ipcRenderer.invoke('instrumentPacks:importPreset', sourcePath, presetIndex),
 })
+
+contextBridge.exposeInMainWorld('musicDiscovery', {
+  available: () => ipcRenderer.invoke('musicDiscovery:available'),
+  configure: config => ipcRenderer.invoke('musicDiscovery:configure', config),
+  run: (brief, providerId) => ipcRenderer.invoke('musicDiscovery:run', { brief, providerId }),
+  cancel: runId => ipcRenderer.invoke('musicDiscovery:cancel', runId),
+  open: candidate => ipcRenderer.invoke('musicDiscovery:open', candidate),
+  listLeads: () => ipcRenderer.invoke('musicDiscovery:listLeads'),
+  saveLead: lead => ipcRenderer.invoke('musicDiscovery:saveLead', lead),
+  onEvent: listener => {
+    const callback = (_event, payload) => listener(payload)
+    ipcRenderer.on('musicDiscovery:event', callback)
+    return () => ipcRenderer.removeListener('musicDiscovery:event', callback)
+  },
+})

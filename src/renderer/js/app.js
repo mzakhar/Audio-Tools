@@ -1599,6 +1599,9 @@ function boot() {
       await refreshPackCatalog()
     },
     usage: () => webPackStore()?.usage() ?? null,
+    // Electron exposes this narrow bridge only when a configured discovery
+    // provider exists; LibraryDialog removes the section otherwise.
+    discovery: () => window.musicDiscovery || null,
     folders: folderLibrary,
     importPreset: async (bankPath, presetIndex, onProgress) => {
       const pack = await folderLibrary()?.importPreset(bankPath, presetIndex, { onProgress })
