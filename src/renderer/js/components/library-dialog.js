@@ -67,6 +67,7 @@ export class LibraryDialog {
     this.discoveryRun = null
     this.discoveryBrief = null
     this.candidates = []
+    this.localResults = []
     this.savedLeads = []
     this.status = ''
     this.usage = null
@@ -114,7 +115,7 @@ export class LibraryDialog {
     section.className = 'lib-browse'
     section.id = 'lib-discovery'
     section.innerHTML = `<h3>FIND SOUNDS</h3>
-      <div class="discovery-config"><label>Freesound key <input id="discovery-freesound-key" type="password" autocomplete="off"></label><label>OpenAI key (ranking later) <input id="discovery-openai-key" type="password" autocomplete="off"></label><label>Model <input id="discovery-openai-model" type="text" value="gpt-5.6-luna"></label><button id="discovery-configure" class="midi-btn" type="button" title="Save keys (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">SAVE KEYS <span aria-hidden="true">CTRL+↵</span></button></div>
+      <div class="discovery-config"><label>Freesound key <input id="discovery-freesound-key" type="password" autocomplete="off"></label><label>OpenAI key (optional ranking) <input id="discovery-openai-key" type="password" autocomplete="off"></label><label>Model <input id="discovery-openai-model" type="text" value="gpt-5.6-luna"></label><button id="discovery-configure" class="midi-btn" type="button" title="Save keys (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">SAVE KEYS <span aria-hidden="true">CTRL+↵</span></button></div>
       <div class="dlg-row"><label>Role <select id="discovery-role"><option value="sample-loop">Sample / loop</option><option value="drum-pack">Drum pack</option><option value="playable-preset">Playable preset</option></select></label>
       <label>BPM <input id="discovery-tempo-min" type="number" min="20" max="300" placeholder="min" aria-label="Minimum tempo">–<input id="discovery-tempo-max" type="number" min="20" max="300" placeholder="max" aria-label="Maximum tempo"></label></div>
       <div class="dlg-row"><label><input id="discovery-loop" type="checkbox"> Loop</label><label><input id="discovery-vocals" type="checkbox"> Vocals okay</label><label>Budget <select id="discovery-budget"><option value="either">Either</option><option value="free">Free</option><option value="paid">Paid</option></select></label><label><input id="discovery-local" type="checkbox" checked> Local</label><label><input id="discovery-web" type="checkbox" checked> Web</label></div>
@@ -139,9 +140,11 @@ export class LibraryDialog {
       }
     })
     Promise.resolve(this.discovery.available?.()).then(available => {
+      this.discoveryAvailable = !!available
       if (available) this.refreshLeads()
-      else { this.discoveryRunBtn.disabled = true; this.setDiscoveryStatus('Connect Freesound and OpenAI to search.') }
-    }).catch(() => { this.discoveryRunBtn.disabled = true })
+      else if (this.library()) this.setDiscoveryStatus('Local search is ready. Connect Freesound for web results.')
+      else { this.discoveryRunBtn.disabled = true; this.setDiscoveryStatus('Connect Freesound to search.') }
+    }).catch(() => { this.discoveryRunBtn.disabled = !this.library() })
   }
 
   async configureDiscovery() {
@@ -182,11 +185,29 @@ export class LibraryDialog {
 
   async runDiscovery() {
     if (!this.discoveryEl || this.discoveryRun) return
-    this.subscribeDiscovery()
     this.discoveryStarting = true
     this.discoveryFinished = false
     this.candidates = []
     this.discoveryBrief = this.discoveryInput()
+    if (this.discoveryBrief.sources.includes('local') && !this.scanned) {
+      if (!this.discoveryBrief.sources.includes('web') || this.discoveryAvailable === false) await this.rescan()
+      else this.rescan().then(() => {
+        if (!this.discoveryBrief?.sources.includes('local')) return
+        this.localResults = this.findLocal(this.discoveryBrief)
+        this.candidates = [...this.localResults, ...this.candidates.filter(candidate => candidate?.kind !== 'local-preset')]
+        this.renderDiscovery()
+      })
+    }
+    this.localResults = this.discoveryBrief.sources.includes('local') ? this.findLocal(this.discoveryBrief) : []
+    this.candidates = [...this.localResults]
+    if (!this.discoveryBrief.sources.includes('web') || this.discoveryAvailable === false) {
+      this.discoveryStarting = false
+      this.discoveryFinished = true
+      this.setDiscoveryStatus(this.localStatus())
+      this.renderDiscovery()
+      return
+    }
+    this.subscribeDiscovery()
     this.setDiscoveryStatus('Searching…')
     this.renderDiscovery()
     try {
@@ -224,7 +245,7 @@ export class LibraryDialog {
   onDiscoveryEvent(event = {}) {
     if (event.type === 'candidate' && event.candidate) this.candidates.push(event.candidate)
     if (event.type === 'final') {
-      this.candidates = event.candidates || this.candidates
+      this.candidates = [...this.localResults, ...(event.candidates || [])]
       this.discoveryFinished = true
       this.discoveryRun = null
       this.setDiscoveryStatus(`${this.candidates.length} sound${this.candidates.length === 1 ? '' : 's'} found.`)
@@ -252,8 +273,10 @@ export class LibraryDialog {
     this.discoveryRunBtn.disabled = active
     this.discoveryCancelBtn.hidden = !active
     this.discoveryResultsEl.innerHTML = ''
-    for (const candidate of this.candidates.slice(0, 5)) {
-      if (!candidate?.assetName || !candidate?.sourceUrl) continue
+    const local = this.candidates.filter(candidate => candidate?.kind === 'local-preset').slice(0, 5)
+    const remote = this.candidates.filter(candidate => candidate?.kind !== 'local-preset').slice(0, 5)
+    for (const candidate of [...local, ...remote]) {
+      if (!candidate?.assetName || (candidate.kind !== 'local-preset' && !candidate?.sourceUrl)) continue
       this.discoveryResultsEl.append(this.discoveryRow(candidate))
     }
     this.discoveryLeadsEl.innerHTML = ''
@@ -274,6 +297,9 @@ export class LibraryDialog {
     if (note) { const fit = document.createElement('span'); fit.className = 'lib-licence'; fit.textContent = note; row.append(fit) }
     const evidence = candidate.evidence?.map(item => item.note || item.title).filter(Boolean).join(' · ')
     if (evidence) { const source = document.createElement('span'); source.className = 'lib-licence'; source.textContent = evidence; row.append(source) }
+    if (candidate.kind === 'local-preset') return this.localDiscoveryRow(row, candidate)
+    const actions = document.createElement('span')
+    actions.className = 'discovery-actions'
     const open = document.createElement('button')
     open.className = 'midi-btn lib-remove'; open.type = 'button'; open.textContent = 'OPEN'
     open.addEventListener('click', () => this.discovery.open?.(candidate))
@@ -290,8 +316,64 @@ export class LibraryDialog {
       catch (error) { this.setDiscoveryStatus(`Save failed: ${error.message}`) }
       finally { save.disabled = false }
     })
-    row.append(open, save)
+    actions.append(open, save)
+    row.append(actions)
     return row
+  }
+
+  /** Indexed metadata chooses this action; no model output can make a local row. */
+  localDiscoveryRow(row, candidate) {
+    row.querySelector('.lib-counts').textContent = [candidate.creator, 'local SoundFont preset'].filter(Boolean).join(' Â· ')
+    const actions = document.createElement('span')
+    actions.className = 'discovery-actions'
+    const arm = document.createElement('button')
+    arm.className = 'midi-btn lib-remove'; arm.type = 'button'
+    arm.textContent = candidate.handoff ? 'ARM' : 'IMPORT & ARM'
+    arm.addEventListener('click', async () => {
+      arm.disabled = true
+      const handoff = await this.activate(candidate.localRow, arm)
+      if (handoff) candidate.handoff = handoff
+      await this.linkLocalLead(candidate)
+      arm.disabled = false
+      this.renderDiscovery()
+    })
+    actions.append(arm)
+    if (this.discovery.saveLead) {
+      const save = document.createElement('button')
+      save.className = 'midi-btn lib-remove'; save.type = 'button'; save.textContent = 'SAVE LEAD'
+      save.addEventListener('click', async () => {
+        save.disabled = true
+        try {
+          const { localRow, handoff, leadId, ...leadCandidate } = candidate
+          const lead = await this.discovery.saveLead({ brief: this.discoveryBrief, candidate: leadCandidate })
+          candidate.leadId = lead?.id
+          await this.linkLocalLead(candidate)
+          await this.refreshLeads()
+        } catch (error) { this.setDiscoveryStatus(`Save failed: ${error.message}`) }
+        finally { save.disabled = false }
+      })
+      actions.append(save)
+    }
+    row.append(actions)
+    return row
+  }
+
+  async linkLocalLead(candidate) {
+    if (!candidate.leadId || !candidate.handoff || !this.discovery.linkLead) return
+    await this.discovery.linkLead(candidate.leadId, candidate.handoff)
+  }
+
+  localStatus() {
+    return `${this.localResults.length} local preset${this.localResults.length === 1 ? '' : 's'} found.`
+  }
+
+  /** Metadata-only lookup. The indexed row remains the action source. */
+  findLocal(brief) {
+    const terms = brief.text.toLowerCase().split(/\s+/).filter(Boolean)
+    return this.rows.filter(row => terms.every(term => row.hay.includes(term))).slice(0, 5).map(row => ({
+      kind: 'local-preset', assetName: row.name, creator: row.author || row.title || 'Local SoundFont',
+      sourceId: 'local', local: { bankPath: row.path, presetIndex: row.presetIndex }, localRow: row
+    }))
   }
 
   async addFolder() {
@@ -345,13 +427,14 @@ export class LibraryDialog {
     if (already) {
       this.deps.armPack?.(already.id, already.version, row.patchId)
       this.setStatus(`Armed ${row.name}.`)
-      return
+      return { packId: already.id, packVersion: already.version, patchId: row.patchId }
     }
     button.disabled = true
     try {
       const pack = await this.deps.importPreset?.(row.path, row.presetIndex, step => this.setStatus(PROGRESS[step?.stage] || ''))
       if (pack) this.deps.armPack?.(pack.id, pack.version, row.patchId)
       this.status = pack ? `Imported ${row.name}.` : ''
+      return pack ? { packId: pack.id, packVersion: pack.version, patchId: row.patchId } : null
     } catch (error) {
       this.status = `Import failed: ${error.message}`
     } finally {

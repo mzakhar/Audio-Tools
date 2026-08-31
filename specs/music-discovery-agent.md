@@ -22,6 +22,10 @@ dialog in `specs/ui-shell.md`.
 | 3 — optional provider and tool expansion | deferred |
 | Web rollout | blocked — see "Web deployment gate" |
 
+Completed: phases 0-2 in Electron. Phase 3 remains deliberately deferred.
+Web rollout remains blocked on the authenticated proxy and its manually applied
+fleet Secret; no browser discovery is exposed yet.
+
 Settled: a hosted OpenAI-compatible provider with a user-supplied key; the first
 web sources are Freesound and the provider's generic web search; Electron and
 web are both targets, but web ships only after the access gate below is met.
@@ -45,6 +49,12 @@ web are both targets, but web ships only after the access gate below is met.
   immediately; Electron encrypts them before persistence. `Ctrl/Cmd+Enter`
   connects, setup reports where keys went, search has a 15-second source
   timeout, and the dialog scrolls vertically rather than horizontally.
+- OpenAI review uses one bounded Responses request over at most 12 supplied
+  Freesound rows, strict indexed JSON, 1200 output tokens, a 15-second timeout,
+  and falls back to source ranking if unavailable. It cannot add a candidate.
+- Local Find searches the existing indexed SoundFont metadata, imports and arms
+  only through the existing path, and records a saved local lead's imported
+  pack/patch identity after the user acts.
 
 ## Product decisions
 
@@ -156,6 +166,35 @@ Two further constraints follow from how this app is deployed:
 
 Electron has neither problem — main holds the key in OS credential storage and
 the renderer never sees it. Ship there first.
+
+### Fleet secret plan — before proxy code ships
+
+The fleet has no deployed SOPS flow yet, so use one small, manually applied
+cluster Secret. Do not put a value or base64 value in either repository.
+
+```text
+namespace: synth
+name: synth-discovery
+keys:
+  OPENAI_API_KEY
+  FREESOUND_API_KEY
+  CF_ACCESS_AUD
+  CF_ACCESS_TEAM_DOMAIN
+```
+
+- The future proxy consumes individual `secretKeyRef` entries, never `envFrom`.
+  Missing keys keep the proxy unready; the static Synth container stays
+  deployable without this Secret.
+- Apply or rotate one key with a `kubectl patch Secret ... --type merge -p`
+  data patch on `themachine`; never apply a generated whole Secret. Restart the
+  proxy only after all required keys exist and keep the old ready pod during
+  rollout.
+- `CF_ACCESS_AUD` comes from the Access application's audience tag. The Access
+  policy must protect the exact API path (planned: `/api/music-discovery`) as
+  well as the external renderer. LAN `/synth/` must never route to this endpoint.
+- When fleet SOPS-with-age is live, migrate this four-key Secret as one
+  encrypted resource. Until then, templates document key names only and Flux
+  must not reconcile them.
 
 ## User flow
 

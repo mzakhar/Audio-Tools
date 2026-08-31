@@ -180,7 +180,33 @@ describe('LibraryDialog discovery', () => {
     setup({ discovery: { configure: vi.fn(), available: async () => false } })
     await Promise.resolve()
     expect(document.getElementById('lib-discovery')).not.toBeNull()
-    expect(document.getElementById('discovery-run').disabled).toBe(true)
+    expect(document.getElementById('discovery-run').disabled).toBe(false)
+    expect(document.getElementById('discovery-status').textContent).toContain('Local search')
+  })
+
+  it('finds indexed local presets and imports through the existing path', async () => {
+    const saveLead = vi.fn(async () => ({ id: 'lead-1' }))
+    const linkLead = vi.fn(async () => {})
+    const { dialog, deps } = setup({
+      banks: [bank('bank0.sf2', 'House', [preset('Soulful Warm Pad', 89)])],
+      discovery: { configure: vi.fn(), available: async () => false, saveLead, linkLead }
+    })
+    await Promise.resolve()
+    document.getElementById('discovery-web').checked = false
+    document.getElementById('discovery-query').value = 'soulful warm'
+    document.getElementById('discovery-run').click()
+    await new Promise(done => setTimeout(done, 0))
+    expect(document.querySelector('#discovery-results .lib-name').textContent).toBe('Soulful Warm Pad')
+    const local = dialog.candidates[0]
+    document.querySelectorAll('#discovery-results button')[1].click()
+    await new Promise(done => setTimeout(done, 0))
+    expect(saveLead).toHaveBeenCalledWith(expect.objectContaining({ candidate: expect.objectContaining({ kind: 'local-preset' }) }))
+    document.querySelector('#discovery-results button').click()
+    await new Promise(done => setTimeout(done, 0))
+    expect(deps.importPreset).toHaveBeenCalledWith('folder/bank0.sf2', 0, expect.any(Function))
+    expect(deps.armPack).toHaveBeenCalledWith('bank0', '1.0.0', 'sf2-0')
+    expect(local.handoff).toEqual({ packId: 'bank0', packVersion: '1.0.0', patchId: 'sf2-0' })
+    expect(linkLead).toHaveBeenCalledWith('lead-1', local.handoff)
   })
 
   it('sends transient connection settings and clears keys immediately', async () => {

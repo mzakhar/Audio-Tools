@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('musicDiscovery', {
   open: candidate => ipcRenderer.invoke('musicDiscovery:open', candidate),
   listLeads: () => ipcRenderer.invoke('musicDiscovery:listLeads'),
   saveLead: lead => ipcRenderer.invoke('musicDiscovery:saveLead', lead),
+  linkLead: (leadId, importedPreset) => ipcRenderer.invoke('musicDiscovery:linkLead', leadId, importedPreset),
   onEvent: listener => {
     const callback = (_event, payload) => listener(payload)
     ipcRenderer.on('musicDiscovery:event', callback)

@@ -2129,6 +2129,15 @@ dialog.ib-dialog[open] { width: min(640px, 94vw); }
 }
 .lib-remove:hover { border-color: var(--danger); color: var(--danger); }
 .lib-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.discovery-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: end;
+}
+.discovery-actions .lib-remove { grid-column: auto; grid-row: auto; }
 .lib-name { font-size: 11px; color: var(--text); }
 .lib-counts, .lib-licence { font-size: 9px; color: var(--text-dim); }
 .lib-browse { display: flex; flex-direction: column; gap: 6px; }

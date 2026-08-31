@@ -6,7 +6,7 @@ import { importSf2Pack, importSf2Preset, listInstrumentPacks, readInstrumentSamp
 import { addSoundFontFolder, listSoundFontFolders, removeSoundFontFolder, scanSoundFontFolders } from './soundfont-folders.js'
 import { loadConnections, saveConnections } from './music-discovery/connections.js'
 import { createDiscoveryService } from './music-discovery/index.js'
-import { listLeads, saveLead } from './music-discovery/leads.js'
+import { linkLead, listLeads, saveLead } from './music-discovery/leads.js'
 import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
 
@@ -23,16 +23,14 @@ async function discovery() {
 }
 
 async function configureDiscovery({ freesoundToken, openaiKey, model }) {
-  if (typeof freesoundToken !== 'string' || typeof openaiKey !== 'string') throw new Error('Both API keys are required')
+  if (typeof freesoundToken !== 'string') throw new Error('Freesound API key is required')
   const userData = app.getPath('userData')
-  await Promise.all([
-    saveFreesound(userData, freesoundToken, safeStorage),
-    saveConnections(userData, [{
+  await saveFreesound(userData, freesoundToken, safeStorage)
+  if (typeof openaiKey === 'string' && openaiKey.trim()) await saveConnections(userData, [{
       id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com',
       model: typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.6-luna', auth: openaiKey,
       capabilities: { structuredOutput: true }
     }], safeStorage)
-  ])
   discoveryService = null
 }
 
@@ -241,3 +239,4 @@ ipcMain.handle('musicDiscovery:open', async (_event, candidate) => {
 
 ipcMain.handle('musicDiscovery:listLeads', () => listLeads(app.getPath('userData')))
 ipcMain.handle('musicDiscovery:saveLead', (_event, lead) => saveLead(app.getPath('userData'), lead || {}))
+ipcMain.handle('musicDiscovery:linkLead', (_event, leadId, importedPreset) => linkLead(app.getPath('userData'), leadId, importedPreset))

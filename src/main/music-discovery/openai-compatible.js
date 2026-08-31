@@ -1,21 +1,67 @@
 const MAX_OUTPUT_TOKENS = 1200
+const MAX_CANDIDATES = 30
+const REQUEST_TIMEOUT_MS = 15000
 
-export function createOpenAICompatibleAdapter(connection) {
-  const endpoint = new URL('chat/completions', `${connection.baseUrl}/`)
-  if (endpoint.origin !== new URL(connection.baseUrl).origin) throw new Error('Invalid provider URL')
+const schema = {
+  type: 'object', additionalProperties: false, required: ['ranked'],
+  properties: { ranked: { type: 'array', maxItems: MAX_CANDIDATES, items: {
+    type: 'object', additionalProperties: false,
+    required: ['candidateIndex', 'reviewerScore', 'fitNote'],
+    properties: {
+      candidateIndex: { type: 'integer', minimum: 0, maximum: MAX_CANDIDATES - 1 },
+      reviewerScore: { type: 'number', minimum: 0, maximum: 100 },
+      fitNote: { type: 'string', maxLength: 500 },
+    },
+  } } },
+}
 
+const outputText = body => typeof body?.output_text === 'string'
+  ? body.output_text
+  : body?.output?.flatMap(item => item?.content || []).find(item => item?.type === 'output_text')?.text
+
+/** OpenAI reviewer. It receives Freesound metadata and can only return indexes into it. */
+export function createOpenAICompatibleAdapter(connection = {}, { fetchFn = fetch } = {}) {
+  if (typeof connection.auth !== 'string' || !connection.auth || typeof connection.model !== 'string' || !connection.model) return null
+  let base
+  try { base = new URL(connection.baseUrl || 'https://api.openai.com') } catch { return null }
+  if (base.protocol !== 'https:' || base.origin !== 'https://api.openai.com' || typeof fetchFn !== 'function') throw new Error('Invalid OpenAI configuration')
   return {
-    async complete({ messages, signal }) {
-      const response = await fetch(endpoint, {
-        method: 'POST', signal,
-        headers: { authorization: `Bearer ${connection.auth}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: connection.model, messages, temperature: 0.2, max_tokens: MAX_OUTPUT_TOKENS, response_format: { type: 'json_object' } }),
+    async review({ brief, candidates, signal }) {
+      const rows = Array.isArray(candidates) ? candidates.slice(0, MAX_CANDIDATES) : []
+      if (!rows.length) return []
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(new Error('OpenAI review timed out')), REQUEST_TIMEOUT_MS)
+      const abort = () => controller.abort(signal?.reason)
+      if (signal?.aborted) abort()
+      signal?.addEventListener('abort', abort, { once: true })
+      let response
+      try {
+        response = await fetchFn('https://api.openai.com/v1/responses', {
+          method: 'POST', signal: controller.signal,
+          headers: { authorization: `Bearer ${connection.auth}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: connection.model, store: false, max_output_tokens: MAX_OUTPUT_TOKENS,
+            instructions: 'Rank only the supplied Freesound records for the brief. Return only candidate indexes from those records. Do not invent assets, creators, URLs, or facts. Use empty ranked when none fit.',
+            input: JSON.stringify({ brief, candidates: rows.map(({ assetName, creator, sourceUrl, evidence }) => ({ assetName, creator, sourceUrl, evidence })) }),
+            text: { format: { type: 'json_schema', name: 'freesound_ranking', strict: true, schema } },
+          }),
+        })
+      } finally {
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', abort)
+      }
+      if (!response.ok) throw new Error(`OpenAI review failed (${response.status})`)
+      let result
+      try { result = JSON.parse(outputText(await response.json())) } catch { throw new Error('OpenAI review returned invalid JSON') }
+      if (!Array.isArray(result?.ranked)) throw new Error('OpenAI review returned no ranking')
+      const used = new Set()
+      return result.ranked.flatMap(row => {
+        const index = row?.candidateIndex
+        const score = row?.reviewerScore
+        if (!Number.isInteger(index) || index < 0 || index >= rows.length || used.has(index) || !Number.isFinite(score) || score < 0 || score > 100 || typeof row?.fitNote !== 'string') return []
+        used.add(index)
+        return [{ ...rows[index], reviewerScore: score, fitNote: row.fitNote.slice(0, 500) }]
       })
-      if (!response.ok) throw new Error(`Discovery provider failed (${response.status})`)
-      const body = await response.json()
-      const text = body?.choices?.[0]?.message?.content
-      if (typeof text !== 'string') throw new Error('Discovery provider returned no result')
-      return JSON.parse(text)
     },
   }
 }
