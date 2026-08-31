@@ -22,17 +22,22 @@ function handler(fetchFn, extra = {}) {
 
 describe('web music discovery proxy', () => {
   it('verifies Access, uses fixed upstream hosts, and returns bounded grounded rows', async () => {
-    const fetchFn = vi.fn(async url => {
+    const fetchFn = vi.fn(async (url, options) => {
       if (String(url) === `${teamDomain}/cdn-cgi/access/certs`) return { ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }
       if (String(url).startsWith('https://freesound.org/apiv2/search/text/')) return { ok: true, json: async () => freesound }
-      if (String(url) === 'https://api.openai.com/v1/responses') return { ok: true, json: async () => ({ output_text: JSON.stringify({ ranked: [{ candidateIndex: 0, reviewerScore: 90, fitNote: 'Fits.' }] }) }) }
+      if (String(url) === 'https://api.openai.com/v1/responses') {
+        const body = JSON.parse(options?.body || '{}')
+        return { ok: true, json: async () => body.tools
+          ? ({ output: [{ type: 'message', content: [{ annotations: [{ type: 'url_citation', url: 'https://example.com/real-sample', title: 'Real sample' }] }] }] })
+          : ({ output_text: JSON.stringify({ ranked: [{ candidateIndex: 0, reviewerScore: 90, fitNote: 'Fits.' }] }) }) }
+      }
       throw new Error(`unexpected host ${url}`)
     })
     const res = response()
     await handler(fetchFn)(request(validBrief), res)
     expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
     expect(JSON.parse(res.end.mock.calls[0][0]).candidates).toMatchObject([{ sourceUrl: freesound.results[0].url, reviewerScore: 90 }])
-    expect(fetchFn.mock.calls.map(([url]) => new URL(String(url)).origin)).toEqual([teamDomain, 'https://freesound.org', 'https://api.openai.com'])
+    expect(fetchFn.mock.calls.map(([url]) => new URL(String(url)).origin)).toEqual([teamDomain, 'https://freesound.org', 'https://api.openai.com', 'https://api.openai.com'])
   })
 
   it('rejects bad JWT signatures and never calls content providers', async () => {

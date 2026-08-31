@@ -1,6 +1,7 @@
 import { normalizeBrief, validateCandidate, dedupeCandidates, rankCandidates } from '../../shared/music-discovery/contracts.js'
 import { createFreesoundAdapter } from './freesound.js'
 import { createOpenAICompatibleAdapter } from './openai-compatible.js'
+import { createOpenAIWebSearchAdapter } from './openai-web-search.js'
 const MAX_CANDIDATES = 5
 
 export async function runDiscovery({ brief: rawBrief, source, reviewer, signal, onEvent = () => {} }) {
@@ -44,8 +45,25 @@ export async function runDiscovery({ brief: rawBrief, source, reviewer, signal, 
 }
 
 export function createDiscoveryService({ connections = [], freesound } = {}) {
-  const source = createFreesoundAdapter(freesound) || connections.find(connection => typeof connection?.investigate === 'function')
-  const reviewer = createOpenAICompatibleAdapter(connections.find(connection => connection?.id === 'openai'))
+  const openai = connections.find(connection => connection?.id === 'openai')
+  const sources = [
+    createFreesoundAdapter(freesound),
+    createOpenAIWebSearchAdapter(openai),
+    connections.find(connection => typeof connection?.investigate === 'function'),
+  ].filter(Boolean)
+  const source = sources.length ? {
+    async investigate(args) {
+      const candidates = []
+      let failure = null
+      for (const adapter of sources) {
+        try { candidates.push(...(await adapter.investigate(args))?.candidates || []) }
+        catch (error) { if (args.signal?.aborted) throw error; failure ||= error }
+      }
+      if (!candidates.length && failure) throw failure
+      return { candidates }
+    },
+  } : null
+  const reviewer = createOpenAICompatibleAdapter(openai)
   const runs = new Map()
   return {
     available: () => !!source,

@@ -1,5 +1,6 @@
 import { createPublicKey, verify as verifySignature } from 'node:crypto'
 import { normalizeBrief, rankCandidates, validateCandidate } from '../shared/music-discovery/contracts.js'
+import { createOpenAIWebSearchAdapter } from '../main/music-discovery/openai-web-search.js'
 
 const MAX_BODY_BYTES = 16 * 1024
 const REQUEST_TIMEOUT_MS = 15000
@@ -130,6 +131,9 @@ export function createWebDiscoveryHandler(options = {}) {
       let sourced, reviewed
       try {
         sourced = await investigate(normalized.value, { freesoundToken, fetchFn, signal: controller.signal })
+        const webSource = createOpenAIWebSearchAdapter({ auth: openaiKey, model }, { fetchFn })
+        try { sourced.push(...(await webSource.investigate({ brief: normalized.value, signal: controller.signal })).candidates) }
+        catch (error) { if (controller.signal.aborted) throw error }
         reviewed = await review(normalized.value, sourced, { openaiKey, model, fetchFn, signal: controller.signal })
       } finally { clearTimeout(timeout) }
       return send(res, 200, { candidates: rankCandidates(reviewed.length ? reviewed : sourced, normalized.value) })
