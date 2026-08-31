@@ -108,14 +108,14 @@ export class LibraryDialog {
 
   /** Discovery is absent until a trusted host API exists. No dead controls. */
   setupDiscovery() {
-    if (!this.discovery?.configure) return
+    if (!this.discovery?.configure && !(this.discovery?.browser && this.discovery?.run && this.discovery?.available)) return
     const body = this.el.querySelector('.dlg-body')
     if (!body) return
     const section = document.createElement('section')
+    const config = this.discovery.browser ? '' : `<div class="discovery-config"><label>Freesound key <input id="discovery-freesound-key" type="password" autocomplete="off"></label><label>OpenAI key (optional ranking) <input id="discovery-openai-key" type="password" autocomplete="off"></label><label>Model <input id="discovery-openai-model" type="text" value="gpt-5.6-luna"></label><button id="discovery-configure" class="midi-btn" type="button" title="Save keys (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">SAVE KEYS <span aria-hidden="true">CTRL+↵</span></button></div>`
     section.className = 'lib-browse'
     section.id = 'lib-discovery'
-    section.innerHTML = `<h3>FIND SOUNDS</h3>
-      <div class="discovery-config"><label>Freesound key <input id="discovery-freesound-key" type="password" autocomplete="off"></label><label>OpenAI key (optional ranking) <input id="discovery-openai-key" type="password" autocomplete="off"></label><label>Model <input id="discovery-openai-model" type="text" value="gpt-5.6-luna"></label><button id="discovery-configure" class="midi-btn" type="button" title="Save keys (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">SAVE KEYS <span aria-hidden="true">CTRL+↵</span></button></div>
+    section.innerHTML = `<h3>FIND SOUNDS</h3>${config}
       <div class="dlg-row"><label>Role <select id="discovery-role"><option value="sample-loop">Sample / loop</option><option value="drum-pack">Drum pack</option><option value="playable-preset">Playable preset</option></select></label>
       <label>BPM <input id="discovery-tempo-min" type="number" min="20" max="300" placeholder="min" aria-label="Minimum tempo">–<input id="discovery-tempo-max" type="number" min="20" max="300" placeholder="max" aria-label="Maximum tempo"></label></div>
       <div class="dlg-row"><label><input id="discovery-loop" type="checkbox"> Loop</label><label><input id="discovery-vocals" type="checkbox"> Vocals okay</label><label>Budget <select id="discovery-budget"><option value="either">Either</option><option value="free">Free</option><option value="paid">Paid</option></select></label><label><input id="discovery-local" type="checkbox" checked> Local</label><label><input id="discovery-web" type="checkbox" checked> Web</label></div>
@@ -132,23 +132,26 @@ export class LibraryDialog {
     this.discoveryConfigureBtn = section.querySelector('#discovery-configure')
     this.discoveryRunBtn.addEventListener('click', () => this.runDiscovery())
     this.discoveryCancelBtn.addEventListener('click', () => this.cancelDiscovery())
-    this.discoveryConfigureBtn.addEventListener('click', () => this.configureDiscovery())
+    this.discoveryConfigureBtn?.addEventListener('click', () => this.configureDiscovery())
     section.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      if (this.discoveryConfigureBtn && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault()
         this.configureDiscovery()
       }
     })
     Promise.resolve(this.discovery.available?.()).then(available => {
       this.discoveryAvailable = !!available
-      if (available) this.refreshLeads()
+      if (available) {
+        this.refreshLeads()
+        if (this.discovery.browser) this.setDiscoveryStatus('Web search ready.')
+      }
       else if (this.library()) this.setDiscoveryStatus('Local search is ready. Connect Freesound for web results.')
       else { this.discoveryRunBtn.disabled = true; this.setDiscoveryStatus('Connect Freesound to search.') }
     }).catch(() => { this.discoveryRunBtn.disabled = !this.library() })
   }
 
   async configureDiscovery() {
-    if (!this.discoveryEl) return
+    if (!this.discoveryEl || !this.discovery.configure) return
     const value = id => this.discoveryEl.querySelector(id).value
     const config = {
       freesoundToken: value('#discovery-freesound-key'),

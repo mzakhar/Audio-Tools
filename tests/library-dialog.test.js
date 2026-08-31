@@ -184,6 +184,21 @@ describe('LibraryDialog discovery', () => {
     expect(document.getElementById('discovery-status').textContent).toContain('Local search')
   })
 
+  it('shows web discovery without browser key fields', async () => {
+    let emit
+    const run = vi.fn(() => 'web-run')
+    setup({ discovery: { browser: true, available: async () => true, run, onEvent: listener => { emit = listener }, open: vi.fn() } })
+    await Promise.resolve()
+    expect(document.getElementById('discovery-freesound-key')).toBeNull()
+    expect(document.getElementById('discovery-openai-key')).toBeNull()
+    expect(document.getElementById('discovery-status').textContent).toBe('Web search ready.')
+    document.getElementById('discovery-query').value = 'soul vocal'
+    document.getElementById('discovery-run').click()
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ sources: ['local', 'web'] }))
+    emit({ runId: 'web-run', type: 'final', candidates: [candidate] })
+    expect(document.getElementById('discovery-status').textContent).toBe('1 sound found.')
+  })
+
   it('finds indexed local presets and imports through the existing path', async () => {
     const saveLead = vi.fn(async () => ({ id: 'lead-1' }))
     const linkLead = vi.fn(async () => {})

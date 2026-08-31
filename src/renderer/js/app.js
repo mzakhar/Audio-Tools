@@ -47,6 +47,41 @@ import { padBank } from './instruments/pad-map.js'
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
 const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
 const MIDI_DEVICE_KEY = 'synth_midi_input'
+
+function webDiscovery() {
+  if (location.protocol !== 'https:' || location.hostname !== 'synth.zakharhome.org') return null
+  const listeners = new Set()
+  const requests = new Map()
+  const emit = event => listeners.forEach(listener => listener(event))
+  return {
+    browser: true,
+    available: async () => true,
+    onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+    run(brief) {
+      const runId = crypto.randomUUID()
+      const controller = new AbortController()
+      requests.set(runId, controller)
+      queueMicrotask(async () => {
+        try {
+          const response = await fetch('/api/music-discovery', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...brief, sources: ['web'] }), signal: controller.signal })
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(data.error || 'Search unavailable')
+          emit({ runId, type: 'final', candidates: Array.isArray(data.candidates) ? data.candidates.slice(0, 5) : [] })
+        } catch (error) {
+          if (requests.has(runId)) emit({ runId, type: 'error', message: error instanceof Error ? error.message : 'Search unavailable' })
+        } finally { requests.delete(runId) }
+      })
+      return runId
+    },
+    cancel(runId) { requests.get(runId)?.abort(); requests.delete(runId) },
+    open(candidate) {
+      try {
+        const url = new URL(candidate?.sourceUrl)
+        if (url.protocol === 'https:' || url.protocol === 'http:') window.open(url.href, '_blank', 'noopener')
+      } catch { /* source was rejected */ }
+    }
+  }
+}
 function getLastDir(key)       { return localStorage.getItem(key) || undefined }
 function setLastDir(key, path) { if (path) localStorage.setItem(key, path) }
 
@@ -1599,9 +1634,7 @@ function boot() {
       await refreshPackCatalog()
     },
     usage: () => webPackStore()?.usage() ?? null,
-    // Electron exposes this narrow bridge only when a configured discovery
-    // provider exists; LibraryDialog removes the section otherwise.
-    discovery: () => window.musicDiscovery || null,
+    discovery: () => window.musicDiscovery || webDiscovery(),
     folders: folderLibrary,
     importPreset: async (bankPath, presetIndex, onProgress) => {
       const pack = await folderLibrary()?.importPreset(bankPath, presetIndex, { onProgress })

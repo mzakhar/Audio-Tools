@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synth-discovery
+  namespace: synth
+  labels:
+    app.kubernetes.io/name: synth-discovery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synth-discovery
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: synth-discovery
+    spec:
+      containers:
+        - name: discovery
+          image: ghcr.io/mzakhar/audio-tools-discovery:main
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: synth-discovery
+                  key: OPENAI_API_KEY
+            - name: FREESOUND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: synth-discovery
+                  key: FREESOUND_API_KEY
+            - name: CF_ACCESS_AUD
+              valueFrom:
+                secretKeyRef:
+                  name: synth-discovery
+                  key: CF_ACCESS_AUD
+            - name: CF_ACCESS_TEAM_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: synth-discovery
+                  key: CF_ACCESS_TEAM_DOMAIN
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi

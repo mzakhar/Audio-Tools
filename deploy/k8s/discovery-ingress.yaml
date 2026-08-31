@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: synth-discovery-external
+  namespace: synth
+spec:
+  rules:
+    - host: synth.zakharhome.org
+      http:
+        paths:
+          - path: /api/music-discovery
+            pathType: Exact
+            backend:
+              service:
+                name: synth-discovery
+                port:
+                  name: http
