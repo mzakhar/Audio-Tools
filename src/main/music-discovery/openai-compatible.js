@@ -19,12 +19,20 @@ const outputText = body => typeof body?.output_text === 'string'
   ? body.output_text
   : body?.output?.flatMap(item => item?.content || []).find(item => item?.type === 'output_text')?.text
 
+export function responsesUrl(baseUrl = 'https://api.openai.com') {
+  let url
+  try { url = new URL(baseUrl) } catch { return null }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null
+  const path = url.pathname.replace(/\/$/, '')
+  url.pathname = /\/v1\/responses$/.test(path) ? path : `${path.endsWith('/v1') ? path : `${path}/v1`}/responses`
+  return url.href
+}
+
 /** OpenAI reviewer. It receives Freesound metadata and can only return indexes into it. */
-export function createOpenAICompatibleAdapter(connection = {}, { fetchFn = fetch } = {}) {
+export function createOpenAICompatibleAdapter(connection = {}, { fetchFn = connection.fetchFn || fetch } = {}) {
   if (typeof connection.auth !== 'string' || !connection.auth || typeof connection.model !== 'string' || !connection.model) return null
-  let base
-  try { base = new URL(connection.baseUrl || 'https://api.openai.com') } catch { return null }
-  if (base.protocol !== 'https:' || base.origin !== 'https://api.openai.com' || typeof fetchFn !== 'function') throw new Error('Invalid OpenAI configuration')
+  const endpoint = responsesUrl(connection.baseUrl)
+  if (!endpoint || typeof fetchFn !== 'function') throw new Error('Invalid provider configuration')
   return {
     async review({ brief, candidates, signal }) {
       const rows = Array.isArray(candidates) ? candidates.slice(0, MAX_CANDIDATES) : []
@@ -36,7 +44,7 @@ export function createOpenAICompatibleAdapter(connection = {}, { fetchFn = fetch
       signal?.addEventListener('abort', abort, { once: true })
       let response
       try {
-        response = await fetchFn('https://api.openai.com/v1/responses', {
+        response = await fetchFn(endpoint, {
           method: 'POST', signal: controller.signal,
           headers: { authorization: `Bearer ${connection.auth}`, 'content-type': 'application/json' },
           body: JSON.stringify({

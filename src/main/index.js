@@ -9,6 +9,7 @@ import { createDiscoveryService } from './music-discovery/index.js'
 import { linkLead, listLeads, saveLead } from './music-discovery/leads.js'
 import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
+import { freesoundPreviewUrl } from './music-discovery/freesound.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -22,15 +23,26 @@ async function discovery() {
   return discoveryService
 }
 
-async function configureDiscovery({ freesoundToken, openaiKey, model }) {
+async function configureDiscovery({ freesoundToken, openaiKey, model, providerUrl, providerKey, providerModel }) {
   if (typeof freesoundToken !== 'string') throw new Error('Freesound API key is required')
   const userData = app.getPath('userData')
   await saveFreesound(userData, freesoundToken, safeStorage)
-  if (typeof openaiKey === 'string' && openaiKey.trim()) await saveConnections(userData, [{
+  const connections = await loadConnections(userData, safeStorage)
+  let next = connections
+  if (typeof openaiKey === 'string' && openaiKey.trim()) next = [...next.filter(connection => connection.id !== 'openai'), {
       id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com',
       model: typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.6-luna', auth: openaiKey,
       capabilities: { structuredOutput: true }
-    }], safeStorage)
+    }]
+  if (typeof providerKey === 'string' && providerKey.trim()) {
+    if (typeof providerUrl !== 'string' || !providerUrl.trim()) throw new Error('Provider URL is required')
+    next = [...next.filter(connection => connection.id !== 'provider'), {
+      id: 'provider', name: 'Personal provider', baseUrl: providerUrl.trim(),
+      model: typeof providerModel === 'string' && providerModel.trim() ? providerModel.trim() : (typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.6-luna'),
+      auth: providerKey, capabilities: { structuredOutput: true, webSearch: true },
+    }]
+  }
+  if (next !== connections) await saveConnections(userData, next, safeStorage)
   discoveryService = null
 }
 
@@ -235,6 +247,12 @@ ipcMain.handle('musicDiscovery:open', async (_event, candidate) => {
   const url = safeOpenUrl(candidate)
   if (!url) throw new Error('Unsafe discovery link')
   await shell.openExternal(url)
+})
+
+ipcMain.handle('musicDiscovery:preview', (_event, candidate) => {
+  const url = freesoundPreviewUrl(candidate)
+  if (!url) throw new Error('Unsafe Freesound preview')
+  return url
 })
 
 ipcMain.handle('musicDiscovery:listLeads', () => listLeads(app.getPath('userData')))

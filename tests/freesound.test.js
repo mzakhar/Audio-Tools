@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createFreesoundAdapter } from '../src/main/music-discovery/freesound.js'
+import { createFreesoundAdapter, freesoundPreviewUrl } from '../src/main/music-discovery/freesound.js'
 import { createDiscoveryService } from '../src/main/music-discovery/index.js'
 
 const brief = { text: 'soul vocal', target: 'sample-loop', sources: ['web'] }
 const result = {
   results: [
-    { id: 1, name: 'Soul Vocal', username: 'Ada', url: 'https://freesound.org/people/ada/sounds/1/', license: 'CC0', tags: ['soul', 'vocal'] },
+    { id: 1, name: 'Soul Vocal', username: 'Ada', url: 'https://freesound.org/people/ada/sounds/1/', license: 'CC0', tags: ['soul', 'vocal'], previews: { 'preview-hq-mp3': 'https://cdn.freesound.org/previews/1/one-hq.mp3' } },
     { id: 2, name: 'Bad', username: 'Mallory', url: 'file:///bad', tags: [] },
   ],
 }
@@ -23,8 +23,15 @@ describe('Freesound adapter', () => {
     expect(url.origin).toBe('https://freesound.org')
     expect(url.pathname).toBe('/apiv2/search/text/')
     expect(url.searchParams.get('page_size')).toBe('30')
+    expect(url.searchParams.get('fields')).toContain('previews')
     expect(options.headers.Authorization).toBe('Token secret')
-    expect(output.candidates).toEqual([expect.objectContaining({ assetName: 'Soul Vocal', sourceId: 'freesound' })])
+    expect(output.candidates).toEqual([expect.objectContaining({ assetName: 'Soul Vocal', sourceId: 'freesound', previewUrl: 'https://cdn.freesound.org/previews/1/one-hq.mp3' })])
+  })
+
+  it('permits only fixed Freesound CDN preview URLs', () => {
+    expect(freesoundPreviewUrl({ sourceId: 'freesound', previewUrl: 'https://cdn.freesound.org/previews/1/one.mp3' })).toBe('https://cdn.freesound.org/previews/1/one.mp3')
+    expect(freesoundPreviewUrl({ sourceId: 'freesound', previewUrl: 'https://evil.test/previews/1/one.mp3' })).toBeNull()
+    expect(freesoundPreviewUrl({ sourceId: 'freesound', previewUrl: 'https://cdn.freesound.org/not-previews/one.mp3' })).toBeNull()
   })
 
   it('adds Freesound to the discovery service without replacing other connections', async () => {

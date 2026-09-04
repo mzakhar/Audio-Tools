@@ -1,4 +1,6 @@
 import { createPublicKey, verify as verifySignature } from 'node:crypto'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { normalizeBrief, rankCandidates, validateCandidate } from '../shared/music-discovery/contracts.js'
 import { createOpenAIWebSearchAdapter } from '../main/music-discovery/openai-web-search.js'
 
@@ -6,6 +8,7 @@ const MAX_BODY_BYTES = 16 * 1024
 const REQUEST_TIMEOUT_MS = 15000
 const FREESOUND_ORIGIN = 'https://freesound.org'
 const OPENAI_URL = 'https://api.openai.com/v1/responses'
+const LEADS_FILE = 'music-discovery-leads.json'
 
 const decode = value => JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))
 const text = (value, max = 500) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
@@ -103,6 +106,29 @@ async function review(brief, candidates, { openaiKey, model, fetchFn, signal }) 
 
 const send = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(data)) }
 
+async function readLeads(dataDir) {
+  try {
+    const saved = JSON.parse(await readFile(join(dataDir, LEADS_FILE), 'utf8'))
+    return Array.isArray(saved?.leads) ? saved.leads : []
+  } catch { return [] }
+}
+
+async function writeLeads(dataDir, leads) {
+  await mkdir(dataDir, { recursive: true })
+  const file = join(dataDir, LEADS_FILE)
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+  await writeFile(temporary, JSON.stringify({ version: 1, leads }), { encoding: 'utf8', mode: 0o600 })
+  await rename(temporary, file)
+}
+
+function leadFor(body, identity) {
+  const brief = normalizeBrief(body?.brief)
+  const candidate = validateCandidate(body?.candidate, { kind: body?.candidate?.kind === 'local-preset' ? 'local-preset' : 'remote' })
+  if (!brief.ok) throw new Error(brief.errors.join('; '))
+  if (!candidate.ok) throw new Error(candidate.errors.join('; '))
+  return { id: crypto.randomUUID(), brief: brief.value, candidate: candidate.value, reviewedAt: new Date().toISOString(), disposition: 'saved', savedBy: identity }
+}
+
 /** Node http handler. Credentials remain server configuration, never request data. */
 export function createWebDiscoveryHandler(options = {}) {
   const teamDomain = teamUrl(options.teamDomain)
@@ -114,12 +140,32 @@ export function createWebDiscoveryHandler(options = {}) {
   const now = options.now || Date.now
   const limit = Number.isInteger(options.limit) ? options.limit : 12
   const windowMs = Number.isInteger(options.windowMs) ? options.windowMs : 60_000
+  const dataDir = typeof options.dataDir === 'string' && options.dataDir ? options.dataDir : '/data'
   if (!audience || !freesoundToken || !openaiKey || !model || typeof fetchFn !== 'function' || limit < 1 || windowMs < 1) throw new Error('Invalid web discovery configuration')
   const requests = new Map()
+  // One pod. Serialize read-modify-write so two saves cannot lose a lead.
+  let leadWrites = Promise.resolve()
+  const saveSharedLead = (payload, identity) => {
+    const next = leadWrites.then(async () => {
+      const lead = leadFor(payload, identity)
+      const leads = await readLeads(dataDir)
+      await writeLeads(dataDir, [...leads, lead])
+      return lead
+    })
+    leadWrites = next.catch(() => {})
+    return next
+  }
   return async (req, res) => {
-    if (req.method !== 'POST' || new URL(req.url || '/', 'http://origin').pathname !== '/api/music-discovery') return send(res, 404, { error: 'Not found' })
+    const path = new URL(req.url || '/', 'http://origin').pathname
+    if (!['/api/music-discovery', '/api/music-discovery/leads'].includes(path)) return send(res, 404, { error: 'Not found' })
     try {
       const identity = await accessIdentity(req.headers?.['cf-access-jwt-assertion'], { teamDomain, audience, fetchFn, now })
+      if (path === '/api/music-discovery/leads') {
+        if (req.method === 'GET') return send(res, 200, { leads: await readLeads(dataDir) })
+        if (req.method === 'POST') return send(res, 201, { lead: await saveSharedLead(await body(req), identity) })
+        return send(res, 405, { error: 'Method not allowed' })
+      }
+      if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' })
       const previous = requests.get(identity) || []
       const recent = previous.filter(time => time > now() - windowMs)
       if (recent.length >= limit) return send(res, 429, { error: 'Too many requests' })

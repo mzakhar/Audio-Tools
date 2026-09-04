@@ -4,6 +4,7 @@ const BASE_URL = 'https://freesound.org'
 const MAX_QUERIES = 6
 const MAX_ROWS = 30
 const REQUEST_TIMEOUT_MS = 15000
+const PREVIEW_HOST = 'cdn.freesound.org'
 
 const clean = (value, max = 500) => typeof value === 'string'
   ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
@@ -11,6 +12,7 @@ const clean = (value, max = 500) => typeof value === 'string'
 
 function candidate(row) {
   const url = typeof row?.url === 'string' ? row.url : ''
+  const previewUrl = freesoundPreviewUrl({ sourceId: 'freesound', previewUrl: row?.previews?.['preview-hq-mp3'] || row?.previews?.['preview-lq-mp3'] })
   const tags = Array.isArray(row?.tags) ? row.tags.map(tag => clean(tag, 40)).filter(Boolean).slice(0, 8) : []
   const licence = clean(row?.license, 160)
   return validateCandidate({
@@ -19,8 +21,18 @@ function candidate(row) {
     sourceId: 'freesound',
     sourceUrl: url,
     evidence: [{ url, title: clean(row?.name, 160), note: [licence, tags.length ? `Tags: ${tags.join(', ')}` : ''].filter(Boolean).join(' — ') }],
+    ...(previewUrl ? { previewUrl } : {}),
     fitNote: '',
   })
+}
+
+/** Only Freesound's fixed CDN preview endpoint may reach the renderer. */
+export function freesoundPreviewUrl(candidate) {
+  if (candidate?.sourceId !== 'freesound' || typeof candidate.previewUrl !== 'string') return null
+  try {
+    const url = new URL(candidate.previewUrl)
+    return url.protocol === 'https:' && url.hostname === PREVIEW_HOST && url.pathname.startsWith('/previews/') ? url.href : null
+  } catch { return null }
 }
 
 /** Fixed-host, metadata-only Freesound source. It never follows result URLs. */
@@ -40,7 +52,7 @@ export function createFreesoundAdapter(options = {}) {
         url.search = new URLSearchParams({
           query,
           page_size: String(MAX_ROWS),
-          fields: 'id,name,username,url,license,tags',
+          fields: 'id,name,username,url,license,tags,previews',
         }).toString()
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(new Error('Freesound request timed out')), REQUEST_TIMEOUT_MS)

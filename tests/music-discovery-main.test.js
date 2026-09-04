@@ -31,6 +31,33 @@ describe('music discovery main boundary', () => {
     await vi.waitFor(() => expect(events.some(event => event.type === 'error' && event.message === 'Discovery cancelled')).toBe(true))
   })
 
+  it('uses configured provider search only after Freesound fails', async () => {
+    const freesoundFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    const providerFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ output: [{ type: 'message', content: [{ annotations: [{ type: 'url_citation', url: 'https://example.com/vocal', title: 'Vocal' }] }] }] }) })
+    const service = createDiscoveryService({
+      freesound: { token: 'freesound-key', fetchFn: freesoundFetch },
+      connections: [{ id: 'provider', baseUrl: 'https://models.example/v1', auth: 'provider-key', model: 'model', fetchFn: providerFetch }],
+    })
+    const events = []
+    service.start({ brief, providerId: 'provider' }, event => events.push(event))
+    await vi.waitFor(() => expect(events.some(event => event.type === 'final')).toBe(true))
+    expect(freesoundFetch).toHaveBeenCalledOnce()
+    expect(providerFetch.mock.calls[0][0]).toBe('https://models.example/v1/responses')
+  })
+
+  it('does not call provider search after a successful Freesound response', async () => {
+    const freesoundFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) })
+    const providerFetch = vi.fn()
+    const service = createDiscoveryService({
+      freesound: { token: 'freesound-key', fetchFn: freesoundFetch },
+      connections: [{ id: 'provider', baseUrl: 'https://models.example/v1', auth: 'provider-key', model: 'model', fetchFn: providerFetch }],
+    })
+    const events = []
+    service.start({ brief, providerId: 'provider' }, event => events.push(event))
+    await vi.waitFor(() => expect(events.some(event => event.type === 'final')).toBe(true))
+    expect(providerFetch).not.toHaveBeenCalled()
+  })
+
   it('keeps only source candidates when the reviewer ranks them', async () => {
     const invented = { ...candidate, sourceUrl: 'https://freesound.org/sounds/999', evidence: [{ url: 'https://freesound.org/sounds/999', title: 'Invented' }] }
     const final = await runDiscovery({ brief, source: { investigate: async () => ({ candidates: [candidate] }) }, reviewer: {

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('musicDiscovery', {
   run: (brief, providerId) => ipcRenderer.invoke('musicDiscovery:run', { brief, providerId }),
   cancel: runId => ipcRenderer.invoke('musicDiscovery:cancel', runId),
   open: candidate => ipcRenderer.invoke('musicDiscovery:open', candidate),
+  preview: candidate => ipcRenderer.invoke('musicDiscovery:preview', candidate),
   listLeads: () => ipcRenderer.invoke('musicDiscovery:listLeads'),
   saveLead: lead => ipcRenderer.invoke('musicDiscovery:saveLead', lead),
   linkLead: (leadId, importedPreset) => ipcRenderer.invoke('musicDiscovery:linkLead', leadId, importedPreset),

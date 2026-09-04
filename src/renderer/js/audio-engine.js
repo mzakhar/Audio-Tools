@@ -18,6 +18,7 @@ const AudioEngine = {
   _convolver: null,
   _premaster: null,
   _compressor: null,
+  _makeup: null,
   _workletReady: false,
 
   async init() {
@@ -30,7 +31,7 @@ const AudioEngine = {
 
     // Master chain:
     // masterGain → dryGain ─┐
-    //              reverbSend → convolver ─┤→ premaster → compressor → destination
+    //              reverbSend → convolver ─┤→ premaster → compressor → makeup → destination
     this._masterGain = ctx.createGain()
     this._masterGain.gain.value = 0.85
 
@@ -47,7 +48,7 @@ const AudioEngine = {
     this._premaster.gain.value = 0.8
 
     this._compressor = ctx.createDynamicsCompressor()
-    this._compressor.threshold.value = -14
+    this._compressor.threshold.value = -8
     this._compressor.knee.value = 6
     this._compressor.ratio.value = 4
     this._compressor.attack.value = 0.003
@@ -58,8 +59,15 @@ const AudioEngine = {
     this._reverbSend.connect(this._convolver)
     this._dryGain.connect(this._premaster)
     this._convolver.connect(this._premaster)
+    // A DynamicsCompressor has no makeup gain of its own, so everything the
+    // limiter pulled down stayed down and the app played well under every other
+    // tab. Put it back after the limiter, where it cannot drive it harder.
+    this._makeup = ctx.createGain()
+    this._makeup.gain.value = 1.8
+
     this._premaster.connect(this._compressor)
-    this._compressor.connect(ctx.destination)
+    this._compressor.connect(this._makeup)
+    this._makeup.connect(ctx.destination)
 
     this._ctx = ctx
 
@@ -85,6 +93,9 @@ const AudioEngine = {
   hasWorklet() { return typeof this._ctx?.audioWorklet?.addModule === 'function' },
   getMasterInput() { return this._masterGain },
   getCompressor() { return this._compressor },
+  // Last node before the destination — what Recorder splices itself into, so a
+  // recording matches what was heard. Not the compressor: makeup sits after it.
+  getRecordTap() { return this._makeup },
 
   setMasterVolume(v) {
     if (!this._masterGain) return

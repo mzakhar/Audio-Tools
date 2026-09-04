@@ -86,11 +86,13 @@ export function validateCandidate(candidate, { kind = 'remote' } = {}) {
   const creator = text(candidate.creator, 120)
   const sourceId = text(candidate.sourceId, 80)
   const sourceUrl = canonicalUrl(candidate.sourceUrl)
+  const previewUrl = candidate.previewUrl == null ? '' : canonicalUrl(candidate.previewUrl)
   const errors = []
   if (!assetName) errors.push('assetName is required')
   if (!creator) errors.push('creator is required')
   if (!sourceId) errors.push('sourceId is required')
   if (!sourceUrl) errors.push('sourceUrl must be an https URL')
+  if (candidate.previewUrl != null && !previewUrl) errors.push('previewUrl must be an https URL')
   if (!Array.isArray(candidate.evidence) || !candidate.evidence.length || candidate.evidence.length > 8) errors.push('Evidence is required')
   const evidence = Array.isArray(candidate.evidence) ? candidate.evidence.map(item => {
     if (!plainObject(item)) return null
@@ -106,7 +108,7 @@ export function validateCandidate(candidate, { kind = 'remote' } = {}) {
   if (errors.length) return { ok: false, errors }
   return { ok: true, value: {
     kind: 'remote', assetName, creator, sourceId, sourceUrl, evidence,
-    reviewerScore: score ?? 0, fitNote: text(candidate.fitNote, 500),
+    ...(previewUrl ? { previewUrl } : {}), reviewerScore: score ?? 0, fitNote: text(candidate.fitNote, 500),
   } }
 }
 

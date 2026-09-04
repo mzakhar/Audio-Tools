@@ -74,6 +74,18 @@ function webDiscovery() {
       return runId
     },
     cancel(runId) { requests.get(runId)?.abort(); requests.delete(runId) },
+    async listLeads() {
+      const response = await fetch('/api/music-discovery/leads')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Saved leads unavailable')
+      return Array.isArray(data.leads) ? data.leads : []
+    },
+    async saveLead(lead) {
+      const response = await fetch('/api/music-discovery/leads', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(lead) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not save lead')
+      return data.lead
+    },
     open(candidate) {
       try {
         const url = new URL(candidate?.sourceUrl)
@@ -862,7 +874,7 @@ function initRecorder() {
       btn.setAttribute('aria-pressed', 'true')
       if (timer) { timer.textContent = '00:00'; timer.hidden = false }
       showToast('● RECORDING')
-      Recorder.start(AudioEngine.getContext(), AudioEngine.getCompressor())
+      Recorder.start(AudioEngine.getContext(), AudioEngine.getRecordTap())
       interval = setInterval(() => {
         elapsed++
         if (timer) timer.textContent = pad(Math.floor(elapsed / 60)) + ':' + pad(elapsed % 60)
@@ -1399,12 +1411,34 @@ function initMidi() {
       try {
         if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity)
         else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch)
-        // ponytail: only CC1 mapped. Add a CC-learn map when a second controller matters.
+        // ponytail: CC1/7/11/120/123 mapped. Add a CC-learn map when a sixth matters.
         else if (detail.kind === 'cc') {
           if (detail.controller === 1) entry.inst.send({ type: 'mod', value: detail.value / 127 })
+          // Channel volume and expression ride the mixer channel's own gain.
+          // Live only — the stored fader is untouched, so reopening the project
+          // comes back at its saved level rather than wherever the knob was left.
+          else if (detail.controller === 7 || detail.controller === 11) {
+            if (track.mixerChannelId) MixerEngine.setVolume(track.mixerChannelId, detail.value / 127)
+          }
+          // All Sound Off / All Notes Off. Palette voices sustain until their
+          // note-off, so one dropped note-off is a drone for the life of the
+          // tab — and a drone the master limiter keeps ducking everything under.
+          // Disposing is the panic; the next note-on rebuilds the instrument.
+          else if (detail.controller === 120 || detail.controller === 123) {
+            entry.inst.dispose()
+            _liveInstruments.delete(trackId)
+          }
         }
         else entry.inst.send({ type: 'pitch-bend', value: detail.value })
       } catch (err) {}
+    }
+
+    // The panic disposed the instruments those routes pointed at; a stale entry
+    // would send the next note-off to something already gone.
+    if (detail.kind === 'cc' && (detail.controller === 120 || detail.controller === 123)) {
+      for (const key of [..._soundingRoutes.keys()]) {
+        if (key.startsWith(`${detail.channel}:`)) _soundingRoutes.delete(key)
+      }
     }
   }
 

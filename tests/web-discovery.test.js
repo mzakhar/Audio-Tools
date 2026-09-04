@@ -1,4 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createWebDiscoveryHandler } from '../src/web-discovery/index.js'
 
@@ -12,6 +15,7 @@ const token = (claims = {}) => {
   return `${head}.${payload}.${sign('RSA-SHA256', Buffer.from(`${head}.${payload}`), privateKey).toString('base64url')}`
 }
 const request = (payload, access = token()) => ({ method: 'POST', url: '/api/music-discovery', headers: { 'cf-access-jwt-assertion': access }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(payload)) } })
+const leadRequest = (method, payload, access = token()) => ({ method, url: '/api/music-discovery/leads', headers: { 'cf-access-jwt-assertion': access }, async *[Symbol.asyncIterator]() { if (payload) yield Buffer.from(JSON.stringify(payload)) } })
 const response = () => ({ writeHead: vi.fn(), end: vi.fn() })
 const validBrief = { text: 'soul vocal', target: 'sample-loop', sources: ['web'] }
 const freesound = { results: [{ name: 'Soul Vocal', username: 'Ada', url: 'https://freesound.org/people/ada/sounds/1/', license: 'CC0' }] }
@@ -57,5 +61,23 @@ describe('web music discovery proxy', () => {
     const res = response()
     await run(request(validBrief), res)
     expect(res.writeHead).toHaveBeenCalledWith(429, expect.any(Object))
+  })
+
+  it('shares saved leads across Access identities and persists them atomically', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'synth-leads-'))
+    const fetchFn = vi.fn(async () => ({ ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }))
+    const run = handler(fetchFn, { dataDir })
+    try {
+      const payload = { brief: validBrief, candidate: { assetName: 'Soul Vocal', creator: 'Ada', sourceId: 'freesound', sourceUrl: freesound.results[0].url, evidence: [{ url: freesound.results[0].url, title: 'Soul Vocal' }] } }
+      const saved = response()
+      const second = response()
+      await Promise.all([run(leadRequest('POST', payload), saved), run(leadRequest('POST', { ...payload, candidate: { ...payload.candidate, assetName: 'Soul Choir' } }), second)])
+      expect(saved.writeHead).toHaveBeenCalledWith(201, expect.any(Object))
+      expect(JSON.parse(saved.end.mock.calls[0][0]).lead).toMatchObject({ savedBy: 'user@example.com', candidate: { sourceUrl: freesound.results[0].url } })
+      const listed = response()
+      await run(leadRequest('GET', undefined, token({ email: 'other@example.com' })), listed)
+      expect(listed.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+      expect(JSON.parse(listed.end.mock.calls[0][0]).leads).toHaveLength(2)
+    } finally { await rm(dataDir, { recursive: true, force: true }) }
   })
 })

@@ -9,7 +9,7 @@ spec:
       http:
         paths:
           - path: /api/music-discovery
-            pathType: Exact
+            pathType: Prefix
             backend:
               service:
                 name: synth-discovery

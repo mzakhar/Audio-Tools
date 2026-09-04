@@ -78,6 +78,7 @@ export class LibraryDialog {
     this.scanned = false
     this.el = document.getElementById(LIBRARY_DIALOG_ID)
     if (!this.el) return
+    this.el.addEventListener('close', () => this.stopPreview())
     this.listEl = this.el.querySelector('#lib-list')
     this.importBtn = this.el.querySelector('#lib-import-btn')
     this.importBtn.addEventListener('click', () => this.runImport())
@@ -306,6 +307,13 @@ export class LibraryDialog {
     const open = document.createElement('button')
     open.className = 'midi-btn lib-remove'; open.type = 'button'; open.textContent = 'OPEN'
     open.addEventListener('click', () => this.discovery.open?.(candidate))
+    if (candidate.sourceId === 'freesound' && candidate.previewUrl && this.discovery.preview) {
+      const preview = document.createElement('button')
+      preview.className = 'midi-btn lib-remove'; preview.type = 'button'
+      preview.textContent = this.previewCandidate === candidate ? 'STOP' : 'PLAY'
+      preview.addEventListener('click', () => this.togglePreview(candidate))
+      actions.append(preview)
+    }
     const save = document.createElement('button')
     save.className = 'midi-btn lib-remove'; save.type = 'button'; save.textContent = 'SAVE LEAD'
     save.hidden = !this.discovery.saveLead
@@ -322,6 +330,37 @@ export class LibraryDialog {
     actions.append(open, save)
     row.append(actions)
     return row
+  }
+
+  async togglePreview(candidate) {
+    if (this.previewCandidate === candidate) { this.stopPreview(); this.renderDiscovery(); return }
+    this.stopPreview()
+    const request = this.previewRequest
+    try {
+      const url = await this.discovery.preview(candidate)
+      if (request !== this.previewRequest) return
+      const audio = document.createElement('audio')
+      audio.preload = 'none'
+      audio.src = url
+      audio.addEventListener('ended', () => {
+        if (this.previewAudio === audio) { this.stopPreview(); this.renderDiscovery() }
+      })
+      this.previewAudio = audio
+      this.previewCandidate = candidate
+      await audio.play()
+      this.renderDiscovery()
+    } catch (error) {
+      this.stopPreview()
+      this.setDiscoveryStatus(`Preview failed: ${error.message}`)
+      this.renderDiscovery()
+    }
+  }
+
+  stopPreview() {
+    this.previewRequest = (this.previewRequest || 0) + 1
+    this.previewAudio?.pause()
+    this.previewAudio = null
+    this.previewCandidate = null
   }
 
   /** Indexed metadata chooses this action; no model output can make a local row. */

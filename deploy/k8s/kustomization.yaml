@@ -8,3 +8,4 @@ resources:
   - discovery-deployment.yaml
   - discovery-service.yaml
   - discovery-ingress.yaml
+  - discovery-leads-pvc.yaml

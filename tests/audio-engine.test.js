@@ -46,6 +46,10 @@ describe('AudioEngine.init', () => {
     await engine.init()
     expect(engine.getMasterInput()).toBeTruthy()
     expect(engine.getCompressor()).toBeTruthy()
+    // The record tap is the makeup gain after the limiter, not the limiter:
+    // rewiring them together would silently undo the makeup gain.
+    expect(engine.getRecordTap()).toBeTruthy()
+    expect(engine.getRecordTap()).not.toBe(engine.getCompressor())
     expect(engine.hasRecorder()).toBe(false)
   })
 

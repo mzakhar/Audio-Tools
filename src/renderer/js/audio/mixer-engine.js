@@ -34,7 +34,9 @@ const MixerEngine = {
   setVolume(channelId, value) {
     const ch = _channels.get(channelId)
     if (!ch) return
-    ch.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, value)), AudioEngine.getContext().currentTime, 0.01)
+    // Ceiling matches the fader's own max — clamping at 1 made every notch
+    // above 100% do nothing at all.
+    ch.gain.gain.setTargetAtTime(Math.max(0, Math.min(1.5, value)), AudioEngine.getContext().currentTime, 0.01)
   },
 
   setPan(channelId, value) {

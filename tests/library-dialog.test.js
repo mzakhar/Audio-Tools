@@ -169,7 +169,7 @@ describe('LibraryDialog browse', () => {
 })
 
 describe('LibraryDialog discovery', () => {
-  const candidate = { assetName: 'Soul Vocal', sourceUrl: 'https://freesound.org/soul', creator: 'Ada', sourceId: 'freesound', evidence: [{ url: 'https://freesound.org/soul' }], fitNote: 'Fits hard house.' }
+  const candidate = { assetName: 'Soul Vocal', sourceUrl: 'https://freesound.org/soul', creator: 'Ada', sourceId: 'freesound', previewUrl: 'https://cdn.freesound.org/previews/1/soul.mp3', evidence: [{ url: 'https://freesound.org/soul' }], fitNote: 'Fits hard house.' }
 
   it('does not render discovery controls without a trusted API', () => {
     setup()
@@ -270,6 +270,23 @@ describe('LibraryDialog discovery', () => {
     await vi.waitFor(() => expect(discovery.saveLead).toHaveBeenCalledWith(expect.objectContaining({ candidate })))
     await vi.waitFor(() => expect(document.getElementById('discovery-leads').textContent).toContain('1 saved lead'))
     dialog.cancelDiscovery()
+  })
+
+  it('plays and stops only a main-approved Freesound preview on click', async () => {
+    const preview = vi.fn(async () => 'https://cdn.freesound.org/previews/1/soul.mp3')
+    const discovery = { configure: vi.fn(), available: async () => true, run: async () => 'run-1', onEvent: vi.fn(), preview }
+    const { dialog } = setup({ discovery })
+    dialog.candidates = [candidate]
+    dialog.renderDiscovery()
+    const audio = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    document.querySelector('#discovery-results button').click()
+    await vi.waitFor(() => expect(document.querySelector('#discovery-results button').textContent).toBe('STOP'))
+    expect(preview).toHaveBeenCalledWith(candidate)
+    expect(audio).toHaveBeenCalled()
+    document.querySelector('#discovery-results button').click()
+    expect(pause).toHaveBeenCalled()
+    audio.mockRestore(); pause.mockRestore()
   })
 
   it('does not leave FIND active when final arrives before run resolves', async () => {

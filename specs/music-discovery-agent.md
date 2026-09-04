@@ -52,11 +52,20 @@ web are both targets, but web ships only after the access gate below is met.
 - OpenAI review uses one bounded Responses request over at most 12 supplied
   Freesound rows, strict indexed JSON, 1200 output tokens, a 15-second timeout,
   and falls back to source ranking if unavailable. It cannot add a candidate.
+- Personal OpenAI-compatible providers store a separate HTTPS endpoint, model,
+  and encrypted key. Their one-tool web search is used only when Freesound
+  fails; it never runs beside a successful Freesound request.
 - Local Find searches the existing indexed SoundFont metadata, imports and arms
   only through the existing path, and records a saved local lead's imported
   pack/patch identity after the user acts.
 
 ## Product decisions
+
+### Status update — 2026-08-30
+
+Web saved leads now use one Access-authenticated shared list on the discovery
+service PVC. Reads and writes use the same route; writes are serialized and
+atomically replaced. One replica is intentional for this personal app.
 
 - **Discover, do not generate.** The output is a shortlist of existing samples,
   loops, packs, presets, and local-library items — never generated music or a

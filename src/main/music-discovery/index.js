@@ -46,24 +46,20 @@ export async function runDiscovery({ brief: rawBrief, source, reviewer, signal, 
 
 export function createDiscoveryService({ connections = [], freesound } = {}) {
   const openai = connections.find(connection => connection?.id === 'openai')
-  const sources = [
-    createFreesoundAdapter(freesound),
-    createOpenAIWebSearchAdapter(openai),
-    connections.find(connection => typeof connection?.investigate === 'function'),
-  ].filter(Boolean)
-  const source = sources.length ? {
+  const provider = connections.find(connection => connection?.id === 'provider')
+  const primary = createFreesoundAdapter(freesound) || connections.find(connection => typeof connection?.investigate === 'function')
+  const fallback = [provider, openai].map(createOpenAIWebSearchAdapter).find(Boolean)
+  const source = primary || fallback ? {
     async investigate(args) {
-      const candidates = []
-      let failure = null
-      for (const adapter of sources) {
-        try { candidates.push(...(await adapter.investigate(args))?.candidates || []) }
-        catch (error) { if (args.signal?.aborted) throw error; failure ||= error }
+      if (!primary) return fallback.investigate(args)
+      try { return await primary.investigate(args) }
+      catch (error) {
+        if (args.signal?.aborted || !fallback) throw error
+        return fallback.investigate(args)
       }
-      if (!candidates.length && failure) throw failure
-      return { candidates }
     },
   } : null
-  const reviewer = createOpenAICompatibleAdapter(openai)
+  const reviewer = createOpenAICompatibleAdapter(openai) || createOpenAICompatibleAdapter(provider)
   const runs = new Map()
   return {
     available: () => !!source,

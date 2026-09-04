@@ -1,6 +1,5 @@
 import { validateCandidate } from '../../shared/music-discovery/contracts.js'
-
-const OPENAI_URL = 'https://api.openai.com/v1/responses'
+import { responsesUrl } from './openai-compatible.js'
 const MAX_RESULTS = 12
 const REQUEST_TIMEOUT_MS = 15000
 
@@ -13,10 +12,11 @@ function citations(body) {
     .filter(item => item?.type === 'url_citation')
 }
 
-/** Bounded OpenAI search. Candidate fields come only from returned citations. */
-export function createOpenAIWebSearchAdapter(connection = {}, { fetchFn = fetch } = {}) {
+/** Bounded provider search. Candidate fields come only from returned citations. */
+export function createOpenAIWebSearchAdapter(connection = {}, { fetchFn = connection.fetchFn || fetch } = {}) {
   if (typeof connection.auth !== 'string' || !connection.auth || typeof connection.model !== 'string' || !connection.model) return null
-  if (typeof fetchFn !== 'function') throw new Error('Invalid OpenAI configuration')
+  const endpoint = responsesUrl(connection.baseUrl)
+  if (!endpoint || typeof fetchFn !== 'function') throw new Error('Invalid provider configuration')
   return {
     async investigate({ brief, signal }) {
       const controller = new AbortController()
@@ -26,7 +26,7 @@ export function createOpenAIWebSearchAdapter(connection = {}, { fetchFn = fetch 
       signal?.addEventListener('abort', abort, { once: true })
       let response
       try {
-        response = await fetchFn(OPENAI_URL, {
+        response = await fetchFn(endpoint, {
           method: 'POST', signal: controller.signal,
           headers: { authorization: `Bearer ${connection.auth}`, 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -50,8 +50,8 @@ export function createOpenAIWebSearchAdapter(connection = {}, { fetchFn = fetch 
         if (!assetName || used.has(url)) return []
         used.add(url)
         const checked = validateCandidate({
-          assetName, creator: host, sourceId: 'openai-web-search', sourceUrl: url,
-          evidence: [{ url, title: assetName, note: 'OpenAI web-search citation' }], reviewerScore: 0, fitNote: '',
+          assetName, creator: host, sourceId: connection.id === 'provider' ? 'provider-web-search' : 'openai-web-search', sourceUrl: url,
+          evidence: [{ url, title: assetName, note: 'Provider web-search citation' }], reviewerScore: 0, fitNote: '',
         })
         return checked.ok ? [checked.value] : []
       })

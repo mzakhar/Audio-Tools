@@ -6,6 +6,7 @@ const handler = createWebDiscoveryHandler({
   audience: process.env.CF_ACCESS_AUD,
   freesoundToken: process.env.FREESOUND_API_KEY,
   openaiKey: process.env.OPENAI_API_KEY,
+  dataDir: process.env.DISCOVERY_DATA_DIR || '/data',
 })
 
 createServer((req, res) => {
