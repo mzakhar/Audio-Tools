@@ -2,6 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 COPY src/shared/music-discovery ./src/shared/music-discovery
+COPY src/main/music-discovery/openai-web-search.js ./src/main/music-discovery/openai-web-search.js
 COPY src/web-discovery ./src/web-discovery
 
 USER node
