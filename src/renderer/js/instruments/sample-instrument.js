@@ -1,3 +1,8 @@
+// Velocity reaches amplitude linearly unless a caller injects a curve. Live
+// playing wants one (a pad hit lands soft); an authored clip does not — curving
+// it would silently relight the dynamics of every saved project.
+const linearVelocity = velocity => Math.max(0, Math.min(127, velocity)) / 127
+
 function zoneFor(patch, pitch, velocity) {
   return patch?.zones?.find(zone => pitch >= zone.keyLo && pitch <= zone.keyHi &&
     (zone.velocityLo === undefined || velocity >= zone.velocityLo) &&
@@ -5,7 +10,7 @@ function zoneFor(patch, pitch, velocity) {
 }
 
 /** One Web Audio source per held note; sample loading stays in the injected store. */
-export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus = () => {} }) {
+export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus = () => {}, velocityToGain = linearVelocity }) {
   if (!ctx || !output || !sampleStore?.get) throw new TypeError('sample instrument needs ctx, output, and sampleStore')
   const voices = new Map()
   const pending = new Map()
@@ -90,7 +95,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     // Earlier SF2 imports stored attenuation as zero/negative gain. Treat it
     // as unity so existing local packs become audible after this fix.
     const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
-    const amplitude = zoneGain * Math.max(0, Math.min(127, velocity)) / 127
+    const amplitude = zoneGain * velocityToGain(velocity)
     const envelope = zone.volumeEnvelope
     if (envelope) {
       const delay = Math.max(0, envelope.delay || 0), attack = Math.max(0, envelope.attack || 0)

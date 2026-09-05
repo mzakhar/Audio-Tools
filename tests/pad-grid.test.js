@@ -58,12 +58,22 @@ describe('PadGrid', () => {
   })
 
   it('renders a pad the instrument cannot play as unlit and dead', () => {
-    // The internal drum palette only answers to the four mapped GM notes.
-    const { onPad, container } = mount({ isPlayable: note => PALETTE_DRUM_NOTES[note] !== undefined })
+    // Any instrument may veto a note — a pack with no zone for it, say. The
+    // internal drum palette no longer does; see the next test.
+    const playable = padToNote('A', 1)
+    const { onPad, container } = mount({ isPlayable: note => note === playable })
     const dead = [...container.querySelectorAll('.drum-pad')].filter(el => el.disabled)
-    expect(dead.length).toBe(8 - padBank('A').filter(pad => PALETTE_DRUM_NOTES[pad.note] !== undefined).length)
+    expect(dead.length).toBe(padBank('A').length - 1)
     press(dead[0])
     expect(onPad).not.toHaveBeenCalled()
+  })
+
+  it('the internal drum palette answers every pad in both banks', () => {
+    // A hardware pad that makes no sound reads as a dead controller, not as an
+    // unmapped note — the on-screen grid is the only place the gap is visible.
+    for (const bank of ['A', 'B']) {
+      for (const pad of padBank(bank)) expect(PALETTE_DRUM_NOTES[pad.note]).toBeDefined()
+    }
   })
 
   it('trigger() presses the numbered slot of the current bank', () => {

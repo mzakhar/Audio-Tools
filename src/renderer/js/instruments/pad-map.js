@@ -34,7 +34,36 @@ const BANKS = {
   B: [41, 45, 48, 50, 51, 54, 56, 58],
 }
 
-export const PALETTE_DRUM_NOTES = { 36: 0, 38: 1, 42: 2, 46: 3 }
+// Every GM percussion note across both banks (plus 35/40/44) routed onto the
+// palette's 4 voices (0 kick, 1 snare, 2 hihat, 3 clap), grouped by family —
+// the drum palette has no real toms/cymbals yet, so the closest voice stands
+// in for the whole family.
+// ponytail: only four voices exist, map by family; revisit when the drum
+// palette grows real toms.
+export const PALETTE_DRUM_NOTES = {
+  35: 0, 36: 0,                   // kick
+  37: 1, 38: 1, 40: 1,            // snare
+  39: 3,                          // clap
+  41: 0,                          // kick (toms)
+  42: 2,                          // hihat
+  43: 0,                          // kick (toms)
+  44: 2,                          // hihat
+  45: 0,                          // kick (toms)
+  46: 2,                          // hihat (open)
+  47: 0,                          // kick (toms)
+  48: 0,                          // kick (toms)
+  49: 3,                          // clap
+  50: 0,                          // kick (toms)
+  51: 2,                          // hihat
+  52: 3,                          // clap
+  53: 2,                          // hihat
+  54: 2,                          // hihat
+  55: 3,                          // clap
+  56: 2,                          // hihat
+  57: 3,                          // clap
+  58: 2,                          // hihat
+  59: 2,                          // hihat
+}
 
 function bankRows(bank) {
   const notes = BANKS[bank]

@@ -7,6 +7,7 @@
 import RackEngine from '../rack/rack-engine.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 import { PALETTE_DRUM_NOTES } from '../instruments/pad-map.js'
+import { velocityGain } from '../utils/velocity.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
 
@@ -33,7 +34,9 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
     const patch = pack?.byId?.get(instrument.patchId)
     const sampleStore = patch && sampleStoreFor?.(pack, ctx)
     if (!sampleStore) return null
-    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus })
+    // The curve belongs to playing, not to stored notes: zone selection still
+    // sees the raw velocity, so a soft hit keeps its soft velocity layer.
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus, velocityToGain: velocityGain })
     return {
       ...inst,
       send(event) {
@@ -68,16 +71,16 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
     }
 
     return {
-      noteOn(pitch, velocity) {
+      noteOn(pitch, velocity, time = ctx.currentTime) {
         if (held.has(pitch)) return
         ensureMounted()
         if (!moduleId) return
         held.add(pitch)
-        RackEngine.sendEvent(handle, moduleId, 'note', { type: 'note-on', note: pitch, velocity, time: ctx.currentTime })
+        RackEngine.sendEvent(handle, moduleId, 'note', { type: 'note-on', note: pitch, velocity, time: Math.max(time, ctx.currentTime) })
       },
-      noteOff(pitch) {
+      noteOff(pitch, time = ctx.currentTime) {
         if (!moduleId || !held.delete(pitch)) return
-        RackEngine.sendEvent(handle, moduleId, 'note', { type: 'note-off', note: pitch, time: ctx.currentTime })
+        RackEngine.sendEvent(handle, moduleId, 'note', { type: 'note-off', note: pitch, time: Math.max(time, ctx.currentTime) })
       },
       send(event) {
         // Never mounts: a wheel nudge must not start every oscillator in a rack
@@ -115,28 +118,32 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
   let bend = 0             // semitones, applied to voices struck later too
   let mod = 0
   return {
-    noteOn(pitch, velocity) {
-      if (voices.has(pitch)) return
+    noteOn(pitch, velocity, time = ctx.currentTime) {
+      const t = Math.max(time, ctx.currentTime)
+      // Drum voices are one-shot and stop() is a no-op (palettes.js), so a
+      // repeat hit while the map entry is stale has nothing to release —
+      // overwrite and let it sound. A held melodic key must still not stack.
+      if (voices.has(pitch) && !drums) return
       let voice
       if (drums) {
         // GM percussion onto the palette's 0–3 voices. An unmapped note is
         // silent rather than detuned — the pad shows unlit for the same reason.
         const index = PALETTE_DRUM_NOTES[pitch]
         if (index === undefined) return
-        voice = palette.createDrumVoice(ctx, output, index, velocity / 127, ctx.currentTime)
+        voice = palette.createDrumVoice(ctx, output, index, velocityGain(velocity), t)
       } else {
         const freq = 440 * Math.pow(2, (pitch - 69) / 12)
-        voice = palette.createVoice(ctx, output, freq, velocity / 127, ctx.currentTime)
+        voice = palette.createVoice(ctx, output, freq, velocityGain(velocity), t)
       }
       voices.set(pitch, voice)
       // A note struck mid-bend has to land in tune, not snap on the next wheel move.
       if (bend) voice?.setBend?.(bend)
       if (mod) voice?.setMod?.(mod)
     },
-    noteOff(pitch) {
+    noteOff(pitch, time = ctx.currentTime) {
       const voice = voices.get(pitch)
       if (!voice) return
-      voice.stop(ctx.currentTime)
+      voice.stop(Math.max(time, ctx.currentTime))
       voices.delete(pitch)
     },
     send(event) {

@@ -125,6 +125,25 @@ describe('instrumentFor', () => {
     expect(() => drums.send({ type: 'pitch-bend', value: 1 })).not.toThrow()
   })
 
+  it('a repeat note-on on a drum pitch with no note-off between produces a second voice', () => {
+    const drumVoices = []
+    const palettes = {
+      drum: {
+        type: 'drum',
+        createDrumVoice: vi.fn(() => {
+          const voice = { stop: vi.fn() }
+          drumVoices.push(voice)
+          return voice
+        })
+      }
+    }
+    const { ctx } = fakeCtx()
+    const inst = instrumentFor({ type: 'palette', paletteKey: 'drum' }, { palettes, ctx, output: {} })
+    inst.noteOn(36, 100)
+    inst.noteOn(36, 100)
+    expect(drumVoices).toHaveLength(2)
+  })
+
   it('leaves no source running after dispose', async () => {
     const { sources, deps } = packDeps()
     const inst = instrumentFor({ type: 'pack', packId: 'gm', packVersion: '1', patchId: 'piano' }, deps)
