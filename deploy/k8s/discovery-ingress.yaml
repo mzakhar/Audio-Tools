@@ -8,7 +8,7 @@ spec:
     - host: synth.zakharhome.org
       http:
         paths:
-          - path: /api/music-discovery
+          - path: /api
             pathType: Prefix
             backend:
               service:
