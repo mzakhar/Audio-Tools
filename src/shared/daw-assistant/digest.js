@@ -126,3 +126,87 @@ export function buildDigest(state) {
     tracks, mixer, racks, patterns, truncated,
   }
 }
+
+/**
+ * The server must not trust that a client sent `buildDigest()` output — a
+ * stale or hostile caller could otherwise inflate the digest it forwards to
+ * OpenAI far past what a real digest costs. Re-applies the same caps and
+ * sanitizers against an arbitrary parsed JSON value, coercing bad types to
+ * safe defaults instead of throwing, and dropping unknown keys by rebuilding
+ * every entry from a fixed whitelist of fields.
+ */
+export function clampDigest(digest) {
+  const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], truncated: false }
+  if (!plainObject(digest)) return empty
+  let truncated = false
+  const drop = (list, cap) => {
+    const items = Array.isArray(list) ? list : []
+    if (items.length > cap) truncated = true
+    return items.slice(0, cap)
+  }
+
+  const tracks = drop(digest.tracks, MAX_TRACKS).map(track => {
+    if (!plainObject(track)) track = {}
+    return {
+      id: text(track.id),
+      name: text(track.name),
+      type: text(track.type, 16),
+      ...(instrument(track.instrument) ? { instrument: instrument(track.instrument) } : {}),
+      ...(Number.isInteger(track.midiChannel) ? { midiChannel: track.midiChannel } : {}),
+      clipCount: finite(track.clipCount),
+      clips: drop(track.clips, MAX_CLIPS).map(clip => plainObject(clip) ? {
+        id: text(clip.id), startBeat: finite(clip.startBeat), duration: finite(clip.duration), noteCount: finite(clip.noteCount),
+      } : { id: '', startBeat: 0, duration: 0, noteCount: 0 }),
+    }
+  })
+
+  const mixer = drop(digest.mixer, MAX_TRACKS)
+    .filter(channel => plainObject(channel) && tracks.some(track => track.id === channel.trackId))
+    .map(channel => ({
+      id: text(channel.id), trackId: text(channel.trackId),
+      volume: finite(channel.volume), pan: finite(channel.pan),
+      mute: !!channel.mute, solo: !!channel.solo,
+    }))
+
+  const racks = (Array.isArray(digest.racks) ? digest.racks : []).map(rack => {
+    if (!plainObject(rack)) rack = {}
+    return {
+      id: text(rack.id),
+      name: text(rack.name),
+      modules: drop(rack.modules, MAX_MODULES).map(mod => plainObject(mod) ? {
+        id: text(mod.id), type: text(mod.type, 32),
+        rail: finite(mod.rail), hp: finite(mod.hp),
+        bypassed: !!mod.bypassed, params: scalars(mod.params),
+      } : { id: '', type: '', rail: 0, hp: 0, bypassed: false, params: {} }),
+      cables: drop(rack.cables, MAX_CABLES).map(cable => plainObject(cable) ? {
+        id: text(cable.id),
+        from: { moduleId: text(cable.from?.moduleId), port: text(cable.from?.port, 32) },
+        to: { moduleId: text(cable.to?.moduleId), port: text(cable.to?.port, 32) },
+      } : { id: '', from: { moduleId: '', port: '' }, to: { moduleId: '', port: '' } }),
+    }
+  })
+
+  const patterns = (Array.isArray(digest.patterns) ? digest.patterns : []).map(pattern => {
+    if (!plainObject(pattern)) pattern = {}
+    return {
+      id: text(pattern.id),
+      name: text(pattern.name),
+      barCount: finite(pattern.barCount),
+      currentBar: finite(pattern.currentBar),
+      chain: (Array.isArray(pattern.chain) ? pattern.chain : []).slice(0, 64).map(finite),
+      bars: drop(pattern.bars, MAX_BARS).map(bar => plainObject(bar) ? {
+        lastStep: finite(bar.lastStep),
+        scale: text(bar.scale, 16),
+        lanes: Object.fromEntries(Object.entries(plainObject(bar.lanes) ? bar.lanes : {})
+          .filter(([id]) => !UNSAFE_KEYS.has(id) && id.length <= MAX_NAME)
+          .map(([id, steps]) => [id, typeof steps === 'string' ? steps.replace(/[^01]/g, '0').padEnd(STEPS, '0').slice(0, STEPS) : '0'.repeat(STEPS)])),
+      } : { lastStep: 0, scale: '', lanes: {} }),
+    }
+  })
+
+  return {
+    bpm: finite(digest.bpm),
+    timeSignature: Array.isArray(digest.timeSignature) ? digest.timeSignature.slice(0, 2).map(finite) : [4, 4],
+    tracks, mixer, racks, patterns, truncated,
+  }
+}

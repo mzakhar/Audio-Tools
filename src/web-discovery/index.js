@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { normalizeBrief, rankCandidates, validateCandidate } from '../shared/music-discovery/contracts.js'
 import { createOpenAIWebSearchAdapter } from '../main/music-discovery/openai-web-search.js'
 import { ALLOWLIST, MAX_ACTIONS, MAX_SUMMARY, validatePlanShape } from '../shared/daw-assistant/plan.js'
+import { clampDigest } from '../shared/daw-assistant/digest.js'
 
 const MAX_BODY_BYTES = 16 * 1024
 const REQUEST_TIMEOUT_MS = 15000
@@ -213,7 +214,11 @@ export function createWebDiscoveryHandler(options = {}) {
         if (typeof rawPrompt !== 'string' || rawPrompt.length < 1 || rawPrompt.length > ASSISTANT_MAX_PROMPT) return send(res, 400, { error: `Prompt must be 1-${ASSISTANT_MAX_PROMPT} characters` })
         const prompt = text(rawPrompt, ASSISTANT_MAX_PROMPT)
         if (!prompt) return send(res, 400, { error: 'Prompt is required' })
-        const digest = payload?.digest
+        const rawDigest = payload?.digest
+        if (rawDigest === null || typeof rawDigest !== 'object' || Array.isArray(rawDigest)) return send(res, 400, { error: 'Digest must be an object' })
+        // Never trust that the browser sent buildDigest() output — clamp it to
+        // the same caps and shape before it reaches a paid model.
+        const digest = clampDigest(rawDigest)
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(new Error('Assistant request timed out')), ASSISTANT_TIMEOUT_MS)
         let plan

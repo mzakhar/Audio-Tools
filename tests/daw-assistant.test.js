@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { buildDigest, MAX_TRACKS, MAX_CLIPS } from '../src/shared/daw-assistant/digest.js'
+import { buildDigest, clampDigest, MAX_TRACKS, MAX_CLIPS } from '../src/shared/daw-assistant/digest.js'
 import { validatePlanShape, validatePlan, describeAction, planToCommands, ALLOWLIST } from '../src/shared/daw-assistant/plan.js'
 import ProjectStore, { AddTrack, SetBpm } from '../src/renderer/js/store/ProjectStore.js'
 
@@ -65,6 +65,29 @@ describe('daw assistant digest', () => {
     const digest = buildDigest(long)
     expect(digest.tracks[0].name).toHaveLength(64)
     expect(digest.racks[0].modules[0].params).toEqual({ tune: 3 })
+  })
+})
+
+describe('clampDigest', () => {
+  it('caps an oversized client-supplied digest the same as buildDigest would', () => {
+    const hostile = { tracks: Array.from({ length: 500 }, (_, i) => ({ id: `t${i}` })) }
+    expect(clampDigest(hostile).tracks).toHaveLength(MAX_TRACKS)
+    expect(clampDigest(hostile).truncated).toBe(true)
+  })
+
+  it('returns a minimal valid digest for non-object input', () => {
+    const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], truncated: false }
+    expect(clampDigest('not a digest')).toEqual(empty)
+    expect(clampDigest(null)).toEqual(empty)
+    expect(clampDigest([1, 2, 3])).toEqual(empty)
+  })
+
+  it('drops a __proto__ key instead of letting it survive', () => {
+    const hostile = JSON.parse('{"tracks":[{"__proto__":{"polluted":true},"id":"t1"}]}')
+    const clamped = clampDigest(hostile)
+    expect(clamped.tracks[0]).not.toHaveProperty('polluted')
+    expect(Object.getPrototypeOf(clamped.tracks[0])).toBe(Object.prototype)
+    expect({}.polluted).toBeUndefined()
   })
 })
 

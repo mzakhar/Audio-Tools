@@ -258,11 +258,18 @@ Changes to `src/web-discovery/`:
    branch so it runs for **every** authenticated route, keyed by identity and
    route. `/leads` gains rate limiting it should already have had.
 3. One OpenAI Responses request, `json_schema` response format, output tokens
-   capped, 15 s timeout — matching the discipline already in
+   capped, 20 s timeout (longer than the 15 s discovery review — plan output
+   runs longer) — matching the discipline already in
    `openai-compatible.js:32`, and preferably by extracting that call rather than
    writing a third copy of it.
-4. Validate the returned plan with the shared `validatePlan` before responding,
-   so a malformed plan never reaches a browser.
+4. Validate the returned plan with the shared `validatePlanShape` before
+   responding, so a malformed plan never reaches a browser. The server has no
+   project state and the rack registry is renderer-only (see "Contracts —
+   phase 0"), so it cannot run the full `validatePlan` — that happens in the
+   renderer at apply time.
+5. Clamp the client-supplied `digest` with `clampDigest` (reapplying the same
+   caps `buildDigest` used) before it reaches OpenAI, so a stale or hostile
+   client cannot inflate a paid request past what a real digest costs.
 
 The digest is built in the renderer and posted up. The server does not hold
 project state, does not persist prompts or plans, and logs neither.

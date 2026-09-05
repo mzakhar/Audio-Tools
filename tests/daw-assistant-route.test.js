@@ -76,12 +76,37 @@ describe('POST /api/assistant', () => {
     const fetchFn = planFetch(validPlan)
     const run = handler(fetchFn, { assistantLimit: 1 })
     await run(assistantRequest({ prompt: 'set bpm to 128', digest: validDigest }), response())
+    const callsBeforeLimited = fetchFn.mock.calls.length
     const limited = response()
     await run(assistantRequest({ prompt: 'set bpm to 130', digest: validDigest }), limited)
     expect(limited.writeHead).toHaveBeenCalledWith(429, expect.any(Object))
+    // Only the Access certs lookup runs for the blocked request — the 429
+    // short-circuits before the paid OpenAI call.
+    expect(fetchFn.mock.calls.length - callsBeforeLimited).toBe(1)
     const leads = response()
     await run(leadsGet(), leads)
     expect(leads.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+  })
+
+  it('refuses a digest that is not a plain object, with no provider call', async () => {
+    for (const badDigest of ['not an object', null, [1, 2, 3]]) {
+      const fetchFn = vi.fn(async () => certsResponse)
+      const res = response()
+      await handler(fetchFn)(assistantRequest({ prompt: 'do something', digest: badDigest }), res)
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object))
+      expect(fetchFn).toHaveBeenCalledTimes(1) // only the Access certs lookup
+    }
+  })
+
+  it('clamps an oversized digest before it reaches OpenAI', async () => {
+    const fetchFn = planFetch(validPlan)
+    const res = response()
+    const hostile = { ...validDigest, tracks: Array.from({ length: 500 }, (_, i) => ({ id: `t${i}` })) }
+    await handler(fetchFn)(assistantRequest({ prompt: 'do something', digest: hostile }), res)
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+    const openaiCall = fetchFn.mock.calls.find(([url]) => String(url) === 'https://api.openai.com/v1/responses')
+    const sentDigest = JSON.parse(JSON.parse(openaiCall[1].body).input).digest
+    expect(sentDigest.tracks.length).toBeLessThanOrEqual(32)
   })
 
   it('rate limits /leads too', async () => {
