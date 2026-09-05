@@ -881,6 +881,20 @@ const ProjectStore = {
     notify()
   },
 
+  // One plan is one undo: run every command against a single snapshot and push
+  // one history entry. A throw anywhere abandons the batch — a half-applied
+  // batch is worse than none (specs/daw-assistant.md).
+  dispatchBatch(commands, label = 'Batch') {
+    if (!commands?.length) return
+    let next = _state
+    for (const command of commands) next = command.execute(next)
+    _undoStack.push({ command: { label }, prev: _state })
+    if (_undoStack.length > MAX_HISTORY) _undoStack.shift()
+    _redoStack = []
+    _state = next
+    notify()
+  },
+
   undo() {
     if (!_undoStack.length) return
     const { command, prev } = _undoStack.pop()

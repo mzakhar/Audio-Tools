@@ -16,15 +16,17 @@ dialog in `specs/ui-shell.md`.
 
 | Phase | State |
 |---|---|
-| 0 — contracts and settings | proposed |
-| 1 — brief to researched shortlist | proposed |
-| 2 — review, provenance, and Library handoff | proposed |
+| 0 — contracts and settings | shipped |
+| 1 — brief to researched shortlist | shipped |
+| 2 — review, provenance, and Library handoff | shipped |
 | 3 — optional provider and tool expansion | deferred |
-| Web rollout | blocked — see "Web deployment gate" |
+| Web rollout | shipped — gate met by option 2 |
 
-Completed: phases 0-2 in Electron. Phase 3 remains deliberately deferred.
-Web rollout remains blocked on the authenticated proxy and its manually applied
-fleet Secret; no browser discovery is exposed yet.
+Phases 0-2 are in, on both Electron and web. Phase 3 remains deliberately
+deferred. The web deployment gate below was met by option 2: the
+`synth-discovery` proxy runs behind Cloudflare Access with the four-key cluster
+Secret applied by hand, and browser discovery is live at
+`https://synth.zakharhome.org`.
 
 Settled: a hosted OpenAI-compatible provider with a user-supplied key; the first
 web sources are Freesound and the provider's generic web search; Electron and
@@ -58,6 +60,26 @@ web are both targets, but web ships only after the access gate below is met.
 - Local Find searches the existing indexed SoundFont metadata, imports and arms
   only through the existing path, and records a saved local lead's imported
   pack/patch identity after the user acts.
+
+## Known gaps — 2026-09-05
+
+Shipped and running, with these unfinished edges. None blocks use; each needs a
+decision rather than discovery.
+
+- **Web `open` is weaker than the non-negotiable says.** `app.js:92` accepts
+  `http:` as well as `https:` and does not check the host against the evidence
+  record. Electron's `safeOpenUrl` does both. Either tighten the web adapter or
+  amend the rule; today they disagree.
+- **Web is missing three Electron capabilities**: shared preview, `linkLead`
+  after an import, and any local-preset path. Whether web should have them is
+  undecided — the browser has no SoundFont folder registry.
+- **Spend guardrails from phase 1 are partly unbuilt.** Per-run token and time
+  ceilings are in; reported provider usage and the advisory monthly budget are
+  not. `budget` in `contracts.js` is the brief's free/paid filter, not spend.
+  Per-identity *rate* limiting exists; per-identity *spend* limiting does not.
+- **Ranking logic is duplicated.** The web service reviews with `json_object`
+  inline while Electron uses the stricter `json_schema` path in
+  `openai-compatible.js`. They will drift.
 
 ## Product decisions
 
@@ -146,11 +168,16 @@ Freesound is the better-behaved first adapter precisely because it has a real
 API with per-asset licence metadata, so provenance comes from a structured field
 rather than from a snippet the model paraphrased.
 
-## Web deployment gate
+## Web deployment gate — met
 
-The web build is a target, but **discovery stays hidden there until one of these
-is true**, because `deploy/k8s/` currently defines no authentication of any kind
-and `synth.zakharhome.org` is reachable by anyone:
+Kept for the reasoning; the decision it gates has been made. Option 2 shipped:
+`src/web-discovery/` verifies a Cloudflare Access JWT on every route, the key
+lives in the `synth-discovery` cluster Secret, and per-identity rate limiting is
+in the route. `connect-src` stayed `'self'` because the proxy is same-origin.
+The Access application protects `synth.zakharhome.org` and
+`synth.zakharhome.org/api/music-discovery` under the Family OIDC policy.
+
+The original gate read:
 
 1. **Bring your own key.** The person supplies their own provider key at
    runtime. It is theirs, it is stored per-browser, it is never bundled, and it
@@ -176,10 +203,11 @@ Two further constraints follow from how this app is deployed:
 Electron has neither problem — main holds the key in OS credential storage and
 the renderer never sees it. Ship there first.
 
-### Fleet secret plan — before proxy code ships
+### Fleet secret plan — applied
 
-The fleet has no deployed SOPS flow yet, so use one small, manually applied
-cluster Secret. Do not put a value or base64 value in either repository.
+This is how the deployed Secret was created and how to rotate it. The fleet has
+no SOPS flow yet, so it stays one small, manually applied cluster Secret. Do not
+put a value or base64 value in either repository.
 
 ```text
 namespace: synth

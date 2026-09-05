@@ -2270,3 +2270,19 @@ dialog.pr-dialog[open] {
   width: 100%;
   height: 100%;
 }
+
+/* --- Assistant ---------------------------------------------------------- */
+.asst-prompt {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 6px;
+}
+.asst-status { font-size: 10px; color: var(--text-dim); white-space: pre-line; }
+.asst-plan { display: flex; flex-direction: column; gap: 4px; max-height: min(46vh, 360px); overflow-y: auto; }
+.asst-summary { margin: 0; font-size: 11px; color: var(--text); }
+.asst-action { font-size: 10px; color: var(--text-dim); padding: 4px 6px; background: var(--bg2); border: 1px solid var(--border); }
