@@ -12,10 +12,11 @@ const DEFAULTS = {
   recording: false,
   midiInput: null,
   canImportPacks: true,
+  assistant: false,
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, midiInput, canImportPacks } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, midiInput, canImportPacks, assistant } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -134,6 +135,15 @@ export function commandItems(opts = {}) {
       group: 'setup',
       enabled: true,
       visible: isArrange,
+    },
+    {
+      id: 'assistant',
+      label: 'Assistant',
+      shortcut: 'Ctrl+Shift+A',
+      group: 'setup',
+      // No route, no entry: an item that cannot work does not exist here.
+      enabled: true,
+      visible: !!assistant,
     },
     {
       id: 'instrument-browser',

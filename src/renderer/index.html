@@ -197,6 +197,23 @@
     </div>
   </dialog>
 
+  <dialog id="assistant-dialog" class="app-dialog" aria-labelledby="asst-title">
+    <div class="dlg-header">
+      <span id="asst-title" class="dlg-title">ASSISTANT</span>
+      <button class="dlg-close-btn" data-close-dialog="assistant-dialog" aria-label="Close assistant">✕</button>
+    </div>
+    <div class="dlg-body">
+      <textarea id="asst-prompt" class="asst-prompt" rows="3" placeholder="Describe the edit…" aria-label="Describe the edit"></textarea>
+      <div class="dlg-row">
+        <button id="asst-propose-btn" class="midi-btn">PROPOSE</button>
+        <button id="asst-apply-btn" class="midi-btn" disabled>APPLY</button>
+        <button id="asst-discard-btn" class="midi-btn">DISCARD</button>
+      </div>
+      <div id="asst-status" class="asst-status" role="status" aria-live="polite"></div>
+      <div id="asst-plan" class="asst-plan"></div>
+    </div>
+  </dialog>
+
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="js/app.js"></script>

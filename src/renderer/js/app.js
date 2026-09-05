@@ -27,6 +27,7 @@ import { RackView } from './components/rack-view.js'
 import { InstrumentBrowser } from './components/instrument-browser.js'
 import { InstrumentSettings } from './components/instrument-settings.js'
 import { LibraryDialog } from './components/library-dialog.js'
+import { AssistantDialog } from './components/assistant-dialog.js'
 import ShortcutManager from './shortcuts.js'
 import { applyTheme, savedTheme, THEMES } from './theme.js'
 import { commandItems } from './ui/command-model.js'
@@ -48,6 +49,12 @@ import { audioTimeFor } from './utils/midi-clock.js'
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
 const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
 const MIDI_DEVICE_KEY = 'synth_midi_input'
+
+// Same gate as webDiscovery(): the Access-protected https host is the only
+// place /api/assistant exists. Everywhere else the menu item is absent.
+function assistantAvailable() {
+  return location.protocol === 'https:' && location.hostname === 'synth.zakharhome.org'
+}
 
 function webDiscovery() {
   if (location.protocol !== 'https:' || location.hostname !== 'synth.zakharhome.org') return null
@@ -340,6 +347,7 @@ let _rackView = null
 let _instrumentBrowser = null
 let _instrumentSettings = null
 let _libraryDialog = null
+let _assistantDialog = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
 let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack' | 'tr909'
 let _selectedArrangeTrackId = null
@@ -392,7 +400,8 @@ function renderCommands() {
     midiInput: _midiInputName,
     // Electron imports through IPC, the browser through a file input plus
     // IndexedDB. Dead only when neither backend exists.
-    canImportPacks: canImportPacks()
+    canImportPacks: canImportPacks(),
+    assistant: assistantAvailable()
   })
   for (const item of items) {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
@@ -415,8 +424,8 @@ function buildAppMenu() {
   menu.innerHTML = ''
   // Ask the model for the full label set; the bar owns transport and the live
   // MIDI token, so those never appear as menu items.
-  const items = commandItems({ mode: 'arrange', projectOpen: true })
-    .filter(item => item.group !== 'transport' && item.id !== 'midi-token' && item.id !== 'theme')
+  const items = commandItems({ mode: 'arrange', projectOpen: true, assistant: assistantAvailable() })
+    .filter(item => item.visible && item.group !== 'transport' && item.id !== 'midi-token' && item.id !== 'theme')
 
   let group = null
   for (const item of items) {
@@ -815,6 +824,7 @@ function initCommandBar() {
   COMMANDS['mixer'] = () => toggleMixer()
   // No listener yet for these two — the instrument agent wires them.
   COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
+  if (assistantAvailable()) COMMANDS['assistant'] = () => document.dispatchEvent(new CustomEvent('open-assistant'))
   COMMANDS['instrument-browser'] = () => document.dispatchEvent(new CustomEvent('open-instrument-browser'))
 
   document.getElementById('midi-token')?.addEventListener('click', () => runCommand('midi-setup'))
@@ -1573,6 +1583,7 @@ function initShortcuts() {
   ShortcutManager.register({ key: 'm', ctrl: true },              () => runCommand('midi-setup'))
   ShortcutManager.register({ key: 'b', ctrl: true },              () => runCommand('bounce'))
   ShortcutManager.register({ key: 'l', ctrl: true, shift: true }, () => runCommand('library'))
+  if (assistantAvailable()) ShortcutManager.register({ key: 'a', ctrl: true, shift: true }, () => runCommand('assistant'))
   ShortcutManager.register({ key: 'i', ctrl: true },              () => runCommand('instrument-browser'))
   ShortcutManager.register({ key: 'm', ctrl: true, shift: true }, () => { if (!modalOpen()) runCommand('mixer') })
 
@@ -1705,6 +1716,10 @@ function boot() {
       if (track) ProjectStore.dispatch(SetTrackInstrument(track.id, instrument))
     }
   })
+  if (assistantAvailable()) {
+    _assistantDialog = new AssistantDialog({ store: ProjectStore })
+    document.addEventListener('open-assistant', () => _assistantDialog.open())
+  }
   document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
   document.addEventListener('open-library', () => _libraryDialog.open())
   document.addEventListener('open-instrument-settings', e => _instrumentSettings.open(e.detail?.trackId ?? ensureMidiTrack()?.id))

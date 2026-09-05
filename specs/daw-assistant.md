@@ -21,9 +21,9 @@ gate, and the "the model proposes, our code decides" posture — and nothing els
 
 | Phase | State |
 |---|---|
-| 0 — plan contract, digest, batch history | proposed |
-| 1 — web route on the existing proxy | proposed |
-| 2 — assistant dialog, preview, apply | proposed |
+| 0 — plan contract, digest, batch history | shipped |
+| 1 — web route on the existing proxy | shipped |
+| 2 — assistant dialog, preview, apply | shipped |
 | 3 — Electron parity via existing provider connections | proposed |
 | 4 — conversation, follow-ups, audio-aware suggestions | deferred |
 
@@ -154,10 +154,17 @@ and the renderer runs the full `validatePlan` at apply time, injecting what it
 knows:
 
 ```js
-capabilities = { moduleTypes, moduleParamKeys(type), canConnect(from, to, rack) }
+capabilities = { moduleTypes, moduleParamKeys(type), canConnect(rack, from, to) }
 ```
 
 Dependencies are passed, never imported into the core. Both validators are pure.
+
+`planToCommands` does not import `ProjectStore` either — that module has import
+side effects (its singleton state and listener set). It returns descriptors,
+`[{ factory: 'SetBpm', args: [128] }]`, and the renderer binds `factory` through
+its own literal map. Actions that mint an id (`AddClip`, `AddMidiNote`) take an
+injected `makeId` rather than deriving one from state counts, so two applies
+against one stale digest cannot collide.
 
 ### Digest
 
