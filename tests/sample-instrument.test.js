@@ -188,7 +188,7 @@ describe('sample instrument', () => {
     const realCreateBufferSource = ctx.createBufferSource
     ctx.createBufferSource = () => {
       const source = realCreateBufferSource()
-      source.detune = { value: 0, connect: vi.fn(), disconnect: vi.fn() }
+      source.detune = { value: 0 }
       return source
     }
     const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore: { get: vi.fn(() => Promise.resolve({})) } })

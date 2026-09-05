@@ -38,7 +38,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
   } catch { bendSource = null; vibratoGain = null }
 
   const connectExpression = source => {
-    if (!source.detune || typeof source.detune.connect !== 'function') return
+    if (!source.detune) return
     try {
       bendSource?.connect(source.detune)
       vibratoGain?.connect(source.detune)
