@@ -231,10 +231,13 @@ export function createWebDiscoveryHandler(options = {}) {
               // The digest is project data, sent as a JSON document in this
               // user-role input — never folded into the instructions above.
               input: JSON.stringify({ prompt, digest }),
-              text: { format: { type: 'json_schema', name: 'daw_assistant_plan', strict: true, schema: ASSISTANT_PLAN_SCHEMA } },
+              // strict mode requires additionalProperties:false on every object,
+              // and args is per-action so it cannot be closed here. The schema
+              // stays as a strong hint; validatePlanShape is the actual gate.
+              text: { format: { type: 'json_schema', name: 'daw_assistant_plan', strict: false, schema: ASSISTANT_PLAN_SCHEMA } },
             }),
           })
-          if (!response.ok) throw new Error('Assistant unavailable')
+          if (!response.ok) throw new Error(response.status === 429 || response.status === 402 ? 'Assistant is out of provider credit or rate limited upstream' : `Assistant unavailable (provider returned ${response.status})`)
           let parsed
           try { parsed = JSON.parse(outputText(await response.json())) } catch { throw new Error('Assistant produced unreadable output') }
           const validated = validatePlanShape(parsed)
