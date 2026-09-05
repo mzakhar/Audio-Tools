@@ -34,7 +34,9 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
     const patch = pack?.byId?.get(instrument.patchId)
     const sampleStore = patch && sampleStoreFor?.(pack, ctx)
     if (!sampleStore) return null
-    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus })
+    // The curve belongs to playing, not to stored notes: zone selection still
+    // sees the raw velocity, so a soft hit keeps its soft velocity layer.
+    const inst = sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus, velocityToGain: velocityGain })
     return {
       ...inst,
       send(event) {

@@ -49,7 +49,7 @@ export const PALETTE_DRUM_NOTES = {
   43: 0,                          // kick (toms)
   44: 2,                          // hihat
   45: 0,                          // kick (toms)
-  46: 3,                          // clap
+  46: 2,                          // hihat (open)
   47: 0,                          // kick (toms)
   48: 0,                          // kick (toms)
   49: 3,                          // clap

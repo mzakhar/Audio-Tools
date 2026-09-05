@@ -47,6 +47,14 @@ describe('pad-map', () => {
     }
   })
 
+  it('maps every hi-hat to the hihat voice, open included', () => {
+    // 46 sat on the clap voice for as long as the map had only four entries.
+    // A pad labelled Open Hi-Hat that claps is a pad the player cannot trust.
+    const closed = PALETTE_DRUM_NOTES[42]
+    for (const note of [42, 44, 46]) expect(PALETTE_DRUM_NOTES[note]).toBe(closed)
+    expect(PALETTE_DRUM_NOTES[39]).not.toBe(closed)   // Hand Clap is the clap
+  })
+
   it('pc keys are 1-8 matching slot', () => {
     for (const row of padBank('A')) expect(row.key).toBe(String(row.slot))
   })

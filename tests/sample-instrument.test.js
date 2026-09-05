@@ -26,6 +26,19 @@ const patch = { zones: [
 ] }
 
 describe('sample instrument', () => {
+  it('scales velocity linearly unless a caller injects a curve', async () => {
+    // Timeline playback passes nothing, so a saved project keeps the dynamics
+    // it was mixed with. Live playing injects the pad curve instead.
+    const plain = setup()
+    const curved = setup()
+    const buffer = { duration: 1, sampleRate: 44100 }
+    const store = { get: async () => buffer, peek: () => buffer }
+    sampleInstrumentFor(patch, { ...plain, sampleStore: store }).noteOn(50, 64)
+    sampleInstrumentFor(patch, { ...curved, sampleStore: store, velocityToGain: () => 0.9 }).noteOn(50, 64)
+    expect(plain.gains[0].gain.setValueAtTime).toHaveBeenCalledWith(64 / 127, 3)
+    expect(curved.gains[0].gain.setValueAtTime).toHaveBeenCalledWith(0.9, 3)
+  })
+
   it('chooses a matching zone and applies pitch and velocity', async () => {
     const { ctx, sources, output } = setup()
     const store = { get: vi.fn(() => Promise.resolve({})) }

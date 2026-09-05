@@ -168,20 +168,21 @@ const fmPalette = {
 
 // ─── Drum Machine ────────────────────────────────────────────────────────────
 
-// ponytail: white noise is white noise — one 2s buffer per sampleRate, cached
+// ponytail: white noise is white noise — one 2s buffer per context, cached
 // lazily, instead of a fresh Math.random() fill on every single strike. Keyed
-// by sampleRate because offline bounce and fake test contexts differ from the
-// live AudioContext.
+// by the context itself, not by sample rate: a buffer belongs to the context
+// that made it, and an offline bounce or a fake test context must never be
+// handed the live one's. The WeakMap lets a dead context take its buffer with it.
 const NOISE_SECONDS = 2
-const noiseBufCache = new Map()
+const noiseBufCache = new WeakMap()
 function getNoiseBuffer(ctx) {
-  const rate = ctx.sampleRate
-  let buf = noiseBufCache.get(rate)
+  let buf = noiseBufCache.get(ctx)
   if (!buf) {
+    const rate = ctx.sampleRate
     buf = ctx.createBuffer(1, Math.ceil(rate * NOISE_SECONDS), rate)
     const d = buf.getChannelData(0)
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-    noiseBufCache.set(rate, buf)
+    noiseBufCache.set(ctx, buf)
   }
   return buf
 }
