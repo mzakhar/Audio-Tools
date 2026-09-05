@@ -1,3 +1,5 @@
+import { velocityGain } from '../utils/velocity.js'
+
 function zoneFor(patch, pitch, velocity) {
   return patch?.zones?.find(zone => pitch >= zone.keyLo && pitch <= zone.keyHi &&
     (zone.velocityLo === undefined || velocity >= zone.velocityLo) &&
@@ -90,7 +92,7 @@ export function sampleInstrumentFor(patch, { ctx, output, sampleStore, onStatus 
     // Earlier SF2 imports stored attenuation as zero/negative gain. Treat it
     // as unity so existing local packs become audible after this fix.
     const zoneGain = Number.isFinite(zone.gain) && zone.gain > 0 ? zone.gain : 1
-    const amplitude = zoneGain * Math.max(0, Math.min(127, velocity)) / 127
+    const amplitude = zoneGain * velocityGain(velocity)
     const envelope = zone.volumeEnvelope
     if (envelope) {
       const delay = Math.max(0, envelope.delay || 0), attack = Math.max(0, envelope.attack || 0)

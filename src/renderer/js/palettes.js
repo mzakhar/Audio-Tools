@@ -168,6 +168,35 @@ const fmPalette = {
 
 // ─── Drum Machine ────────────────────────────────────────────────────────────
 
+// ponytail: white noise is white noise — one 2s buffer per sampleRate, cached
+// lazily, instead of a fresh Math.random() fill on every single strike. Keyed
+// by sampleRate because offline bounce and fake test contexts differ from the
+// live AudioContext.
+const NOISE_SECONDS = 2
+const noiseBufCache = new Map()
+function getNoiseBuffer(ctx) {
+  const rate = ctx.sampleRate
+  let buf = noiseBufCache.get(rate)
+  if (!buf) {
+    buf = ctx.createBuffer(1, Math.ceil(rate * NOISE_SECONDS), rate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+    noiseBufCache.set(rate, buf)
+  }
+  return buf
+}
+
+/**
+ * A cached buffer read from 0 every time makes each strike bit-identical — and
+ * the clap's four staggered bursts then comb against each other instead of
+ * sounding like a clap. Reading from a random offset restores the variation the
+ * per-hit fill used to give, for free. Longest slice any voice needs is well
+ * under a second, so half the buffer is always safe headroom.
+ */
+function startNoise(source, when) {
+  source.start(when, Math.random() * (NOISE_SECONDS / 2))
+}
+
 const drumPalette = {
   name: 'Drum Machine',
   type: 'drum',
@@ -227,14 +256,8 @@ const drumPalette = {
   },
 
   _snare(ctx, output, decay, v, t) {
-    const rate = ctx.sampleRate
-    const bufLen = Math.ceil(rate * decay)
-    const noiseBuf = ctx.createBuffer(1, bufLen, rate)
-    const d = noiseBuf.getChannelData(0)
-    for (let i = 0; i < bufLen; i++) d[i] = Math.random() * 2 - 1
-
     const noise = ctx.createBufferSource()
-    noise.buffer = noiseBuf
+    noise.buffer = getNoiseBuffer(ctx)
 
     const hpf = ctx.createBiquadFilter()
     hpf.type = 'highpass'
@@ -257,7 +280,7 @@ const drumPalette = {
     osc.connect(oscGain)
     oscGain.connect(output)
 
-    noise.start(t)
+    startNoise(noise, t)
     noise.stop(t + decay + 0.05)
     osc.start(t)
     osc.stop(t + decay * 0.5 + 0.05)
@@ -267,14 +290,8 @@ const drumPalette = {
   },
 
   _hihat(ctx, output, decay, v, t) {
-    const rate = ctx.sampleRate
-    const bufLen = Math.ceil(rate * decay)
-    const noiseBuf = ctx.createBuffer(1, bufLen, rate)
-    const d = noiseBuf.getChannelData(0)
-    for (let i = 0; i < bufLen; i++) d[i] = Math.random() * 2 - 1
-
     const noise = ctx.createBufferSource()
-    noise.buffer = noiseBuf
+    noise.buffer = getNoiseBuffer(ctx)
 
     const hpf = ctx.createBiquadFilter()
     hpf.type = 'highpass'
@@ -287,7 +304,7 @@ const drumPalette = {
     noise.connect(hpf)
     hpf.connect(gain)
     gain.connect(output)
-    noise.start(t)
+    startNoise(noise, t)
     noise.stop(t + decay + 0.05)
     noise.onended = () => { noise.disconnect(); hpf.disconnect(); gain.disconnect() }
     return { stop() {} }
@@ -297,14 +314,8 @@ const drumPalette = {
     // Multiple noise bursts for realism
     const bursts = [0, 0.008, 0.016, 0.024]
     bursts.forEach((offset, i) => {
-      const rate = ctx.sampleRate
-      const bufLen = Math.ceil(rate * 0.04)
-      const noiseBuf = ctx.createBuffer(1, bufLen, rate)
-      const d = noiseBuf.getChannelData(0)
-      for (let j = 0; j < bufLen; j++) d[j] = Math.random() * 2 - 1
-
       const noise = ctx.createBufferSource()
-      noise.buffer = noiseBuf
+      noise.buffer = getNoiseBuffer(ctx)
 
       const hpf = ctx.createBiquadFilter()
       hpf.type = 'bandpass'
@@ -319,7 +330,7 @@ const drumPalette = {
       noise.connect(hpf)
       hpf.connect(gain)
       gain.connect(output)
-      noise.start(t + offset)
+      startNoise(noise, t + offset)
       noise.stop(t + offset + decay + 0.05)
       noise.onended = () => { noise.disconnect(); hpf.disconnect(); gain.disconnect() }
     })

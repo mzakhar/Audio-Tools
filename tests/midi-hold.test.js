@@ -73,4 +73,10 @@ describe('holdReducer', () => {
     const event = noteOff(1, 61)
     expect(holdReducer(s, event).emit).toEqual([event])
   })
+
+  it('a message that changes nothing returns the identical state object, no allocation', () => {
+    const s = holdReducer(undefined, pedalDown(0)).state
+    const event = { kind: 'poly-aftertouch', channel: 0, pitch: 60, pressure: 80 }
+    expect(holdReducer(s, event).state).toBe(s)
+  })
 })

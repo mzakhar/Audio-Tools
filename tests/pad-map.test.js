@@ -33,10 +33,17 @@ describe('pad-map', () => {
     }
   })
 
-  it('PALETTE_DRUM_NOTES keys are all bank-A notes', () => {
-    const bankANotes = padBank('A').map(r => r.note)
-    for (const noteKey of Object.keys(PALETTE_DRUM_NOTES)) {
-      expect(bankANotes).toContain(Number(noteKey))
+  it('PALETTE_DRUM_NOTES covers every note in both banks', () => {
+    const allNotes = [...padBank('A'), ...padBank('B')].map(r => r.note)
+    for (const note of allNotes) {
+      expect(PALETTE_DRUM_NOTES[note]).toBeDefined()
+    }
+  })
+
+  it('PALETTE_DRUM_NOTES values are all valid palette voice indices 0-3', () => {
+    for (const index of Object.values(PALETTE_DRUM_NOTES)) {
+      expect(index).toBeGreaterThanOrEqual(0)
+      expect(index).toBeLessThanOrEqual(3)
     }
   })
 

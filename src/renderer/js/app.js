@@ -42,6 +42,7 @@ import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
 import { PadGrid } from './components/pad-grid.js'
 import { padBank } from './instruments/pad-map.js'
+import { audioTimeFor } from './utils/midi-clock.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -148,11 +149,15 @@ function sampleStatus(trackId, status) {
   document.dispatchEvent(new CustomEvent('instrument-sample-status', { detail: { trackId, status } }))
 }
 
+// A melodic octave plus every note the pad banks can send. A drum patch keeps
+// one zone per pad, so warming only 48/60/72 left the first strike of each pad
+// waiting on an IndexedDB read — audible as a late first hit, every pad.
+const WARM_NOTES = [...new Set([48, 60, 72, ...padBank('A').map(pad => pad.note), ...padBank('B').map(pad => pad.note)])]
+
 async function warmPack(pack, patch) {
   await ensureAudio()
   const ctx = AudioEngine.getContext(), store = pack && ctx && sampleStoreFor(pack, ctx)
-  // Warm a small playable octave range, not an entire SoundFont preset.
-  const ids = [...new Set([48, 60, 72].flatMap(note => patch?.zones
+  const ids = [...new Set(WARM_NOTES.flatMap(note => patch?.zones
     ?.filter(item => note >= item.keyLo && note <= item.keyHi && 100 >= (item.velocityLo ?? 0) && 100 <= (item.velocityHi ?? 127))
     .map(item => item.sampleId) || []))]
   if (store && ids.length) await store.preload(ids)
@@ -1248,12 +1253,17 @@ function initMidi() {
     updateMidiDeviceSelect(inputs)
   }
 
-  enableBtn.addEventListener('click', enableMidi)
+  // Both are real gestures, and a resume needs one. Spinning the context up
+  // here is what lets the note path stay synchronous: by the time a pad sends
+  // anything, the graph exists and is running. The boot call below is not a
+  // gesture, so it deliberately does not do this.
+  enableBtn.addEventListener('click', () => { ensureAudio(); enableMidi() })
   // Electron resets Web MIDI access with every renderer restart. Reconnect a
   // previously-approved device so restarting the app cannot silently disable it.
   enableMidi()
 
   deviceSel?.addEventListener('change', () => {
+    ensureAudio()
     MidiController.selectInput(deviceSel.value)
     if (deviceSel.value) localStorage.setItem(MIDI_DEVICE_KEY, deviceSel.value)
     if (recBtn) recBtn.disabled = !deviceSel.value
@@ -1321,13 +1331,16 @@ function initMidi() {
   // Sustain (CC64) is resolved before anything else sees the stream: the pure
   // reducer swallows note-offs while a channel is held and flushes them on
   // release, so no instrument has to know the pedal exists.
-  document.addEventListener('midi-event', async (e) => {
+  // Synchronous end to end. An awaited handler put every note at least one
+  // microtask behind the MIDI callback that delivered it, and that jitter is
+  // audible the moment you finger-drum.
+  document.addEventListener('midi-event', (e) => {
     const { state, emit } = holdReducer(_holdState, e.detail)
     _holdState = state
-    for (const event of emit) await handleMidiEvent(event)
+    for (const event of emit) handleMidiEvent(event)
   })
 
-  async function handleMidiEvent(detail) {
+  function handleMidiEvent(detail) {
     if (detail.kind === 'program-change' || (detail.kind === 'cc' && (detail.controller === 0 || detail.controller === 32))) {
       const result = applyChannelMidi(_channelPrograms, detail)
       _channelPrograms = result.stateByChannel
@@ -1355,9 +1368,18 @@ function initMidi() {
       return
     }
     if (detail.kind !== 'note-on' && detail.kind !== 'note-off' && detail.kind !== 'cc' && detail.kind !== 'pitch-bend') return
-    await ensureAudio()
-    const ctx = AudioEngine.getContext()
+    // The graph is built synchronously so this note can reach it now; resuming
+    // a suspended context still needs a gesture, so that half stays async and
+    // off the hot path. Both the MIDI enable button and every on-screen control
+    // call ensureAudio() on their own gesture, so this rarely has work to do.
+    const ctx = AudioEngine.ensureContext()
     if (!ctx) return
+    if (ctx.state !== 'running') ensureAudio()
+
+    // The controller stamps each message with its performance.now() arrival.
+    // Scheduling against that instead of "whenever the main thread got here"
+    // is what keeps a roll even under GC and store reads.
+    const time = audioTimeFor(detail.time, performance.now(), ctx.currentTime)
 
     // Auto-provision: a note into an empty project makes the track it belongs
     // on, once. Note-offs never provision — they can only follow a note-on.
@@ -1409,8 +1431,8 @@ function initMidi() {
       }
 
       try {
-        if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity)
-        else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch)
+        if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity, time)
+        else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch, time)
         // ponytail: CC1/7/11/120/123 mapped. Add a CC-learn map when a sixth matters.
         else if (detail.kind === 'cc') {
           if (detail.controller === 1) entry.inst.send({ type: 'mod', value: detail.value / 127 })

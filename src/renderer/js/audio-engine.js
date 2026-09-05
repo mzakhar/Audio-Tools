@@ -20,12 +20,16 @@ const AudioEngine = {
   _compressor: null,
   _makeup: null,
   _workletReady: false,
+  _workletTried: false,
 
-  async init() {
-    if (this._ctx) {
-      if (this._ctx.state === 'suspended') await this._ctx.resume()
-      return
-    }
+  /**
+   * Build the context and master chain. Synchronous on purpose: a MIDI note has
+   * to be able to reach the graph inside the callback that delivered it, and an
+   * awaited init() put every note at least a microtask behind its own message.
+   * Only resume() and the worklet load below are genuinely async.
+   */
+  ensureContext() {
+    if (this._ctx) return this._ctx
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
 
@@ -47,12 +51,17 @@ const AudioEngine = {
     this._premaster = ctx.createGain()
     this._premaster.gain.value = 0.8
 
+    // Tuned for percussive playing, not for loudness. A 3 ms attack clamped the
+    // very peak that makes a drum hit read as immediate, and a 250 ms release
+    // meant each hit in a roll ducked the next — both together made pads feel
+    // late and forced hard hitting. 12 ms lets the transient through and catches
+    // the body behind it; the shorter release recovers inside a roll.
     this._compressor = ctx.createDynamicsCompressor()
-    this._compressor.threshold.value = -8
-    this._compressor.knee.value = 6
-    this._compressor.ratio.value = 4
-    this._compressor.attack.value = 0.003
-    this._compressor.release.value = 0.25
+    this._compressor.threshold.value = -6
+    this._compressor.knee.value = 10
+    this._compressor.ratio.value = 3
+    this._compressor.attack.value = 0.012
+    this._compressor.release.value = 0.12
 
     this._masterGain.connect(this._dryGain)
     this._masterGain.connect(this._reverbSend)
@@ -63,13 +72,20 @@ const AudioEngine = {
     // limiter pulled down stayed down and the app played well under every other
     // tab. Put it back after the limiter, where it cannot drive it harder.
     this._makeup = ctx.createGain()
-    this._makeup.gain.value = 1.8
+    // Trimmed with the limiter above: it now pulls down less, so the same 1.8
+    // would clip the transients the new attack time deliberately lets past.
+    this._makeup.gain.value = 1.4
 
     this._premaster.connect(this._compressor)
     this._compressor.connect(this._makeup)
     this._makeup.connect(ctx.destination)
 
     this._ctx = ctx
+    return ctx
+  },
+
+  async init() {
+    const ctx = this.ensureContext()
 
     // Creation is usually inside a user gesture, but awaiting the worklet below
     // loses that activation. Resume the context before any asynchronous setup.
@@ -77,7 +93,11 @@ const AudioEngine = {
 
     // Recorder's worklet. `ctx.audioWorklet` is undefined outside a secure
     // context (plain-http deploys), so this must not be fatal — synth audio
-    // works fine without it, only recording is lost.
+    // works fine without it, only recording is lost. Tried once: init() is now
+    // called on every gesture that might need audio, and a failed addModule
+    // must not be retried on each one.
+    if (this._workletTried) return
+    this._workletTried = true
     try {
       await ctx.audioWorklet.addModule(recorderProcessorUrl)
       this._workletReady = true
