@@ -2,6 +2,7 @@
 // Implements a command pattern for undo/redo.
 
 import { INSTRUMENTS } from '../drums/tr909-kit.js'
+import Palettes, { paletteDefaults, paletteParamKeys, clampPaletteParam } from '../palettes.js'
 
 // ---------------------------------------------------------------------------
 // ID generation (no crypto dependency)
@@ -12,7 +13,7 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
-export const CURRENT_VERSION = 5
+export const CURRENT_VERSION = 6
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -30,6 +31,7 @@ export const DEFAULT_STATE = {
     { id: 'delay',  name: 'Delay',  returnLevel: 0.6,  params: { time: 0.375, feedback: 0.4 } },
   ],
   racks: {},        // rackId → Rack
+  presets: [],      // { id, name, paletteKey, params }[] — project-level, not a user library
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,24 @@ export function migrate(projectJson) {
       track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
     }
   }
+  // Optional array, safe default — no schema bump needed for this alone.
+  if (!next.presets) next.presets = []
+  if ((next.version ?? 1) < 6) {
+    for (const track of next.tracks || []) {
+      const instrument = track.instrument
+      if (instrument?.type !== 'palette') continue
+      if (!Palettes[instrument.paletteKey]) instrument.paletteKey = 'classic'
+      const declared = paletteParamKeys(instrument.paletteKey)
+      const defaults = paletteDefaults(instrument.paletteKey)
+      const existing = instrument.params || {}
+      const filtered = {}
+      for (const k of declared) {
+        filtered[k] = existing[k] !== undefined ? existing[k] : defaults[k]
+      }
+      instrument.params = filtered
+    }
+    next.version = 6
+  }
   return next
 }
 
@@ -96,7 +116,7 @@ export function AddTrack(type = 'audio', name = 'Track', ids = {}) {
         clips: [],
         effects: []
       })
-      if (type === 'midi') next.tracks.at(-1).instrument = { type: 'palette', paletteKey: 'classic' }
+      if (type === 'midi') next.tracks.at(-1).instrument = { type: 'palette', paletteKey: 'classic', params: paletteDefaults('classic') }
       next.mixer.channels.push({
         id: channelId,
         trackId,
@@ -141,6 +161,106 @@ export function SetTrackInstrument(trackId, instrument) {
       if (!track || !instrument) return next
       if (instrument.type === 'rack' && !(next.racks || {})[instrument.rackId]) return state
       track.instrument = { ...instrument }
+      if (track.instrument.type === 'palette') {
+        track.instrument.params = { ...(instrument.params || paletteDefaults(instrument.paletteKey)) }
+      }
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function SetInstrumentParam(trackId, key, value) {
+  return {
+    label: `Set ${key}`,
+    execute(state) {
+      const track = state.tracks.find(t => t.id === trackId)
+      const instrument = track?.instrument
+      if (!instrument || instrument.type !== 'palette') return state
+      const validated = clampPaletteParam(instrument.paletteKey, key, value)
+      if (validated === undefined) return state
+      const next = JSON.parse(JSON.stringify(state))
+      const nextTrack = next.tracks.find(t => t.id === trackId)
+      if (!nextTrack.instrument.params) nextTrack.instrument.params = paletteDefaults(nextTrack.instrument.paletteKey)
+      nextTrack.instrument.params[key] = validated
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+/** Copy the armed track's current patch into project data. `id` is
+ *  caller-supplied like AddTrack's ids (so an assistant plan can pre-mint it);
+ *  omitted, one is minted here. Rejects (returns the original state) when the
+ *  track is missing or its instrument is not a palette. */
+export function SavePreset(trackId, name, id = null) {
+  return {
+    label: `Save preset "${name}"`,
+    execute(state) {
+      const track = state.tracks.find(t => t.id === trackId)
+      const instrument = track?.instrument
+      if (!instrument || instrument.type !== 'palette') return state
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.presets) next.presets = []
+      next.presets.push({
+        id: id || genId('preset'),
+        name,
+        paletteKey: instrument.paletteKey,
+        params: JSON.parse(JSON.stringify(instrument.params || paletteDefaults(instrument.paletteKey)))
+      })
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+/** Write a saved patch onto a track's instrument. Params are re-run through
+ *  the palette's own schema (clampPaletteParam) so a preset saved before the
+ *  palette changed cannot write a key it no longer declares. */
+export function ApplyPreset(trackId, presetId) {
+  return {
+    label: `Apply preset`,
+    execute(state) {
+      const preset = (state.presets || []).find(p => p.id === presetId)
+      const track = state.tracks.find(t => t.id === trackId)
+      if (!preset || !track) return state
+      const next = JSON.parse(JSON.stringify(state))
+      const nextTrack = next.tracks.find(t => t.id === trackId)
+      const declared = paletteParamKeys(preset.paletteKey)
+      const params = {}
+      for (const key of declared) {
+        const validated = clampPaletteParam(preset.paletteKey, key, preset.params?.[key])
+        params[key] = validated !== undefined ? validated : paletteDefaults(preset.paletteKey)[key]
+      }
+      // Bend range and mod destination are the player's setup for this track,
+      // not part of the patch — a preset recall must not silently reset them,
+      // the same way instrument-settings.js keeps them across an instrument swap.
+      const { bendRange, modDest } = track.instrument || {}
+      nextTrack.instrument = {
+        type: 'palette', paletteKey: preset.paletteKey, params,
+        ...(bendRange === undefined ? {} : { bendRange }),
+        ...(modDest === undefined ? {} : { modDest })
+      }
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function RemovePreset(presetId) {
+  return {
+    label: `Remove preset`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      next.presets = (next.presets || []).filter(p => p.id !== presetId)
       return next
     },
     undo(state) {
@@ -597,7 +717,8 @@ export function RemoveRack(rackId) {
       // instrument select and no way back — put it on a palette instead.
       for (const track of next.tracks || []) {
         if (track.instrument?.type === 'rack' && track.instrument.rackId === rackId) {
-          track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
+          const paletteKey = track.paletteKey || 'classic'
+          track.instrument = { type: 'palette', paletteKey, params: paletteDefaults(paletteKey) }
         }
       }
       return next

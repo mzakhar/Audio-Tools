@@ -7,6 +7,8 @@ const MARKUP = `
   <button id="ib-settings-btn"></button>
   <input type="search" id="ib-search">
   <div id="ib-scopes"></div>
+  <input type="text" id="ib-save-name">
+  <button id="ib-save-btn"></button>
   <div id="ib-list"></div>
 </dialog>`
 
@@ -24,13 +26,15 @@ function setup() {
   el.showModal = () => { el.open = true }
   el.close = () => { if (el.open) { el.open = false; el.dispatchEvent(new Event('close')) } }
 
-  const tracks = [{ id: 't1', type: 'midi', instrument: { type: 'palette', paletteKey: 'classic' } }]
+  const tracks = [{ id: 't1', type: 'midi', instrument: { type: 'palette', paletteKey: 'classic', params: {} } }]
+  const presets = [{ id: 'preset-1', name: 'Night Pad', paletteKey: 'classic', params: { cutoff: 400 } }]
   const dispatched = []
   const deps = {
-    store: { getState: () => ({ tracks, racks: {} }), dispatch: cmd => dispatched.push(cmd) },
+    store: { getState: () => ({ tracks, racks: {}, presets }), dispatch: cmd => dispatched.push(cmd) },
     packCatalog: () => packs,
     palettes: () => ({ classic: { name: 'Classic Synth' } }),
     racks: () => ({}),
+    presets: () => presets,
     auditioner: { play: vi.fn(), stop: vi.fn() },
     ensureTrack: () => tracks[0],
     addTrack: vi.fn(() => { tracks.push({ id: 't2', type: 'midi' }); return tracks[1] }),
@@ -49,10 +53,21 @@ describe('instrument browser', () => {
 
   it('lists every source and filters live', () => {
     const { browser } = setup()
-    expect(labels()).toEqual(['Acoustic Grand', 'Warm Pad', 'Classic Synth'])
+    expect(labels()).toEqual(['Acoustic Grand', 'Warm Pad', 'Classic Synth', 'Night Pad'])
     browser.search.value = 'warm'
     browser.search.dispatchEvent(new Event('input'))
     expect(labels()).toEqual(['Warm Pad'])
+  })
+
+  it('lists project presets beside factory patches, not in a separate surface', () => {
+    const { el } = setup()
+    press(el, 'Tab', {}) // PACKS
+    press(el, 'Tab', {}) // INTERNAL
+    press(el, 'Tab', {}) // RACKS
+    press(el, 'Tab', {}) // ♥
+    press(el, 'Tab', {}) // RECENT
+    press(el, 'Tab', {}) // PRESETS
+    expect(labels()).toEqual(['Night Pad'])
   })
 
   it('auditions the highlighted row after a debounce', () => {
@@ -98,6 +113,39 @@ describe('instrument browser', () => {
     el.close()
     expect(dispatched).toHaveLength(0)
     expect(deps.auditioner.stop).toHaveBeenCalled()
+  })
+
+  it('saves the armed track\'s current sound as a preset', () => {
+    const { browser, dispatched } = setup()
+    browser.el.querySelector('#ib-save-name').value = 'Bright Lead'
+    browser.el.querySelector('#ib-save-btn').click()
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0].label).toMatch(/Bright Lead/)
+  })
+
+  it('does not save when the armed track has no palette instrument', () => {
+    const { browser, dispatched, tracks } = setup()
+    tracks[0].instrument = { type: 'rack', rackId: 'r1' }
+    browser.el.querySelector('#ib-save-btn').click()
+    expect(dispatched).toHaveLength(0)
+  })
+
+  it('applying a preset row dispatches ApplyPreset against the armed track', () => {
+    const { browser, dispatched, el } = setup()
+    const presetRow = browser.rows.find(row => row.kind === 'preset')
+    browser.assign(presetRow, false)
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0].label).toMatch(/preset/i)
+  })
+
+  it('removing a preset is reachable from its row', () => {
+    const { browser, dispatched } = setup()
+    browser.scopeIndex = 6 // PRESETS is the last scope chip
+    browser.refresh()
+    const removeBtn = document.querySelector('.ib-preset-remove')
+    removeBtn.click()
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0].label).toMatch(/remove preset/i)
   })
 
   it('survives a storage that refuses to answer', () => {

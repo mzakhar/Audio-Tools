@@ -35,6 +35,12 @@ const state = () => ({
 
 const plan = (...actions) => ({ summary: 'Test plan', actions })
 
+const pack = (overrides = {}) => ({
+  id: 'gm-piano', version: '1.0.0',
+  manifest: { name: 'GM Piano', patches: [{ id: 'sf2-0', name: 'Grand Piano', address: { bankMsb: 0, bankLsb: 0, program: 0 } }] },
+  ...overrides,
+})
+
 describe('daw assistant digest', () => {
   it('caps a huge project and says it was truncated', () => {
     const big = state()
@@ -58,6 +64,26 @@ describe('daw assistant digest', () => {
     expect(digest.racks[0].cables[0]).toEqual({ id: 'cable-1', from: { moduleId: 'mod-1', port: 'out' }, to: { moduleId: 'mod-2', port: 'in' } })
   })
 
+  it('projects instrument params like any other scalar bag', () => {
+    const withParams = state()
+    withParams.tracks[0].instrument.params = { cutoff: 400, evil: { nested: true } }
+    const digest = buildDigest(withParams)
+    expect(digest.tracks[0].instrument.params).toEqual({ cutoff: 400 })
+  })
+
+  it('caps the injected pack list and its patches, and says so', () => {
+    const packs = Array.from({ length: 20 }, (_, i) => ({
+      id: `pack-${i}`, version: '1.0.0',
+      manifest: { name: `Pack ${i}`, patches: Array.from({ length: 100 }, (_, p) => ({ id: `sf2-${p}`, name: `Patch ${p}` })) },
+    }))
+    const digest = buildDigest(state(), { packs })
+    expect(digest.packs).toHaveLength(8)
+    expect(digest.packs[0].patches).toHaveLength(64)
+    expect(digest.packs[0]).toMatchObject({ id: 'pack-0', version: '1.0.0', name: 'Pack 0' })
+    expect(digest.truncated).toBe(true)
+    expect(buildDigest(state()).packs).toEqual([])
+  })
+
   it('clips long names and drops non-scalar module params', () => {
     const long = state()
     long.tracks[0].name = 'n'.repeat(200)
@@ -76,10 +102,15 @@ describe('clampDigest', () => {
   })
 
   it('returns a minimal valid digest for non-object input', () => {
-    const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], truncated: false }
+    const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], packs: [], truncated: false }
     expect(clampDigest('not a digest')).toEqual(empty)
     expect(clampDigest(null)).toEqual(empty)
     expect(clampDigest([1, 2, 3])).toEqual(empty)
+  })
+
+  it('re-clamps a client-supplied packs list the same way buildDigest would', () => {
+    const hostile = { packs: Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, version: '1.0.0', name: `N${i}`, patches: [{ id: 'x', name: 'y' }] })) }
+    expect(clampDigest(hostile).packs).toHaveLength(8)
   })
 
   it('drops a __proto__ key instead of letting it survive', () => {
@@ -94,7 +125,10 @@ describe('clampDigest', () => {
 describe('daw assistant plan shape', () => {
   it('exposes only the specced action vocabulary', () => {
     expect(ALLOWLIST).toContain('SetBpm')
-    for (const excluded of ['AddRack', 'RemoveRack', 'LoadRackPatch', 'SetCurrentBar', 'SetBusReturn', 'SetCableColor']) {
+    expect(ALLOWLIST).toContain('SetInstrumentParam')
+    expect(ALLOWLIST).toContain('SetTrackInstrumentProgram')
+    expect(ALLOWLIST).toContain('SavePreset')
+    for (const excluded of ['AddRack', 'RemoveRack', 'LoadRackPatch', 'SetCurrentBar', 'SetBusReturn', 'SetCableColor', 'ApplyPreset', 'RemovePreset']) {
       expect(ALLOWLIST).not.toContain(excluded)
     }
   })
@@ -190,6 +224,52 @@ describe('daw assistant live validation', () => {
     expect(validatePlan(plan({ action: 'SetModuleParam', args: { rackId: 'rack-1', moduleId: 'mod-1', key: 'tune', value: 3 } }), state(), { moduleParamKeys }).ok).toBe(true)
   })
 
+  it('constrains instrument param keys to what the palette declares, and requires a palette instrument', () => {
+    const setParam = plan({ action: 'SetInstrumentParam', args: { trackId: 'track-1', key: 'cutoff', value: 400 } })
+    const paletteParamKeys = vi.fn(key => (key === 'drum' ? ['reverb'] : []))
+    expect(validatePlan(setParam, state(), { paletteParamKeys }).ok).toBe(false)
+    expect(paletteParamKeys).toHaveBeenCalledWith('drum')
+    expect(validatePlan(plan({ action: 'SetInstrumentParam', args: { trackId: 'track-1', key: 'reverb', value: 0.5 } }), state(), { paletteParamKeys }).ok).toBe(true)
+
+    const rackTrack = state()
+    rackTrack.tracks[0].instrument = { type: 'rack', rackId: 'rack-1' }
+    const result = validatePlan(plan({ action: 'SetInstrumentParam', args: { trackId: 'track-1', key: 'reverb', value: 0.5 } }), rackTrack, { paletteParamKeys })
+    expect(result.ok).toBe(false)
+    expect(result.errors[0]).toMatch(/not a palette/)
+  })
+
+  it('requires a palette instrument to save a preset', () => {
+    const save = plan({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } })
+    expect(validatePlan(save, state()).ok).toBe(true)
+
+    const rackTrack = state()
+    rackTrack.tracks[0].instrument = { type: 'rack', rackId: 'rack-1' }
+    const result = validatePlan(save, rackTrack)
+    expect(result.ok).toBe(false)
+    expect(result.errors[0]).toMatch(/not a palette/)
+
+    expect(validatePlan(plan({ action: 'SavePreset', args: { trackId: 'nope', name: 'X' } }), state()).ok).toBe(false)
+  })
+
+  it('resolves a pack program change against the installed manifest only, refusing an uninstalled pack, an unknown patch and a pinned instrument', () => {
+    const packPatchIds = vi.fn(packId => (pack().id === packId ? pack().manifest.patches.map(p => p.id) : []))
+    const setProgram = (patchId, packId = 'gm-piano') => plan({ action: 'SetTrackInstrumentProgram', args: { trackId: 'track-1', packId, patchId } })
+
+    expect(validatePlan(setProgram('sf2-0'), state(), { packPatchIds }).ok).toBe(true)
+    expect(validatePlan(setProgram('sf2-9'), state(), { packPatchIds }).ok).toBe(false)
+    expect(validatePlan(setProgram('sf2-0', 'unknown-pack'), state(), { packPatchIds }).ok).toBe(false)
+
+    const pinned = state()
+    pinned.tracks[0].instrument = { type: 'pack', packId: 'gm-piano', patchId: 'sf2-0', programFollow: 'pinned' }
+    const pinnedResult = validatePlan(setProgram('sf2-0'), pinned, { packPatchIds })
+    expect(pinnedResult.ok).toBe(false)
+    expect(pinnedResult.errors[0]).toMatch(/pinned/)
+
+    const audioTrack = state()
+    audioTrack.tracks[0].type = 'audio'
+    expect(validatePlan(setProgram('sf2-0'), audioTrack, { packPatchIds }).ok).toBe(false)
+  })
+
   it('refuses ids that no longer resolve, one error per action', () => {
     const cases = [
       [{ action: 'RemoveClip', args: { trackId: 'track-1', clipId: 'clip-9' } }, /clip not found/],
@@ -225,6 +305,7 @@ describe('daw assistant descriptions and command mapping', () => {
     expect(describeAction({ action: 'AddModule', args: { rackId: 'rack-1', type: 'lfo', rail: 1, hp: 8 } }, current)).toBe('Add a LFO module to Rack 1, rail 2')
     expect(describeAction({ action: 'RemoveTrack', args: { trackId: 'track-1' } }, current)).toBe('Remove track "Kick"')
     expect(describeAction({ action: 'SetMixerParam', args: { channelId: 'channel-1', param: 'volume', value: 0.6 } }, current)).toBe('Set volume on "Kick" to 0.6')
+    expect(describeAction({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } }, current)).toBe('Save the sound on Kick as "Night Pad"')
   })
 
   it('falls back to the id when the target is gone', () => {
@@ -253,6 +334,23 @@ describe('daw assistant descriptions and command mapping', () => {
     expect(() => planToCommands(adding, state())).toThrow(TypeError)
     // Nothing minted, nothing to collide: an id-free plan still maps.
     expect(planToCommands(plan({ action: 'SetBpm', args: { bpm: 128 } }), state())).toHaveLength(1)
+  })
+
+  it('refuses to map a pack program change without a packSelection resolver, and builds the selection entirely from it when one is given', () => {
+    const setProgram = plan({ action: 'SetTrackInstrumentProgram', args: { trackId: 'track-1', packId: 'gm-piano', patchId: 'sf2-0' } })
+    expect(() => planToCommands(setProgram, state())).toThrow(TypeError)
+    const packSelection = (packId, patchId) => ({ packId, packVersion: '1.0.0', patchId, bankMsb: 0, bankLsb: 0, program: 0 })
+    const calls = planToCommands(setProgram, state(), { packSelection })
+    expect(calls[0]).toEqual({
+      factory: 'SetTrackInstrumentProgram',
+      args: ['track-1', { packId: 'gm-piano', packVersion: '1.0.0', patchId: 'sf2-0', bankMsb: 0, bankLsb: 0, program: 0 }],
+    })
+  })
+
+  it('mints a preset id for a SavePreset plan', () => {
+    const save = plan({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } })
+    const calls = planToCommands(save, state(), { makeId: kind => `${kind}-1` })
+    expect(calls).toEqual([{ factory: 'SavePreset', args: ['track-1', 'Night Pad', 'preset-1'] }])
   })
 
   it('mints different ids for two applies of one plan against one state', () => {

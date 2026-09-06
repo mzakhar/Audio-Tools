@@ -46,11 +46,26 @@ function rackRow(rackId, rack) {
   }
 }
 
-export function buildIndex({ packs = [], palettes = {}, racks = {} } = {}) {
+function presetRow(preset) {
+  return {
+    key: `preset:${preset.id}`,
+    kind: 'preset',
+    label: preset.name,
+    sub: preset.paletteKey,
+    program: null,
+    presetId: preset.id,
+    // For audition only — applying a preset goes through ApplyPreset, not
+    // SetTrackInstrument, so the row keeps the params for the player to hear.
+    instrument: { type: 'palette', paletteKey: preset.paletteKey, params: preset.params },
+  }
+}
+
+export function buildIndex({ packs = [], palettes = {}, racks = {}, presets = [] } = {}) {
   const rows = []
   for (const pack of packs) rows.push(...packRows(pack))
   for (const [paletteKey, palette] of Object.entries(palettes)) rows.push(paletteRow(paletteKey, palette))
   for (const [rackId, rack] of Object.entries(racks)) rows.push(rackRow(rackId, rack))
+  for (const preset of presets) rows.push(presetRow(preset))
   return rows
 }
 

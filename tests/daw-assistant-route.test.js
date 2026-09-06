@@ -141,3 +141,42 @@ describe('POST /api/assistant', () => {
     expect(res.writeHead).toHaveBeenCalledWith(429, expect.any(Object))
   })
 })
+
+describe('POST /api/assistant, mode: ask', () => {
+  const validAnswer = { answer: 'The tempo is 120 BPM.', cited: ['bpm'] }
+
+  it('returns { answer, cited } for a shape-valid response', async () => {
+    const fetchFn = planFetch(validAnswer)
+    const res = response()
+    await handler(fetchFn)(assistantRequest({ prompt: 'what is the tempo?', digest: validDigest, mode: 'ask' }), res)
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+    const body = JSON.parse(res.end.mock.calls[0][0])
+    expect(body).toEqual(validAnswer)
+    expect(body).not.toHaveProperty('plan')
+  })
+
+  it('refuses an unknown mode with a 400 before any provider call', async () => {
+    const fetchFn = vi.fn(async () => certsResponse)
+    const res = response()
+    await handler(fetchFn)(assistantRequest({ prompt: 'do something', digest: validDigest, mode: 'edit' }), res)
+    expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object))
+    expect(fetchFn).toHaveBeenCalledTimes(1) // only the Access certs lookup, never OpenAI
+  })
+
+  it('refuses an ask response smuggling an actions field, with a 424', async () => {
+    const fetchFn = planFetch({ answer: 'ok', cited: [], actions: [{ action: 'SetBpm', args: { bpm: 128 } }] })
+    const res = response()
+    await handler(fetchFn)(assistantRequest({ prompt: 'do something', digest: validDigest, mode: 'ask' }), res)
+    expect(res.writeHead).toHaveBeenCalledWith(424, expect.any(Object))
+    expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty('answer')
+  })
+
+  it('rate limits ask mode same as plan mode, per identity', async () => {
+    const fetchFn = planFetch(validAnswer)
+    const run = handler(fetchFn, { assistantLimit: 1 })
+    await run(assistantRequest({ prompt: 'q1', digest: validDigest, mode: 'ask' }), response())
+    const limited = response()
+    await run(assistantRequest({ prompt: 'q2', digest: validDigest, mode: 'ask' }), limited)
+    expect(limited.writeHead).toHaveBeenCalledWith(429, expect.any(Object))
+  })
+})

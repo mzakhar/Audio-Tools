@@ -161,6 +161,10 @@
     <div class="dlg-body">
       <input type="search" id="ib-search" class="ib-search" placeholder="Search instruments" aria-label="Search instruments" autocomplete="off">
       <div id="ib-scopes" class="ib-scopes" role="group" aria-label="Scope"></div>
+      <div class="dlg-row">
+        <input type="text" id="ib-save-name" class="ib-search" placeholder="Name for the armed track's sound" aria-label="Preset name" autocomplete="off">
+        <button id="ib-save-btn" class="midi-btn" type="button">SAVE PATCH</button>
+      </div>
       <div id="ib-list" class="ib-list" role="listbox" aria-label="Instruments" tabindex="-1"></div>
       <p class="dlg-note">↑↓ audition · Enter assign · Shift+Enter new track · Tab scope · Ctrl+D favourite · Esc cancel</p>
     </div>
@@ -206,6 +210,7 @@
       <textarea id="asst-prompt" class="asst-prompt" rows="3" placeholder="Describe the edit…" aria-label="Describe the edit"></textarea>
       <div class="dlg-row">
         <button id="asst-propose-btn" class="midi-btn">PROPOSE</button>
+        <button id="asst-ask-btn" class="midi-btn">ASK</button>
         <button id="asst-apply-btn" class="midi-btn" disabled>APPLY</button>
         <button id="asst-discard-btn" class="midi-btn">DISCARD</button>
       </div>

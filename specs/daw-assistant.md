@@ -24,8 +24,11 @@ gate, and the "the model proposes, our code decides" posture — and nothing els
 | 0 — plan contract, digest, batch history | shipped |
 | 1 — web route on the existing proxy | shipped |
 | 2 — assistant dialog, preview, apply | shipped |
-| 3 — Electron parity via existing provider connections | proposed |
+| 3 — Electron parity via existing provider connections | shipped |
 | 4 — conversation, follow-ups, audio-aware suggestions | deferred |
+| 5 — palette param actions | shipped |
+| 6 — ask mode, answering without editing | shipped |
+| 7 — pack program selection | shipped |
 
 Settled: web ships first, because the deployed app is where this is wanted and
 Cloudflare Access already protects the whole host. Electron follows using the
@@ -249,13 +252,16 @@ the promise in its summary. So a creating action may **name** what it makes:
 | Effects | `AddEffect`, `RemoveEffect`, `SetEffectParam` |
 | Pattern (909) | `SetPatternStep`, `SetBarParam`, `ClearBar`, `AddBar`, `SetChain` |
 | Rack | `AddModule`, `RemoveModule`, `MoveModule`, `SetModuleParam`, `SetAttenuverter`, `SetModuleBypass`, `Connect`, `Disconnect` |
+| Presets | `SavePreset` |
 
 Deliberately excluded: `AddRack`, `RemoveRack`, `LoadRackPatch`,
-`SetTrackInstrumentProgram`, `SetCableColor`, `SetRackRails`, `RenameRack`,
-`SetCurrentBar`, `RemoveBar`, `SetBusReturn`, and every clip/note command not
-listed. Each is either wholesale-destructive, subtle enough to need its own
-review (pack program resolution), or cosmetic. Add one when a real request needs
-it, with a test.
+`SetCableColor`, `SetRackRails`, `RenameRack`,
+`SetCurrentBar`, `RemoveBar`, `SetBusReturn`, `ApplyPreset`, `RemovePreset`, and
+every clip/note command not listed. Each is either wholesale-destructive,
+subtle enough to need its own review (pack program resolution), or cosmetic —
+`ApplyPreset`/`RemovePreset` specifically: only "save it as a preset" was ever
+the named request (`specs/palette-state.md`, phase 5 of this file), so only
+saving is wired up. Add one when a real request needs it, with a test.
 
 Per-action validation beyond "the id exists": `SetMidiClipNotes` caps notes per
 clip and clamps pitch to 0-127, velocity to 0.01-1, duration to >= 0.0625.
@@ -370,17 +376,156 @@ actually in the plan.
 
 ## Phase 3 — Electron parity
 
-Electron already stores named provider connections with keys in `safeStorage`
-(`src/main/music-discovery/connections.js`). Assistant reuses them through a
-narrow `dawAssistant:propose` IPC method beside the existing
-`musicDiscovery:*` ones. The shared plan contract and the renderer dialog do not
-change; only the transport does.
+Electron reuses the same named provider connections discovery already stores
+with keys in `safeStorage` (`src/main/music-discovery/connections.js`) —
+there is no separate assistant configuration UI. `src/main/daw-assistant.js`
+exposes `createAssistantService({ connections, fetchFn })` with `available()`,
+`propose({ prompt, digest, providerId })` and `ask({ prompt, digest,
+providerId })`, and `src/main/index.js` wires those up as
+`dawAssistant:available` / `dawAssistant:propose` / `dawAssistant:ask` beside
+the existing `musicDiscovery:*` handlers, lazily constructed the same way and
+reset whenever connections are reconfigured. The preload bridge mirrors it 1:1
+as `window.dawAssistant`.
+
+Both call shapes — plan and ask — go through the same model request the web
+route uses, extracted once into `src/shared/daw-assistant/provider.js`
+(`assistantModelCall`, the two instruction strings, the two JSON schemas, the
+shared timeout/output-token constants), so there is exactly one place that
+builds an OpenAI Responses request for this feature, not one per transport.
+`src/web-discovery/index.js` now imports from there too; its behaviour is
+unchanged.
+
+The main-process service applies the same server-side discipline the web
+route does, because it is the same threat model even though the key is local:
+`clampDigest` reapplies the digest caps, the prompt is capped and sanitized
+the same way, and the model's response is gated through `validatePlanShape` /
+`validateAnswerShape` before it crosses the IPC boundary — a malformed plan or
+an ask response smuggling an `actions` field never reaches the renderer. Only
+the validated `{ plan }` or `{ answer, cited }` crosses; the connection and its
+key never do.
+
+Per-identity rate limiting is a shared-host concern (the web route protects
+one key paid for by everyone on `synth.zakharhome.org`); Electron here is one
+local user spending a key they configured themselves, so there is nothing to
+limit and the service applies none.
+
+The shared plan contract and the renderer dialog do not change; only the
+transport does. `AssistantDialog`'s constructor already accepted injected
+`propose`/`ask` deps for testing — phase 3 adds one more default ahead of the
+existing `fetch` one: when `window.dawAssistant` exists and no dep was
+injected, `propose`/`ask` call the IPC bridge instead. `assistantAvailable()`
+in `app.js` now also returns true whenever `window.dawAssistant` exists, so
+the `⋯` menu item appears in the Electron app without needing the deployed
+host.
 
 ## Phase 4 — deferred
 
 Multi-turn conversation and follow-up refinement; the assistant listening to
 rendered audio; automatic re-planning when a plan is rejected; plan templates or
 saved macros; anything that edits without a person clicking Apply.
+
+## Coverage against the workflow catalogue
+
+`specs/ux-scenarios.md` is the eleven-scenario evaluation script for the app.
+Scored against the action allowlist, so this is not re-derived each time:
+
+| # | Scenario | Priority | Assistant |
+|---|---|---|---|
+| 6 | Getting a drum pattern down | table-stakes | strong — the 909 actions cover it end to end |
+| 7 | Comping in the piano roll | table-stakes | decent — `SetMidiClipNotes` expresses quantize as a bulk rewrite |
+| 10 | Recovering from silence | table-stakes | strong — ask mode answers directly from the digest's mute/solo/volume/instrument fields, with citations back to the exact value it used |
+| 2 | Finding a specific kind of sound | table-stakes | decent — `SetTrackInstrument` and `SetTrackInstrumentProgram` now reach every real source (palette, rack, installed pack patch); still no audition, so a pack pick is blind until Apply |
+| 3 | Playing the controller first time | table-stakes | marginal — `SetTrackMidiChannel` fixes a channel mismatch, nothing else touches devices or CC |
+| 4 | Holding a sound while tweaking it | expected | decent — `SetInstrumentParam` reaches any live palette knob; still no audition, so a change is heard only after Apply |
+| 8 | Locking in a sound worth keeping | expected | decent — `SetInstrumentParam` shapes a sound and `SavePreset` names and keeps it in one plan ("make the pad darker and save it as Night Pad"); recall and delete are UI-only, not assistant actions |
+| 1, 5, 9, 11 | First sound · recording a take · reopening a project · bouncing a WAV | table-stakes | none, by construction |
+
+The shape of that table is the point: this assistant edits **project structure**,
+while most of the catalogue is real-time interaction, perception, hardware and
+persistence. Six scenarios are out of reach because a propose-then-apply agent is
+the wrong tool, not because the allowlist is short.
+
+**Deliberately not built**: transport, record, and export actions. Scenarios 5
+and 11 want a person in control of a live take and of a file. An agent that
+proposes a batch and waits for approval does not belong on either path, and
+adding those actions would put it there.
+
+## Phase 5 — palette param actions
+
+Was blocked until `specs/palette-state.md` phases 0–1 landed; knob values now
+live in `ProjectStore`, so there is something to address.
+
+Adds one action:
+
+| Action | Notes |
+|---|---|
+| `SetInstrumentParam` | `trackId`, `key`, `value` |
+
+`key` is **not** validated by a list in this spec — it is validated against the
+palette definition for that track's `paletteKey`, the same way `SetModuleParam`
+resolves keys from the module registry rather than from the model. That check is
+capability-injected (`capabilities.paletteParamKeys(paletteKey)`), so
+`src/shared/` still imports nothing from the renderer.
+
+The digest gains `instrument.params` per track, capped like everything else: only
+keys the palette declares, numbers and short strings, no nested objects.
+
+This closes scenario 4 and, with the preset half of `palette-state.md`, makes
+scenario 8 addressable — "make the pad darker and save it as Night Pad" becomes
+expressible.
+
+## Phase 6 — ask mode
+
+Scenario 10 is table-stakes and the assistant already holds the data to serve it:
+mute, solo, volume and instrument per track are in the digest. What is missing is
+a way to **answer** rather than edit.
+
+```
+POST /api/assistant  { prompt, digest, mode: 'ask' }  ->  { answer, cited }
+```
+
+- The model returns prose plus a list of digest paths it relied on. No actions,
+  no plan, and the response schema has no `actions` field at all — ask mode
+  cannot become edit mode by way of a model that ignores its instructions.
+- The dialog renders the answer with the cited values shown beside it, so a claim
+  like "Kick is muted" is checkable against the state it came from without
+  trusting the prose.
+- Same route, same Access gate, same per-identity rate limit, same digest clamp.
+  `mode` is validated server-side against a literal pair; anything else is a 400.
+- The answer is never a diagnosis of things outside the digest. An AudioContext
+  that never started, a MIDI device that was never granted, a secure-context API
+  refusing on the LAN route — none of that is in project state, and the answer
+  must say what it cannot see rather than guess. Scenario 10's named failure is
+  a user guessing across panels; an assistant guessing on their behalf is worse.
+
+Whether ask mode should ever propose a fix from an answer ("Kick is muted —
+unmute it?") is left open. It is one extra round trip and it re-introduces the
+edit path into a mode defined by not having one, so it waits for a real request.
+
+## Phase 7 — pack program selection
+
+Scenario 2 is weak because `SetTrackInstrument` only swaps a palette or a rack,
+while most real instrument choice in this app is a SoundFont pack patch.
+
+Adds `SetTrackInstrumentProgram` to the allowlist. It was excluded from phase 0
+on purpose — pack program resolution has its own rules (`programFollow`, the
+`received` bank/program triple, `unresolved` state) in
+`specs/instrument-packs.md`, and it deserved its own review rather than being
+waved through with the rest.
+
+Requirements before it goes in:
+
+- validation resolves the selection against the installed pack's manifest, not
+  against model text, and a plan naming a pack or patch that is not installed is
+  refused whole
+- a `programFollow: 'pinned'` instrument is not silently overridden — the store
+  already respects this at `ProjectStore.js:151`, and the assistant must refuse
+  rather than emit an action it knows will be ignored
+- the digest exposes enough for the model to choose: pack id, patch id and name
+  per armed track, capped, with no file paths
+
+Auditioning stays out of scope. The assistant proposes a patch; the person hears
+it after apply, or uses the browser, which is what the browser is for.
 
 ## Verification
 

@@ -49,8 +49,8 @@ const classicPalette = {
   selectors: [
     { key: 'waveform', label: 'WAVE', options: ['sine', 'square', 'sawtooth', 'triangle'] },
   ],
-  createVoice(ctx, output, freq, velocity, startTime) {
-    const p = this.params
+  createVoice(ctx, output, freq, velocity, startTime, params) {
+    const p = params || this.params
     const gainNode = ctx.createGain()
     const filter = ctx.createBiquadFilter()
     filter.type = 'lowpass'
@@ -111,8 +111,8 @@ const fmPalette = {
     { key: 'reverb',   label: 'REVERB', min: 0,     max: 1,    step: 0.01,  fmt: '' },
   ],
   selectors: [],
-  createVoice(ctx, output, freq, velocity, startTime) {
-    const p = this.params
+  createVoice(ctx, output, freq, velocity, startTime, params) {
+    const p = params || this.params
 
     // Carrier
     const carrier = ctx.createOscillator()
@@ -218,8 +218,8 @@ const drumPalette = {
   selectors: [],
 
   // drumIndex: 0=kick, 1=snare, 2=hihat, 3=clap
-  createDrumVoice(ctx, output, drumIndex, velocity, startTime) {
-    const p = this.params
+  createDrumVoice(ctx, output, drumIndex, velocity, startTime, params) {
+    const p = params || this.params
     const v = velocity || 1
     switch (drumIndex) {
       case 0: return this._kick(ctx, output, p.kickDecay, v, startTime)
@@ -231,11 +231,11 @@ const drumPalette = {
   },
 
   // createVoice maps note to drum index for keyboard play
-  createVoice(ctx, output, freq, velocity, startTime) {
+  createVoice(ctx, output, freq, velocity, startTime, params) {
     // Map to drum type by frequency range
     const midi = Math.round(69 + 12 * Math.log2(freq / 440))
     const idx = [60, 62, 65, 69].indexOf(midi)
-    return this.createDrumVoice(ctx, output, idx >= 0 ? idx : 0, velocity, startTime)
+    return this.createDrumVoice(ctx, output, idx >= 0 ? idx : 0, velocity, startTime, params)
   },
 
   _kick(ctx, output, decay, v, t) {
@@ -363,8 +363,8 @@ const padPalette = {
     { key: 'reverb',  label: 'REVERB', min: 0,   max: 1,     step: 0.01,  fmt: '' },
   ],
   selectors: [],
-  createVoice(ctx, output, freq, velocity, startTime) {
-    const p = this.params
+  createVoice(ctx, output, freq, velocity, startTime, params) {
+    const p = params || this.params
 
     const oscA = ctx.createOscillator()
     oscA.type = 'triangle'
@@ -431,4 +431,35 @@ const tr909Palette = {
 }
 
 const Palettes = { classic: classicPalette, fm: fmPalette, drum: drumPalette, tr909: tr909Palette, pad: padPalette }
+
+// paletteDefaults/paletteParamKeys/clampPaletteParam: the palette definition is
+// the schema. Params on an instrument are data now, these are the only doors
+// in and out of that schema — never read Palettes[key].params directly for
+// live state, only to seed or validate.
+function paletteDefaults(paletteKey) {
+  const palette = Palettes[paletteKey] || Palettes.classic
+  return { ...palette.params }
+}
+
+function paletteParamKeys(paletteKey) {
+  const palette = Palettes[paletteKey] || Palettes.classic
+  return [...palette.knobs.map(k => k.key), ...palette.selectors.map(s => s.key)]
+}
+
+function clampPaletteParam(paletteKey, key, value) {
+  const palette = Palettes[paletteKey] || Palettes.classic
+  const knob = palette.knobs.find(k => k.key === key)
+  if (knob) {
+    const n = Number(value)
+    if (Number.isNaN(n)) return undefined
+    return Math.min(knob.max, Math.max(knob.min, n))
+  }
+  const selector = palette.selectors.find(s => s.key === key)
+  if (selector) {
+    return selector.options.includes(value) ? value : undefined
+  }
+  return undefined
+}
+
+export { paletteDefaults, paletteParamKeys, clampPaletteParam }
 export default Palettes

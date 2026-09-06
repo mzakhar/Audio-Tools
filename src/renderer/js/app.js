@@ -4,11 +4,11 @@
  * Handles palette switching, knob panel, and transport controls.
  */
 import AudioEngine from './audio-engine.js'
-import Palettes from './palettes.js'
+import Palettes, { paletteDefaults } from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
@@ -50,10 +50,11 @@ const DIR_KEY_PROJECT = 'synth_lastProjectDir'
 const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
 const MIDI_DEVICE_KEY = 'synth_midi_input'
 
-// Same gate as webDiscovery(): the Access-protected https host is the only
-// place /api/assistant exists. Everywhere else the menu item is absent.
+// Same gate as webDiscovery(): the Access-protected https host has
+// /api/assistant, and Electron carries its own IPC transport (dawAssistant
+// preload bridge) regardless of host.
 function assistantAvailable() {
-  return location.protocol === 'https:' && location.hostname === 'synth.zakharhome.org'
+  return (location.protocol === 'https:' && location.hostname === 'synth.zakharhome.org') || !!window.dawAssistant
 }
 
 function webDiscovery() {
@@ -495,7 +496,8 @@ function armedTrack() {
  *  first note. Mirrors liveInstrumentFor's own fallback. */
 function armedInstrument() {
   const track = armedTrack()
-  return track?.instrument || { type: 'palette', paletteKey: track?.paletteKey || 'classic' }
+  const paletteKey = track?.paletteKey || 'classic'
+  return track?.instrument || { type: 'palette', paletteKey, params: paletteDefaults(paletteKey) }
 }
 
 /** Rebuild the slot, knobs and pads — but only when the selection really moved. */
@@ -605,11 +607,13 @@ function renderKnobPanel() {
   const instrument = armedInstrument()
   if (instrument.type === 'rack') return renderRackPanel(panel, instrument)
   if (instrument.type === 'pack') return renderPackKnobs(panel, instrument)
-  renderPaletteKnobs(panel, instrument.paletteKey || 'classic')
+  renderPaletteKnobs(panel, instrument, armedTrack()?.id)
 }
 
-function renderPaletteKnobs(panel, paletteKey) {
+function renderPaletteKnobs(panel, instrument, trackId) {
+  const paletteKey = instrument.paletteKey || 'classic'
   const p = Palettes[paletteKey] || Palettes.classic
+  const params = instrument.params || paletteDefaults(paletteKey)
 
   // Selectors (waveform picker etc.)
   if (p.selectors && p.selectors.length) {
@@ -627,11 +631,11 @@ function renderPaletteKnobs(panel, paletteKey) {
         const o = document.createElement('option')
         o.value = opt
         o.textContent = opt.toUpperCase()
-        if (p.params[def.key] === opt) o.selected = true
+        if (params[def.key] === opt) o.selected = true
         sel.appendChild(o)
       })
       sel.addEventListener('change', () => {
-        p.params[def.key] = sel.value
+        if (trackId) ProjectStore.dispatch(SetInstrumentParam(trackId, def.key, sel.value))
       })
 
       group.appendChild(lbl)
@@ -644,19 +648,29 @@ function renderPaletteKnobs(panel, paletteKey) {
   p.knobs.forEach((def, i) => {
     addKnob(panel, def, {
       id: `knob-${paletteKey}-${def.key}`,
-      value: p.params[def.key],
-      onInput: v => {
-        p.params[def.key] = v
-        if (def.key === 'reverb') { _reverbAmount = v; AudioEngine.setReverb(v) }
-      }
+      value: params[def.key],
+      // Commit on release, not per tick: one drag is one undo entry. The
+      // slider still tracks the pointer live via updateFill, only the store
+      // write is deferred.
+      // ponytail: a note struck mid-drag plays the pre-drag value — voices
+      // sample params at creation, not live, so this only affects notes
+      // triggered while a knob is still moving.
+      event: 'change',
+      onInput: v => { if (trackId) ProjectStore.dispatch(SetInstrumentParam(trackId, def.key, v)) }
     })
+    if (def.key === 'reverb') {
+      // Reverb keeps immediate feedback during the drag — engine state, not
+      // store state, so ticking it does not spam undo history.
+      document.getElementById(`knob-${paletteKey}-${def.key}`)
+        ?.addEventListener('input', e => AudioEngine.setReverb(parseFloat(e.target.value)))
+    }
     if (i < p.knobs.length - 1) addDivider(panel)
   })
 
   // Each palette carries its own reverb default, applied when it becomes the
   // armed sound rather than on a tab click that no longer exists.
-  if (AudioEngine.getContext() && p.params?.reverb != null) {
-    _reverbAmount = p.params.reverb
+  if (AudioEngine.getContext() && params?.reverb != null) {
+    _reverbAmount = params.reverb
     AudioEngine.setReverb(_reverbAmount)
   }
 }
@@ -1156,7 +1170,8 @@ function initProjectCommands() {
       racks: state.racks,
       packFor,
       sampleStoreFor,
-      sampleRate: state.sampleRate
+      sampleRate: state.sampleRate,
+      palettes: Palettes
     })
     await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
   })
@@ -1683,6 +1698,7 @@ function boot() {
     // tr909 is the 909 editor's own transport, not a playable voice.
     palettes: () => Object.fromEntries(Object.entries(Palettes).filter(([key]) => key !== 'tr909')),
     racks: () => ProjectStore.getState().racks,
+    presets: () => ProjectStore.getState().presets || [],
     auditioner: _auditioner,
     ensureTrack: ensureMidiTrack,
     addTrack: () => addMidiTrack(),
@@ -1717,7 +1733,7 @@ function boot() {
     }
   })
   if (assistantAvailable()) {
-    _assistantDialog = new AssistantDialog({ store: ProjectStore })
+    _assistantDialog = new AssistantDialog({ store: ProjectStore, packs: () => _packCatalog })
     document.addEventListener('open-assistant', () => _assistantDialog.open())
   }
   document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())

@@ -8,13 +8,14 @@ import { RackClock } from '../rack/rack-clock.js'
 import { beatsToSeconds } from '../utils/timeline-math.js'
 import { audioBufferToWAV } from '../utils/wav-encoder.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
+import { paletteDefaults } from '../palettes.js'
 
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
-export function paletteInstrument(palette, ctx, output) {
+export function paletteInstrument(palette, ctx, output, params) {
   return (note, time, stopTime) => {
     const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
-    const voice = palette.createVoice(ctx, output, freq, note.velocity ?? 0.8, time)
+    const voice = palette.createVoice(ctx, output, freq, note.velocity ?? 0.8, time, params)
     voice.stop(stopTime)
   }
 }
@@ -49,8 +50,10 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, packF
     return moduleId ? rackInstrument(handle, moduleId) : null
   }
   if (instrument.type !== 'palette') return null
-  const palette = palettes?.[instrument.paletteKey || track.paletteKey || 'classic']
-  return palette ? paletteInstrument(palette, ctx, output) : null
+  const paletteKey = instrument.paletteKey || track.paletteKey || 'classic'
+  const palette = palettes?.[paletteKey]
+  const params = instrument.params || paletteDefaults(paletteKey)
+  return palette ? paletteInstrument(palette, ctx, output, params) : null
 }
 
 const TimelinePlayer = {
@@ -208,7 +211,7 @@ const TimelinePlayer = {
     return this._startBeat + (elapsed / (60 / bpm))
   },
 
-  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, packFor, sampleStoreFor }) {
+  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, packFor, sampleStoreFor, palettes = null }) {
     const totalSeconds = beatsToSeconds(durationBeats, bpm)
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05
@@ -231,7 +234,7 @@ const TimelinePlayer = {
     if (missing.length) throw new Error(`Missing pack samples: ${missing.join(', ')}`)
     tracks.forEach(track => {
       if (track.type === 'midi') {
-        const playNote = instrumentFor(track, { palettes: null, ctx: offline, output: offline.destination, rackHandles, packFor, sampleStoreFor, packInstruments })
+        const playNote = instrumentFor(track, { palettes, ctx: offline, output: offline.destination, rackHandles, packFor, sampleStoreFor, packInstruments })
         for (const clip of track.clips) for (const note of clip.notes || []) {
           if (clip.type !== 'midi') continue
           const at = startTime + beatsToSeconds(clip.startBeat + note.startBeat, bpm)

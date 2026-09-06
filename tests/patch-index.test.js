@@ -43,6 +43,14 @@ describe('buildIndex', () => {
     expect(rackRow.sub).toBe('Rack')
   })
 
+  it('indexes project presets beside factory patches', () => {
+    const presets = [{ id: 'preset-1', name: 'Night Pad', paletteKey: 'classic', params: { cutoff: 400 } }]
+    const index = buildIndex({ packs: [], palettes: {}, racks: {}, presets })
+    expect(index).toHaveLength(1)
+    expect(index[0]).toMatchObject({ kind: 'preset', label: 'Night Pad', presetId: 'preset-1' })
+    expect(index[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic', params: { cutoff: 400 } })
+  })
+
   it('indexes a bare manifest (no .manifest wrapper)', () => {
     const bareManifest = { id: 'bare', version: '1.0.0', name: 'Bare Pack', patches: [
       { id: 'b1', name: 'Bare Patch', kind: 'melodic', address: { bankMsb: 0, bankLsb: 0, program: 5 } },
