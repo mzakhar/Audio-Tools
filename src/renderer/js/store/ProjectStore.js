@@ -79,13 +79,15 @@ export function migrate(projectJson) {
 // Commands are pure: receive state, return new state (no mutation).
 // ---------------------------------------------------------------------------
 
-export function AddTrack(type = 'audio', name = 'Track') {
+// `ids` lets a caller (the assistant) pre-mint both ids so a plan can name the
+// track before it exists; omitted, they are minted here exactly as before.
+export function AddTrack(type = 'audio', name = 'Track', ids = {}) {
   return {
     label: `Add track "${name}"`,
     execute(state) {
       const next = JSON.parse(JSON.stringify(state))
-      const trackId = genId('track')
-      const channelId = genId('channel')
+      const trackId = ids.trackId || genId('track')
+      const channelId = ids.channelId || genId('channel')
       next.tracks.push({
         id: trackId,
         name,
@@ -376,7 +378,7 @@ export function SetBusReturn(busId, level) {
 // Effect command factories
 // ---------------------------------------------------------------------------
 
-export function AddEffect(trackId, type, params = {}) {
+export function AddEffect(trackId, type, params = {}, effectId = null) {
   return {
     label: `Add ${type} effect`,
     execute(state) {
@@ -384,8 +386,7 @@ export function AddEffect(trackId, type, params = {}) {
       const track = next.tracks.find(t => t.id === trackId)
       if (!track) return next
       if (!track.effects) track.effects = []
-      const effectId = genId('effect')
-      track.effects.push({ id: effectId, type, params: { ...params } }) // rack params carry { rack }
+      track.effects.push({ id: effectId || genId('effect'), type, params: { ...params } }) // rack params carry { rack }
       return next
     },
     undo(state) {

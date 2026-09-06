@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { buildDigest, clampDigest, MAX_TRACKS, MAX_CLIPS } from '../src/shared/daw-assistant/digest.js'
 import { validatePlanShape, validatePlan, describeAction, planToCommands, ALLOWLIST } from '../src/shared/daw-assistant/plan.js'
-import ProjectStore, { AddTrack, SetBpm } from '../src/renderer/js/store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddEffect, SetBpm } from '../src/renderer/js/store/ProjectStore.js'
 
 const step = on => ({ on, velocity: 0.85, accent: false, flam: false })
 const lane = pattern => [...pattern].map(char => step(char === '1'))
@@ -266,6 +266,157 @@ describe('daw assistant descriptions and command mapping', () => {
   })
 })
 
+describe('daw assistant forward references', () => {
+  const refPlan = () => plan(
+    { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+    { action: 'SetTrackInstrument', args: { trackId: { $ref: 'lead' }, instrument: { type: 'palette', paletteKey: 'fm' } } },
+  )
+
+  it('resolves a ref to an earlier action, in shape and against live state', () => {
+    const shape = validatePlanShape(refPlan())
+    expect(shape.ok).toBe(true)
+    expect(shape.value.actions[0].ref).toBe('lead')
+    expect(shape.value.actions[1].args.trackId).toEqual({ $ref: 'lead' })
+    expect(validatePlan(refPlan(), state()).ok).toBe(true)
+  })
+
+  it('resolves a track ref in a channelId slot to that track mixer channel', () => {
+    const mixing = plan(
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+      { action: 'SetMixerParam', args: { channelId: { $ref: 'lead' }, param: 'volume', value: 0.5 } },
+    )
+    expect(validatePlan(mixing, state()).ok).toBe(true)
+    let seq = 0
+    const calls = planToCommands(mixing, state(), { makeId: kind => `${kind}-${++seq}` })
+    expect(calls[0].args[2]).toEqual({ trackId: 'track-1', channelId: 'channel-2' })
+    expect(calls[1].args[0]).toBe('channel-2')
+  })
+
+  it('refuses a ref to a later action and a ref that was never defined', () => {
+    const backwards = plan(
+      { action: 'SetTrackMidiChannel', args: { trackId: { $ref: 'lead' }, channel: 2 } },
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+    )
+    expect(validatePlan(backwards, state()).errors[0]).toMatch(/created by a later action/)
+    const missing = plan({ action: 'SetTrackMidiChannel', args: { trackId: { $ref: 'nope' }, channel: 2 } })
+    expect(validatePlan(missing, state()).errors[0]).toMatch(/unknown ref/)
+  })
+
+  it('refuses a clip ref in a track slot', () => {
+    const mismatched = plan(
+      { action: 'AddClip', args: { trackId: 'track-1', clip: { startBeat: 0, duration: 4 } }, ref: 'riff' },
+      { action: 'SetTrackMidiChannel', args: { trackId: { $ref: 'riff' }, channel: 2 } },
+    )
+    const result = validatePlan(mismatched, state())
+    expect(result.ok).toBe(false)
+    expect(result.errors[0]).toMatch(/is a clip, not usable as trackId/)
+  })
+
+  it('refuses a duplicate slug, a malformed slug, and a ref on a non-creating action', () => {
+    const twice = plan(
+      { action: 'AddTrack', args: { name: 'A' }, ref: 'lead' },
+      { action: 'AddTrack', args: { name: 'B' }, ref: 'lead' },
+    )
+    expect(validatePlanShape(twice).errors[0]).toMatch(/duplicate ref/)
+    expect(validatePlanShape(plan({ action: 'AddTrack', args: {}, ref: 'Lead Track' })).ok).toBe(false)
+    expect(validatePlanShape(plan({ action: 'AddTrack', args: {}, ref: '__proto__' })).ok).toBe(false)
+    expect(validatePlanShape(plan({ action: 'SetBpm', args: { bpm: 120 }, ref: 'tempo' })).errors[0]).toMatch(/cannot define a ref/)
+    expect(validatePlanShape(plan({ action: 'SetBpm', args: { bpm: 120 } })).value.actions[0].ref).toBeUndefined()
+  })
+
+  it('refuses a slug that shadows an id already in the project', () => {
+    const shadow = plan(
+      { action: 'AddTrack', args: { name: 'Lead' }, ref: 'track-1' },
+      { action: 'SetTrackMidiChannel', args: { trackId: { $ref: 'track-1' }, channel: 2 } },
+    )
+    expect(validatePlan(shadow, state()).errors[0]).toMatch(/collides with an id already in the project/)
+  })
+
+  it('refuses a slug whose derived channel id shadows a real mixer channel', () => {
+    // The slug itself is free; the `${ref}#channel` id it stands for is not.
+    const taken = state()
+    taken.mixer.channels.push({ id: 'lead#channel', trackId: 'track-1', volume: 1, pan: 0, mute: false, solo: false, sends: {} })
+    const shadow = plan(
+      { action: 'AddTrack', args: { name: 'Lead' }, ref: 'lead' },
+      { action: 'SetMixerParam', args: { channelId: { $ref: 'lead' }, param: 'volume', value: 0.5 } },
+    )
+    expect(validatePlan(shadow, taken).errors[0]).toMatch(/collides with an id already in the project/)
+    expect(validatePlan(shadow, state()).ok).toBe(true)
+  })
+
+  it('refuses "constructor" and "prototype" as ref slugs', () => {
+    for (const name of ['constructor', 'prototype']) {
+      expect(validatePlanShape(plan({ action: 'AddTrack', args: {}, ref: name })).ok).toBe(false)
+      expect(validatePlanShape(plan({ action: 'RemoveTrack', args: { trackId: { $ref: name } } })).ok).toBe(false)
+    }
+  })
+
+  it('refuses a Connect where one ref slot fails and the other resolves', () => {
+    // Today the null from the failed slot is also caught by the existence
+    // check; the accumulate-never-clear rule in validatePlan is what keeps that
+    // true for the next action that grows a second ref-bearing sub-field.
+    const half = plan(
+      { action: 'AddModule', args: { rackId: 'rack-1', type: 'lfo' }, ref: 'lfo' },
+      { action: 'Connect', args: { rackId: 'rack-1', from: { moduleId: { $ref: 'missing' }, port: 'out' }, to: { moduleId: { $ref: 'lfo' }, port: 'in' } } },
+    )
+    const canConnect = vi.fn(() => ({ ok: true }))
+    const result = validatePlan(half, state(), { canConnect })
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /unknown ref "missing"/.test(e))).toBe(true)
+    expect(canConnect).not.toHaveBeenCalled()
+  })
+
+  it('refuses a malformed $ref, and a $ref in a slot no action can fill', () => {
+    expect(validatePlanShape(plan({ action: 'SetBpm', args: { bpm: { $ref: 'lead' } } })).ok).toBe(false)
+    expect(validatePlanShape(plan({ action: 'AddModule', args: { rackId: { $ref: 'lead' }, type: 'lfo' } })).ok).toBe(false)
+    expect(validatePlanShape(plan({ action: 'RemoveTrack', args: { trackId: { $ref: 'NOPE!' } } })).ok).toBe(false)
+  })
+
+  it('checks a ref-created module the way it checks a real one', () => {
+    const patching = plan(
+      { action: 'AddModule', args: { rackId: 'rack-1', type: 'lfo', rail: 1, hp: 8 }, ref: 'lfo1' },
+      { action: 'SetModuleParam', args: { rackId: 'rack-1', moduleId: { $ref: 'lfo1' }, key: 'rate', value: 2 } },
+      { action: 'Connect', args: { rackId: 'rack-1', from: { moduleId: { $ref: 'lfo1' }, port: 'out' }, to: { moduleId: 'mod-2', port: 'cutoff' } } },
+    )
+    const canConnect = vi.fn(() => ({ ok: true }))
+    const moduleParamKeys = vi.fn(type => (type === 'lfo' ? ['rate'] : []))
+    expect(validatePlan(patching, state(), { canConnect, moduleParamKeys }).ok).toBe(true)
+    // Both capability checks saw the module the plan is about to create.
+    expect(moduleParamKeys).toHaveBeenCalledWith('lfo')
+    expect(canConnect.mock.calls[0][1]).toEqual({ moduleId: 'lfo1', port: 'out' })
+    expect(validatePlan(patching, state(), { moduleParamKeys: () => ['nope'] }).ok).toBe(false)
+  })
+
+  it('pre-mints every id and resolves refs to exactly those ids', () => {
+    const creating = plan(
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+      { action: 'AddEffect', args: { trackId: { $ref: 'lead' }, type: 'delay', params: {} }, ref: 'fx' },
+      { action: 'SetEffectParam', args: { trackId: { $ref: 'lead' }, effectId: { $ref: 'fx' }, param: 'time', value: 0.25 } },
+    )
+    expect(validatePlan(creating, state()).ok).toBe(true)
+    let seq = 0
+    const calls = planToCommands(creating, state(), { makeId: kind => `${kind}-${++seq}` })
+    const trackId = calls[0].args[2].trackId
+    const effectId = calls[1].args[3]
+    expect(calls[1].args[0]).toBe(trackId)
+    expect(calls[2].args.slice(0, 2)).toEqual([trackId, effectId])
+    // A second pass over the same plan and the same state mints a fresh set.
+    const again = planToCommands(creating, state(), { makeId: kind => `${kind}-${++seq}` })
+    expect(again[0].args[2].trackId).not.toBe(trackId)
+  })
+
+  it('needs a makeId for any creating action', () => {
+    expect(() => planToCommands(plan({ action: 'AddTrack', args: { name: 'Lead' } }), state())).toThrow(TypeError)
+    expect(() => planToCommands(plan({ action: 'AddEffect', args: { trackId: 'track-1', type: 'delay' } }), state())).toThrow(TypeError)
+  })
+
+  it('describes a $ref as the step that creates it', () => {
+    const actions = refPlan().actions
+    expect(describeAction(actions[1], state(), actions)).toBe('Set the instrument on "the track added in step 1" to fm')
+    expect(describeAction(actions[1], state())).toBe('Set the instrument on "the track added earlier" to fm')
+  })
+})
+
 describe('ProjectStore.dispatchBatch', () => {
   beforeEach(() => { ProjectStore.reset() })
 
@@ -283,6 +434,26 @@ describe('ProjectStore.dispatchBatch', () => {
     ProjectStore.undo()
     expect(ProjectStore.getState()).toEqual(before)
     expect(ProjectStore.canRedo()).toBe(true)
+  })
+
+  it('mints its own ids when none are supplied, and honours them when they are', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'Plain'))
+    const plain = ProjectStore.getState().tracks[0]
+    expect(plain.id).toMatch(/^track-/)
+    expect(plain.mixerChannelId).toMatch(/^channel-/)
+    expect(ProjectStore.getState().mixer.channels[0].id).toBe(plain.mixerChannelId)
+
+    ProjectStore.dispatch(AddTrack('midi', 'Named', { trackId: 'given-track', channelId: 'given-channel' }))
+    const named = ProjectStore.getState().tracks[1]
+    expect(named.id).toBe('given-track')
+    expect(named.mixerChannelId).toBe('given-channel')
+    expect(ProjectStore.getState().mixer.channels[1]).toMatchObject({ id: 'given-channel', trackId: 'given-track' })
+
+    ProjectStore.dispatch(AddEffect('given-track', 'delay', { time: 0.25 }))
+    ProjectStore.dispatch(AddEffect('given-track', 'delay', { time: 0.25 }, 'given-effect'))
+    const effects = ProjectStore.getState().tracks[1].effects
+    expect(effects[0].id).toMatch(/^effect-/)
+    expect(effects[1].id).toBe('given-effect')
   })
 
   it('clears the redo stack like dispatch does', () => {

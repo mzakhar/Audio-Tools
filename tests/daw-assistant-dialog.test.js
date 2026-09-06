@@ -94,6 +94,64 @@ describe('assistant apply path', () => {
     expect(ProjectStore.getState()).toEqual(before)
   })
 
+  it('applies a forward ref: the instrument lands on the track the plan just added', () => {
+    const store = spyStore()
+    const result = applyPlan(plan(
+      { action: 'SetBpm', args: { bpm: 128 } },
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+      { action: 'SetTrackInstrument', args: { trackId: { $ref: 'lead' }, instrument: { type: 'palette', paletteKey: 'fm' } } },
+      { action: 'SetMixerParam', args: { channelId: { $ref: 'lead' }, param: 'volume', value: 0.5 } },
+    ), store)
+
+    expect(result.ok).toBe(true)
+    const after = ProjectStore.getState()
+    const track = after.tracks.find(item => item.name === 'Lead')
+    expect(track.instrument).toEqual({ type: 'palette', paletteKey: 'fm' })
+    // The channelId slot resolved to that track's own mixer channel.
+    expect(after.mixer.channels.find(channel => channel.id === track.mixerChannelId).volume).toBe(0.5)
+    // Still one batch, still one undo.
+    expect(store.dispatchBatch).toHaveBeenCalledTimes(1)
+    expect(ProjectStore.getUndoStackSize()).toBe(1)
+    ProjectStore.undo()
+    expect(ProjectStore.getState().tracks).toHaveLength(0)
+  })
+
+  it('dispatches exactly the pre-minted ids, and mints fresh ones on a second apply', () => {
+    const store = spyStore()
+    const creating = plan(
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+      { action: 'AddEffect', args: { trackId: { $ref: 'lead' }, type: 'delay', params: {} } },
+    )
+
+    expect(applyPlan(creating, store).ok).toBe(true)
+    const first = ProjectStore.getState().tracks[0]
+    expect(applyPlan(creating, store).ok).toBe(true)
+    const [a, b] = ProjectStore.getState().tracks
+
+    expect(a.id).toBe(first.id)
+    expect(b.id).not.toBe(a.id)
+    expect(b.mixerChannelId).not.toBe(a.mixerChannelId)
+    expect(a.effects[0].id).not.toBe(b.effects[0].id)
+
+    // The ids the store holds are the ones planToCommands handed to the batch.
+    const dispatched = store.dispatchBatch.mock.calls[1][0]
+    expect(dispatched[0].execute).toBeTypeOf('function')
+    expect(ProjectStore.getState().tracks.map(track => track.id)).toContain(b.id)
+  })
+
+  it('refuses a ref plan whose kinds do not match, and dispatches nothing', () => {
+    const store = spyStore()
+    const result = applyPlan(plan(
+      { action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' },
+      { action: 'SetTrackMidiChannel', args: { trackId: { $ref: 'gone' }, channel: 2 } },
+    ), store)
+
+    expect(result.ok).toBe(false)
+    expect(result.errors[0]).toMatch(/unknown ref/)
+    expect(store.dispatchBatch).not.toHaveBeenCalled()
+    expect(ProjectStore.getState().tracks).toHaveLength(0)
+  })
+
   it('mints different clip ids when one plan is applied twice', () => {
     ProjectStore.dispatch(AddTrack('midi', 'Kick'))
     const trackId = ProjectStore.getState().tracks[0].id

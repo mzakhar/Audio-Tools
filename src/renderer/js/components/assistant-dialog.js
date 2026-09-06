@@ -135,7 +135,7 @@ export class AssistantDialog {
     for (const action of plan.actions || []) {
       const row = document.createElement('div')
       row.className = 'asst-action'
-      row.textContent = describeAction(action, state)
+      row.textContent = describeAction(action, state, plan.actions || [])
       this.planEl.appendChild(row)
     }
   }

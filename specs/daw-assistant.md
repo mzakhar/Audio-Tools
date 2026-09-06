@@ -196,6 +196,47 @@ the digest records that it was, so the model can say it only saw part.
 }
 ```
 
+### Forward references
+
+An id does not exist until a plan is applied, so a model asked to "add a Lead
+track using the FM palette" could only ever return the `AddTrack` — any
+`trackId` it invented would be refused. It dropped the second action and kept
+the promise in its summary. So a creating action may **name** what it makes:
+
+```js
+{ action: 'AddTrack', args: { type: 'midi', name: 'Lead' }, ref: 'lead' }
+{ action: 'SetTrackInstrument', args: { trackId: { $ref: 'lead' }, instrument: { type: 'palette', paletteKey: 'fm' } } }
+```
+
+- `ref` is a slug matching `^[a-z0-9][a-z0-9_-]{0,31}$`, unique within the plan,
+  and only `AddTrack`, `AddClip`, `AddMidiNote`, `AddEffect` and `AddModule` may
+  carry one. It may not collide with an id already in `state`.
+- Any argument in an id position takes either a real id string or `{ $ref }`.
+- A `$ref` must be defined by a **strictly earlier** action, and its kind must
+  match the slot:
+
+  | Creating action | Fills |
+  |---|---|
+  | `AddTrack` | `trackId`, and `channelId` — a track ref in a channel slot resolves to that track's mixer channel |
+  | `AddClip` | `clipId` |
+  | `AddMidiNote` | `noteId` |
+  | `AddEffect` | `effectId` |
+  | `AddModule` | `moduleId` |
+
+  A clip ref in a `trackId` slot is an error, not a coincidence that happens to
+  work.
+- `validatePlan` walks the plan against a **projected** state: each ref'd
+  creating action appends a stub, so every existence check, `canConnect` and
+  `moduleParamKeys` included, still runs against a real shape. A plan naming
+  something it never creates is refused whole, before anything executes.
+- **Ids are pre-minted.** `planToCommands` mints every id a creating action
+  needs — including both the track id and its mixer channel id — resolves each
+  `$ref` to that value, and passes it to the store, which mints nothing during
+  execution. `ProjectStore.AddTrack` and `AddEffect` therefore take optional id
+  arguments; omitted, they behave exactly as before.
+- `describeAction` renders a `$ref` as the step that creates it ("the track
+  added in step 2"), never a slug or `[object Object]`.
+
 ### Action allowlist
 
 | Group | Actions |
@@ -319,6 +360,13 @@ only if it changes while you play; this one does not.
   assistant adds no second path into the audio graph.
 - With no assistant route reachable, the menu item is absent, matching the
   posture discovery takes when no provider is configured.
+
+Live verification found the one gap this phase left: asked to set the tempo and
+add a track with a named instrument, the model returned the tempo and the track
+but not the instrument — it had no way to name a track that did not exist yet —
+while its summary still claimed all three. Forward references (see phase 0)
+closed it, and the instructions now say the summary describes only the actions
+actually in the plan.
 
 ## Phase 3 — Electron parity
 
