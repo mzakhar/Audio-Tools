@@ -6,6 +6,7 @@ import { importSf2Pack, importSf2Preset, listInstrumentPacks, readInstrumentSamp
 import { addSoundFontFolder, listSoundFontFolders, removeSoundFontFolder, scanSoundFontFolders } from './soundfont-folders.js'
 import { loadConnections, saveConnections } from './music-discovery/connections.js'
 import { createDiscoveryService } from './music-discovery/index.js'
+import { createAssistantService } from './daw-assistant.js'
 import { linkLead, listLeads, saveLead } from './music-discovery/leads.js'
 import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
@@ -14,6 +15,7 @@ import { freesoundPreviewUrl } from './music-discovery/freesound.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 let discoveryService = null
+let assistantService = null
 
 async function discovery() {
   if (!discoveryService) discoveryService = createDiscoveryService({
@@ -21,6 +23,15 @@ async function discovery() {
     freesound: await loadFreesound(app.getPath('userData'), safeStorage),
   })
   return discoveryService
+}
+
+// Same provider connections discovery uses — this feature adds no settings
+// of its own. Reset alongside discoveryService whenever connections change.
+async function assistant() {
+  if (!assistantService) assistantService = createAssistantService({
+    connections: await loadConnections(app.getPath('userData'), safeStorage),
+  })
+  return assistantService
 }
 
 async function configureDiscovery({ freesoundToken, openaiKey, model, providerUrl, providerKey, providerModel }) {
@@ -44,6 +55,7 @@ async function configureDiscovery({ freesoundToken, openaiKey, model, providerUr
   }
   if (next !== connections) await saveConnections(userData, next, safeStorage)
   discoveryService = null
+  assistantService = null
 }
 
 // Auto-updater — only active in packaged builds (not dev)
@@ -258,3 +270,7 @@ ipcMain.handle('musicDiscovery:preview', (_event, candidate) => {
 ipcMain.handle('musicDiscovery:listLeads', () => listLeads(app.getPath('userData')))
 ipcMain.handle('musicDiscovery:saveLead', (_event, lead) => saveLead(app.getPath('userData'), lead || {}))
 ipcMain.handle('musicDiscovery:linkLead', (_event, leadId, importedPreset) => linkLead(app.getPath('userData'), leadId, importedPreset))
+
+ipcMain.handle('dawAssistant:available', async () => (await assistant()).available())
+ipcMain.handle('dawAssistant:propose', async (_event, request) => (await assistant()).propose(request || {}))
+ipcMain.handle('dawAssistant:ask', async (_event, request) => (await assistant()).ask(request || {}))

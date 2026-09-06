@@ -50,10 +50,11 @@ const DIR_KEY_PROJECT = 'synth_lastProjectDir'
 const DIR_KEY_AUDIO   = 'synth_lastAudioDir'
 const MIDI_DEVICE_KEY = 'synth_midi_input'
 
-// Same gate as webDiscovery(): the Access-protected https host is the only
-// place /api/assistant exists. Everywhere else the menu item is absent.
+// Same gate as webDiscovery(): the Access-protected https host has
+// /api/assistant, and Electron carries its own IPC transport (dawAssistant
+// preload bridge) regardless of host.
 function assistantAvailable() {
-  return location.protocol === 'https:' && location.hostname === 'synth.zakharhome.org'
+  return (location.protocol === 'https:' && location.hostname === 'synth.zakharhome.org') || !!window.dawAssistant
 }
 
 function webDiscovery() {

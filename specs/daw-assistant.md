@@ -24,7 +24,7 @@ gate, and the "the model proposes, our code decides" posture — and nothing els
 | 0 — plan contract, digest, batch history | shipped |
 | 1 — web route on the existing proxy | shipped |
 | 2 — assistant dialog, preview, apply | shipped |
-| 3 — Electron parity via existing provider connections | proposed |
+| 3 — Electron parity via existing provider connections | shipped |
 | 4 — conversation, follow-ups, audio-aware suggestions | deferred |
 | 5 — palette param actions | shipped |
 | 6 — ask mode, answering without editing | shipped |
@@ -376,11 +376,47 @@ actually in the plan.
 
 ## Phase 3 — Electron parity
 
-Electron already stores named provider connections with keys in `safeStorage`
-(`src/main/music-discovery/connections.js`). Assistant reuses them through a
-narrow `dawAssistant:propose` IPC method beside the existing
-`musicDiscovery:*` ones. The shared plan contract and the renderer dialog do not
-change; only the transport does.
+Electron reuses the same named provider connections discovery already stores
+with keys in `safeStorage` (`src/main/music-discovery/connections.js`) —
+there is no separate assistant configuration UI. `src/main/daw-assistant.js`
+exposes `createAssistantService({ connections, fetchFn })` with `available()`,
+`propose({ prompt, digest, providerId })` and `ask({ prompt, digest,
+providerId })`, and `src/main/index.js` wires those up as
+`dawAssistant:available` / `dawAssistant:propose` / `dawAssistant:ask` beside
+the existing `musicDiscovery:*` handlers, lazily constructed the same way and
+reset whenever connections are reconfigured. The preload bridge mirrors it 1:1
+as `window.dawAssistant`.
+
+Both call shapes — plan and ask — go through the same model request the web
+route uses, extracted once into `src/shared/daw-assistant/provider.js`
+(`assistantModelCall`, the two instruction strings, the two JSON schemas, the
+shared timeout/output-token constants), so there is exactly one place that
+builds an OpenAI Responses request for this feature, not one per transport.
+`src/web-discovery/index.js` now imports from there too; its behaviour is
+unchanged.
+
+The main-process service applies the same server-side discipline the web
+route does, because it is the same threat model even though the key is local:
+`clampDigest` reapplies the digest caps, the prompt is capped and sanitized
+the same way, and the model's response is gated through `validatePlanShape` /
+`validateAnswerShape` before it crosses the IPC boundary — a malformed plan or
+an ask response smuggling an `actions` field never reaches the renderer. Only
+the validated `{ plan }` or `{ answer, cited }` crosses; the connection and its
+key never do.
+
+Per-identity rate limiting is a shared-host concern (the web route protects
+one key paid for by everyone on `synth.zakharhome.org`); Electron here is one
+local user spending a key they configured themselves, so there is nothing to
+limit and the service applies none.
+
+The shared plan contract and the renderer dialog do not change; only the
+transport does. `AssistantDialog`'s constructor already accepted injected
+`propose`/`ask` deps for testing — phase 3 adds one more default ahead of the
+existing `fetch` one: when `window.dawAssistant` exists and no dep was
+injected, `propose`/`ask` call the IPC bridge instead. `assistantAvailable()`
+in `app.js` now also returns true whenever `window.dawAssistant` exists, so
+the `⋯` menu item appears in the Electron app without needing the deployed
+host.
 
 ## Phase 4 — deferred
 

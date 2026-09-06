@@ -37,3 +37,9 @@ contextBridge.exposeInMainWorld('musicDiscovery', {
     return () => ipcRenderer.removeListener('musicDiscovery:event', callback)
   },
 })
+
+contextBridge.exposeInMainWorld('dawAssistant', {
+  available: () => ipcRenderer.invoke('dawAssistant:available'),
+  propose: (prompt, digest, providerId) => ipcRenderer.invoke('dawAssistant:propose', { prompt, digest, providerId }),
+  ask: (prompt, digest) => ipcRenderer.invoke('dawAssistant:ask', { prompt, digest }),
+})

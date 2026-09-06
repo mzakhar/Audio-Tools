@@ -136,12 +136,30 @@ async function postAnswer(prompt, digest, signal) {
   return { answer: data.answer, cited: Array.isArray(data.cited) ? data.cited : [] }
 }
 
+// Electron transport: same contract as postPlan/postAnswer above, over the
+// dawAssistant preload bridge instead of fetch — same shared plan contract,
+// only the transport differs, per specs/daw-assistant.md phase 3. IPC has no
+// abort signal; a superseded call is just ignored by the caller.
+async function ipcPropose(prompt, digest) {
+  const data = await window.dawAssistant.propose(prompt, digest)
+  if (!data?.plan) throw new Error('Assistant returned no plan')
+  return data.plan
+}
+
+async function ipcAsk(prompt, digest) {
+  const data = await window.dawAssistant.ask(prompt, digest)
+  if (typeof data?.answer !== 'string') throw new Error('Assistant returned no answer')
+  return { answer: data.answer, cited: Array.isArray(data.cited) ? data.cited : [] }
+}
+
 export class AssistantDialog {
   /** deps: { propose(prompt, digest, signal) → plan, ask(prompt, digest, signal) → { answer, cited }, store,
    *  packs() → installed pack list, same shape buildDigest expects } */
   constructor(deps = {}) {
-    this.propose = deps.propose || postPlan
-    this.ask = deps.ask || postAnswer
+    // Electron ships a dawAssistant IPC bridge; everywhere else it's the fetch
+    // route. Either way the dialog itself does not change (spec phase 3).
+    this.propose = deps.propose || (window.dawAssistant ? ipcPropose : postPlan)
+    this.ask = deps.ask || (window.dawAssistant ? ipcAsk : postAnswer)
     this.store = deps.store || ProjectStore
     this.packs = deps.packs || (() => [])
     this.plan = null
