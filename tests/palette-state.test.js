@@ -224,6 +224,20 @@ describe('presets — phase 2', () => {
     expect(ProjectStore.getState().presets.at(-1).id).toBeTruthy()
   })
 
+  it('ApplyPreset keeps the track bend range and mod destination', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey: 'classic', bendRange: 12, modDest: 'off' }))
+    ProjectStore.dispatch(SavePreset(trackId, 'Wide'))
+    const presetId = ProjectStore.getState().presets[0].id
+    ProjectStore.dispatch(ApplyPreset(trackId, presetId))
+    const instrument = ProjectStore.getState().tracks[0].instrument
+    // The patch is the sound; bend range and mod destination are the player's
+    // setup for the track and must survive a recall.
+    expect(instrument.bendRange).toBe(12)
+    expect(instrument.modDest).toBe('off')
+  })
+
   it('ApplyPreset writes the saved params onto the armed track', () => {
     const source = armedMidiTrack()
     ProjectStore.dispatch(SetInstrumentParam(source, 'resonance', 7))

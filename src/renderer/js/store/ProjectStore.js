@@ -238,7 +238,15 @@ export function ApplyPreset(trackId, presetId) {
         const validated = clampPaletteParam(preset.paletteKey, key, preset.params?.[key])
         params[key] = validated !== undefined ? validated : paletteDefaults(preset.paletteKey)[key]
       }
-      nextTrack.instrument = { type: 'palette', paletteKey: preset.paletteKey, params }
+      // Bend range and mod destination are the player's setup for this track,
+      // not part of the patch — a preset recall must not silently reset them,
+      // the same way instrument-settings.js keeps them across an instrument swap.
+      const { bendRange, modDest } = track.instrument || {}
+      nextTrack.instrument = {
+        type: 'palette', paletteKey: preset.paletteKey, params,
+        ...(bendRange === undefined ? {} : { bendRange }),
+        ...(modDest === undefined ? {} : { modDest })
+      }
       return next
     },
     undo(state) {
