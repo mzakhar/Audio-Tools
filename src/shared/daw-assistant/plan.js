@@ -31,6 +31,13 @@ const id = value => {
   return clean && !UNSAFE.has(clean) ? clean : null
 }
 
+const SLUG = /^[a-z0-9][a-z0-9_-]{0,31}$/
+const slug = value => (typeof value === 'string' && SLUG.test(value)) ? value : null
+const refValue = value => (plainObject(value) && slug(value.$ref) !== null) ? { $ref: value.$ref } : null
+
+/** An id slot: a real id, or { $ref } naming something an earlier action makes. */
+const idOrRef = value => plainObject(value) ? refValue(value) : id(value)
+
 /** Anything that becomes an object key: no prototype pollution, no separators. */
 const objectKey = value => {
   const clean = text(value, 64)
@@ -106,7 +113,7 @@ const instrument = value => {
 
 const endpoint = value => {
   if (!plainObject(value)) return null
-  const moduleId = id(value.moduleId)
+  const moduleId = idOrRef(value.moduleId)
   const port = objectKey(value.port)
   return moduleId === null || port === null ? null : { moduleId, port }
 }
@@ -135,24 +142,24 @@ const SPECS = {
   SetBpm: { bpm: num(40, 240) },
 
   AddTrack: { type: optional(oneOf(TRACK_TYPES), 'midi'), name: optional(str(64), 'Track') },
-  RemoveTrack: { trackId: id },
-  SetTrackInstrument: { trackId: id, instrument },
-  SetTrackMidiChannel: { trackId: id, channel: int(0, 15) },
+  RemoveTrack: { trackId: idOrRef },
+  SetTrackInstrument: { trackId: idOrRef, instrument },
+  SetTrackMidiChannel: { trackId: idOrRef, channel: int(0, 15) },
 
-  AddClip: { trackId: id, clip },
-  RemoveClip: { trackId: id, clipId: id },
-  MoveClip: { trackId: id, clipId: id, startBeat: num(0, 1e6) },
-  DuplicateClip: { trackId: id, clipId: id },
-  TileClip: { trackId: id, clipId: id, endBeat: optional(num(0, 1e6), 64) },
+  AddClip: { trackId: idOrRef, clip },
+  RemoveClip: { trackId: idOrRef, clipId: idOrRef },
+  MoveClip: { trackId: idOrRef, clipId: idOrRef, startBeat: num(0, 1e6) },
+  DuplicateClip: { trackId: idOrRef, clipId: idOrRef },
+  TileClip: { trackId: idOrRef, clipId: idOrRef, endBeat: optional(num(0, 1e6), 64) },
 
-  SetMidiClipNotes: { trackId: id, clipId: id, notes: noteList },
-  AddMidiNote: { trackId: id, clipId: id, note },
-  RemoveMidiNote: { trackId: id, clipId: id, noteId: id },
+  SetMidiClipNotes: { trackId: idOrRef, clipId: idOrRef, notes: noteList },
+  AddMidiNote: { trackId: idOrRef, clipId: idOrRef, note },
+  RemoveMidiNote: { trackId: idOrRef, clipId: idOrRef, noteId: idOrRef },
 
   // ProjectStore.js:322 writes channel[param] with no key check — this is the
   // only guard between a model string and an object key.
   SetMixerParam: args => {
-    const channelId = id(args.channelId)
+    const channelId = idOrRef(args.channelId)
     const param = oneOf(MIXER_PARAMS)(args.param)
     if (channelId === null || param === null) return null
     const value = param === 'volume' ? num(0, 1)(args.value)
@@ -160,11 +167,11 @@ const SPECS = {
       : bool(args.value)
     return value === null ? null : { channelId, param, value }
   },
-  SetSendLevel: { channelId: id, busId: id, level: num(0, 1) },
+  SetSendLevel: { channelId: idOrRef, busId: id, level: num(0, 1) },
 
-  AddEffect: { trackId: id, type: objectKey, params: paramBag },
-  RemoveEffect: { trackId: id, effectId: id },
-  SetEffectParam: { trackId: id, effectId: id, param: objectKey, value: scalar },
+  AddEffect: { trackId: idOrRef, type: objectKey, params: paramBag },
+  RemoveEffect: { trackId: idOrRef, effectId: idOrRef },
+  SetEffectParam: { trackId: idOrRef, effectId: idOrRef, param: objectKey, value: scalar },
 
   SetPatternStep: { patternId: id, barIndex: int(0, 63), instrumentId: objectKey, stepIndex: int(0, 15), patch: stepPatch },
   SetBarParam: args => {
@@ -182,16 +189,46 @@ const SPECS = {
   SetChain: { patternId: id, chain: chainList },
 
   AddModule: { rackId: id, type: objectKey, rail: optional(int(0, 7), 0), hp: optional(int(0, 512), 0), params: paramBag },
-  RemoveModule: { rackId: id, moduleId: id },
-  MoveModule: { rackId: id, moduleId: id, rail: int(0, 7), hp: int(0, 512) },
-  SetModuleParam: { rackId: id, moduleId: id, key: objectKey, value: scalar },
-  SetAttenuverter: { rackId: id, moduleId: id, portId: objectKey, value: num(-1, 1) },
-  SetModuleBypass: { rackId: id, moduleId: id, bypassed: bool },
+  RemoveModule: { rackId: id, moduleId: idOrRef },
+  MoveModule: { rackId: id, moduleId: idOrRef, rail: int(0, 7), hp: int(0, 512) },
+  SetModuleParam: { rackId: id, moduleId: idOrRef, key: objectKey, value: scalar },
+  SetAttenuverter: { rackId: id, moduleId: idOrRef, portId: objectKey, value: num(-1, 1) },
+  SetModuleBypass: { rackId: id, moduleId: idOrRef, bypassed: bool },
   Connect: { rackId: id, from: endpoint, to: endpoint },
   Disconnect: { rackId: id, cableId: id },
 }
 
 export const ALLOWLIST = Object.freeze(Object.keys(SPECS))
+
+// ── Forward references ─────────────────────────────────────────────────────
+// An action may name something an *earlier* action in the same plan creates,
+// because ids do not exist until apply.  Which creating action may fill which
+// slot, and which of its ids goes there: a track ref in a channelId slot
+// resolves to that track's mixer channel.
+const REF_SLOTS = {
+  trackId: { AddTrack: 'trackId' },
+  channelId: { AddTrack: 'channelId' },
+  clipId: { AddClip: 'clipId' },
+  noteId: { AddMidiNote: 'noteId' },
+  effectId: { AddEffect: 'effectId' },
+  moduleId: { AddModule: 'moduleId' },
+}
+const CREATING = new Set(Object.values(REF_SLOTS).flatMap(Object.keys))
+const CREATED_NOUN = { AddTrack: 'a track', AddClip: 'a clip', AddMidiNote: 'a note', AddEffect: 'an effect', AddModule: 'a module' }
+
+/** Rewrite every { $ref } in an id slot through `lookup(slot, slug)`.  Pure. */
+function resolveRefs(args, lookup) {
+  const out = { ...args }
+  for (const slot of Object.keys(REF_SLOTS)) {
+    if (plainObject(out[slot])) out[slot] = lookup(slot, out[slot].$ref)
+  }
+  for (const side of ['from', 'to']) {
+    if (plainObject(out[side]) && plainObject(out[side].moduleId)) {
+      out[side] = { ...out[side], moduleId: lookup('moduleId', out[side].moduleId.$ref) }
+    }
+  }
+  return out
+}
 
 /** Structure only — safe to run where no project state exists (the proxy). */
 export function validatePlanShape(plan) {
@@ -204,6 +241,7 @@ export function validatePlanShape(plan) {
   else if (plan.actions.length > MAX_ACTIONS) errors.push(`actions must be <= ${MAX_ACTIONS} entries`)
 
   const actions = []
+  const seenRefs = new Set()
   if (Array.isArray(plan.actions) && plan.actions.length && plan.actions.length <= MAX_ACTIONS) {
     plan.actions.forEach((raw, index) => {
       const where = `Action ${index + 1}`
@@ -211,11 +249,20 @@ export function validatePlanShape(plan) {
       // Literal lookup on our own table — a model string never indexes a module.
       const spec = Object.prototype.hasOwnProperty.call(SPECS, raw.action) ? SPECS[raw.action] : null
       if (!spec) { errors.push(`${where}: unknown action "${text(raw.action, 40) || String(raw.action)}"`); return }
+      let ref = null
+      if (raw.ref !== undefined && raw.ref !== null) {
+        ref = slug(raw.ref)
+        if (ref === null) { errors.push(`${where}: "ref" must be a short lowercase slug`); return }
+        if (!CREATING.has(raw.action)) { errors.push(`${where}: ${raw.action} creates nothing, so it cannot define a ref`); return }
+        if (seenRefs.has(ref)) { errors.push(`${where}: duplicate ref "${ref}"`); return }
+        seenRefs.add(ref)
+      }
+      const named = ref ? { ref } : {}
       const rawArgs = plainObject(raw.args) ? raw.args : {}
       if (typeof spec === 'function') {
         const args = spec(rawArgs)
         if (args === null) { errors.push(`${where} (${raw.action}): invalid arguments`); return }
-        actions.push({ action: raw.action, args })
+        actions.push({ action: raw.action, args, ...named })
         return
       }
       const args = {}
@@ -225,7 +272,7 @@ export function validatePlanShape(plan) {
         if (value === null) { errors.push(`${where} (${raw.action}): invalid "${field}"`); bad = true; continue }
         if (value !== undefined) args[field] = value
       }
-      if (!bad) actions.push({ action: raw.action, args })
+      if (!bad) actions.push({ action: raw.action, args, ...named })
     })
   }
   return errors.length ? { ok: false, errors } : { ok: true, value: { summary, actions } }
@@ -248,6 +295,64 @@ const trackClip = (state, args, errors, where) => {
   return found || null
 }
 
+/** Every id already in the project — a ref slug may not shadow one of them. */
+function collectIds(state) {
+  const ids = new Set()
+  for (const track of state?.tracks || []) {
+    ids.add(track.id).add(track.mixerChannelId)
+    for (const item of track.clips || []) {
+      ids.add(item.id)
+      for (const item2 of item.notes || []) ids.add(item2.id)
+    }
+    for (const effect of track.effects || []) ids.add(effect.id)
+  }
+  for (const channel of state?.mixer?.channels || []) ids.add(channel.id)
+  for (const bus of state?.buses || []) ids.add(bus.id)
+  for (const [rackId, rack] of Object.entries(state?.racks || {})) {
+    ids.add(rackId)
+    for (const mod of rack?.modules || []) ids.add(mod.id)
+    for (const cable of rack?.cables || []) ids.add(cable.id)
+  }
+  for (const patternId of Object.keys(state?.patterns || {})) ids.add(patternId)
+  ids.delete(undefined)
+  return ids
+}
+
+const withTrack = (state, trackId, fn) => ({
+  ...state,
+  tracks: (state?.tracks || []).map(track => track.id === trackId ? fn(track) : track),
+})
+
+/** Placeholder ids, so the checks below see what the plan is about to create.
+ *  REF_SLOTS decides which key is ever read, so one bag covers every kind. */
+const stubIds = ref => ({ trackId: ref, channelId: `${ref}#channel`, clipId: ref, noteId: ref, effectId: ref, moduleId: ref })
+
+/**
+ * The state as it will be *after* a creating action runs — enough of it that
+ * every existence check, canConnect included, still runs against a real shape.
+ */
+function project(state, action, args, ref) {
+  switch (action) {
+    case 'AddTrack': return {
+      ...state,
+      tracks: [...(state?.tracks || []), { id: ref, name: args.name, type: args.type, mixerChannelId: `${ref}#channel`, clips: [], effects: [] }],
+      mixer: { ...(state?.mixer || {}), channels: [...(state?.mixer?.channels || []), { id: `${ref}#channel`, trackId: ref, volume: 1, pan: 0, mute: false, solo: false, sends: {} }] },
+    }
+    case 'AddClip': return withTrack(state, args.trackId, track => ({ ...track, clips: [...(track.clips || []), { id: ref, ...args.clip, notes: [] }] }))
+    case 'AddMidiNote': return withTrack(state, args.trackId, track => ({
+      ...track,
+      clips: (track.clips || []).map(item => item.id === args.clipId ? { ...item, notes: [...(item.notes || []), { id: ref, ...args.note }] } : item),
+    }))
+    case 'AddEffect': return withTrack(state, args.trackId, track => ({ ...track, effects: [...(track.effects || []), { id: ref, type: args.type, params: args.params }] }))
+    case 'AddModule': {
+      const rack = rackOf(state, args.rackId)
+      if (!rack) return state
+      return { ...state, racks: { ...state.racks, [args.rackId]: { ...rack, modules: [...(rack.modules || []), { id: ref, type: args.type, rail: args.rail, hp: args.hp, params: args.params, atten: {}, bypassed: false, name: null }] } } }
+    }
+    default: return state
+  }
+}
+
 /**
  * Everything validatePlanShape checks, plus ids resolved against the state in
  * front of the user right now.  `capabilities` is optional; a check whose
@@ -258,9 +363,38 @@ export function validatePlan(plan, state, capabilities = {}) {
   if (!shape.ok) return shape
   const caps = plainObject(capabilities) ? capabilities : {}
   const errors = []
+  const stateIds = collectIds(state)
+  const declared = new Map(shape.value.actions.flatMap((item, index) => item.ref ? [[item.ref, index]] : []))
+  const refs = new Map()
+  let live = state
 
-  shape.value.actions.forEach(({ action, args }, index) => {
+  shape.value.actions.forEach(({ action, args: named, ref }, index) => {
     const where = `Action ${index + 1} (${action})`
+    // A $ref must point strictly backwards, so `refs` only ever holds actions
+    // already walked.  Resolved to placeholder ids, every check below is the
+    // same check it was before refs existed.
+    let broken = false
+    const args = resolveRefs(named, (slot, wanted) => {
+      const entry = refs.get(wanted)
+      broken = true
+      if (!entry) {
+        errors.push(declared.has(wanted)
+          ? `${where}: ref "${wanted}" is created by a later action`
+          : `${where}: unknown ref "${wanted}"`)
+        return null
+      }
+      const key = REF_SLOTS[slot][entry.action]
+      if (!key) { errors.push(`${where}: ref "${wanted}" is ${CREATED_NOUN[entry.action]}, not usable as ${slot}`); return null }
+      broken = false
+      return entry.ids[key]
+    })
+    if (ref) {
+      if (stateIds.has(ref)) errors.push(`${where}: ref "${ref}" collides with an id already in the project`)
+      refs.set(ref, { action, ids: stubIds(ref) })
+    }
+    const state = live   // shadows the parameter: the checks below run against
+    if (ref) live = project(live, action, args, ref)   // the projected state
+    if (broken) return
     switch (action) {
       case 'SetBpm': case 'AddTrack':
         break
@@ -356,10 +490,20 @@ export function validatePlan(plan, state, capabilities = {}) {
 
 const nameOf = (thing, fallback) => text(thing?.name, 64) || fallback
 
-/** One sentence for a preview row; the action name alone if the target is gone. */
-export function describeAction(action, state) {
+const SLOT_NOUN = { trackId: 'track', channelId: 'channel of the track', clipId: 'clip', noteId: 'note', effectId: 'effect', moduleId: 'module' }
+
+/** A $ref reads as the step that creates it, never as a slug or an object. */
+const refPhrase = (slot, wanted, actions) => {
+  const step = actions.findIndex(item => item?.ref === wanted)
+  return step < 0 ? `the ${SLOT_NOUN[slot]} added earlier` : `the ${SLOT_NOUN[slot]} added in step ${step + 1}`
+}
+
+/** One sentence for a preview row; the action name alone if the target is gone.
+ *  `actions` is the rest of the plan, needed only to number a $ref's step. */
+export function describeAction(action, state, actions = []) {
   if (!plainObject(action) || !Object.prototype.hasOwnProperty.call(SPECS, action.action)) return 'Unknown action'
-  const args = plainObject(action.args) ? action.args : {}
+  const plan = Array.isArray(actions) ? actions : []
+  const args = resolveRefs(plainObject(action.args) ? action.args : {}, (slot, wanted) => refPhrase(slot, wanted, plan))
   const track = () => nameOf(trackOf(state, args.trackId), args.trackId)
   const rack = () => nameOf(rackOf(state, args.rackId), args.rackId)
   const mod = () => {
@@ -412,21 +556,21 @@ export function describeAction(action, state) {
 // the renderer binds them to the real factories.
 const CALLS = {
   SetBpm: a => ['SetBpm', a.bpm],
-  AddTrack: a => ['AddTrack', a.type, a.name],
+  AddTrack: (a, mint, ids) => ['AddTrack', a.type, a.name, { trackId: ids.trackId, channelId: ids.channelId }],
   RemoveTrack: a => ['RemoveTrack', a.trackId],
   SetTrackInstrument: a => ['SetTrackInstrument', a.trackId, a.instrument],
   SetTrackMidiChannel: a => ['SetTrackMidiChannel', a.trackId, a.channel],
-  AddClip: (a, mint) => ['AddClip', a.trackId, { id: mint('clip'), ...a.clip, notes: a.clip.notes.map(item => ({ id: mint('note'), ...item })) }],
+  AddClip: (a, mint, ids) => ['AddClip', a.trackId, { id: ids.clipId, ...a.clip, notes: a.clip.notes.map(item => ({ id: mint('note'), ...item })) }],
   RemoveClip: a => ['RemoveClip', a.trackId, a.clipId],
   MoveClip: a => ['MoveClip', a.trackId, a.clipId, a.startBeat],
   DuplicateClip: a => ['DuplicateClip', a.trackId, a.clipId],
   TileClip: a => ['TileClip', a.trackId, a.clipId, a.endBeat],
   SetMidiClipNotes: (a, mint) => ['SetMidiClipNotes', a.trackId, a.clipId, a.notes.map(item => ({ id: mint('note'), ...item }))],
-  AddMidiNote: (a, mint) => ['AddMidiNote', a.trackId, a.clipId, { id: mint('note'), ...a.note }],
+  AddMidiNote: (a, mint, ids) => ['AddMidiNote', a.trackId, a.clipId, { id: ids.noteId, ...a.note }],
   RemoveMidiNote: a => ['RemoveMidiNote', a.trackId, a.clipId, a.noteId],
   SetMixerParam: a => ['SetMixerParam', a.channelId, a.param, a.value],
   SetSendLevel: a => ['SetSendLevel', a.channelId, a.busId, a.level],
-  AddEffect: a => ['AddEffect', a.trackId, a.type, a.params],
+  AddEffect: (a, mint, ids) => ['AddEffect', a.trackId, a.type, a.params, ids.effectId],
   RemoveEffect: a => ['RemoveEffect', a.trackId, a.effectId],
   SetEffectParam: a => ['SetEffectParam', a.trackId, a.effectId, a.param, a.value],
   SetPatternStep: a => ['SetPatternStep', a.patternId, a.barIndex, a.instrumentId, a.stepIndex, a.patch],
@@ -434,7 +578,7 @@ const CALLS = {
   ClearBar: a => ['ClearBar', a.patternId, a.barIndex],
   AddBar: a => ['AddBar', a.patternId, { copyFrom: a.copyFrom }],
   SetChain: a => ['SetChain', a.patternId, a.chain],
-  AddModule: a => ['AddModule', a.rackId, a.type, { rail: a.rail, hp: a.hp, params: a.params }],
+  AddModule: (a, mint, ids) => ['AddModule', a.rackId, a.type, { rail: a.rail, hp: a.hp, params: a.params, id: ids.moduleId }],
   RemoveModule: a => ['RemoveModule', a.rackId, a.moduleId],
   MoveModule: a => ['MoveModule', a.rackId, a.moduleId, a.rail, a.hp],
   SetModuleParam: a => ['SetModuleParam', a.rackId, a.moduleId, a.key, a.value],
@@ -444,24 +588,45 @@ const CALLS = {
   Disconnect: a => ['Disconnect', a.rackId, a.cableId],
 }
 
-/** Actions that create a clip or a note, and so need an id from the caller. */
-const MINTS_IDS = new Set(['AddClip', 'SetMidiClipNotes', 'AddMidiNote'])
+/** Every id a creating action needs, minted before anything executes — so a
+ *  later action in the same plan can name it, and so the store mints nothing. */
+const MINTED = {
+  AddTrack: mint => ({ trackId: mint('track'), channelId: mint('channel') }),
+  AddClip: mint => ({ clipId: mint('clip') }),
+  AddMidiNote: mint => ({ noteId: mint('note') }),
+  AddEffect: mint => ({ effectId: mint('effect') }),
+  AddModule: mint => ({ moduleId: mint('mod') }),
+}
+
+/** Actions that need an id from the caller (SetMidiClipNotes mints per note). */
+const MINTS_IDS = new Set([...Object.keys(MINTED), 'SetMidiClipNotes'])
 
 /**
  * -> [{ factory, args }] in plan order.  Throws if the plan never passed a
  * validator: reaching here with an unvalidated plan is a caller bug.
  * New ids come from the injected `makeId(kind)`, never from counting state:
  * two applies of one plan against one stale state must not collide, and a
- * derived fallback would silently reintroduce exactly that.
+ * derived fallback would silently reintroduce exactly that.  Every id is minted
+ * here and passed to the store, so a $ref resolves to the id the command will
+ * actually use and nothing is minted during execution.
  */
 export function planToCommands(plan, state, { makeId } = {}) {
   const shape = validatePlanShape(plan)
   if (!shape.ok) throw new TypeError(`planToCommands got an invalid plan: ${shape.errors[0]}`)
   if (typeof makeId !== 'function' && shape.value.actions.some(({ action }) => MINTS_IDS.has(action))) {
-    throw new TypeError('planToCommands needs a makeId(kind) for plans that create clips or notes')
+    throw new TypeError('planToCommands needs a makeId(kind) for plans that create tracks, clips, notes, effects or modules')
   }
-  return shape.value.actions.map(({ action, args }) => {
-    const [factory, ...factoryArgs] = CALLS[action](args, makeId)
+  const refs = new Map()
+  return shape.value.actions.map(({ action, args: named, ref }) => {
+    const args = resolveRefs(named, (slot, wanted) => {
+      const key = REF_SLOTS[slot][refs.get(wanted)?.action]
+      // validatePlan already refused these; reaching here is a caller bug.
+      if (!key) throw new TypeError(`planToCommands got an unresolvable $ref "${wanted}"`)
+      return refs.get(wanted).ids[key]
+    })
+    const ids = MINTED[action] ? MINTED[action](makeId) : {}
+    if (ref) refs.set(ref, { action, ids })
+    const [factory, ...factoryArgs] = CALLS[action](args, makeId, ids)
     return { factory, args: factoryArgs }
   })
 }
