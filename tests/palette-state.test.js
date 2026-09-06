@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Palettes, { paletteDefaults, clampPaletteParam } from '../src/renderer/js/palettes.js'
-import ProjectStore, { AddTrack, SetTrackInstrument, SetInstrumentParam, migrate, CURRENT_VERSION } from '../src/renderer/js/store/ProjectStore.js'
+import ProjectStore, { AddTrack, SetTrackInstrument, SetInstrumentParam, SavePreset, ApplyPreset, RemovePreset, migrate, CURRENT_VERSION } from '../src/renderer/js/store/ProjectStore.js'
 
 // jsdom doesn't provide OfflineAudioContext — supply a minimal stub, same
 // shape as tests/timeline-player.test.js.
@@ -181,5 +181,94 @@ describe('offline bounce threads a track\'s params into createVoice', () => {
 
     expect(createVoice).toHaveBeenCalledOnce()
     expect(createVoice.mock.calls[0][5]).toEqual(customParams)
+  })
+})
+
+describe('presets — phase 2', () => {
+  function armedMidiTrack(paletteKey = 'classic') {
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks.at(-1).id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey }))
+    return trackId
+  }
+
+  it('SavePreset captures a clone — later mutation on either side does not cross', () => {
+    const trackId = armedMidiTrack()
+    ProjectStore.dispatch(SetInstrumentParam(trackId, 'resonance', 5))
+    ProjectStore.dispatch(SavePreset(trackId, 'Night Pad', 'preset-1'))
+
+    ProjectStore.dispatch(SetInstrumentParam(trackId, 'resonance', 15))
+    const preset = ProjectStore.getState().presets.find(p => p.id === 'preset-1')
+    expect(preset.params.resonance).toBe(5)
+
+    preset.params.resonance = 999
+    const track = ProjectStore.getState().tracks.find(t => t.id === trackId)
+    expect(track.instrument.params.resonance).toBe(15)
+  })
+
+  it('SavePreset rejects a track that is missing or not a palette', () => {
+    const before = ProjectStore.getState()
+    ProjectStore.dispatch(SavePreset('nope', 'X', 'preset-x'))
+    expect(ProjectStore.getState()).toEqual(before)
+
+    ProjectStore.dispatch(AddTrack('audio', 'Guitar'))
+    const audioTrackId = ProjectStore.getState().tracks.at(-1).id
+    const before2 = ProjectStore.getState()
+    ProjectStore.dispatch(SavePreset(audioTrackId, 'X', 'preset-y'))
+    expect(ProjectStore.getState()).toEqual(before2)
+  })
+
+  it('SavePreset mints an id when none is supplied', () => {
+    const trackId = armedMidiTrack()
+    ProjectStore.dispatch(SavePreset(trackId, 'Unnamed'))
+    expect(ProjectStore.getState().presets.at(-1).id).toBeTruthy()
+  })
+
+  it('ApplyPreset writes the saved params onto the armed track', () => {
+    const source = armedMidiTrack()
+    ProjectStore.dispatch(SetInstrumentParam(source, 'resonance', 7))
+    ProjectStore.dispatch(SavePreset(source, 'Bright', 'preset-2'))
+
+    const target = armedMidiTrack()
+    ProjectStore.dispatch(ApplyPreset(target, 'preset-2'))
+    const track = ProjectStore.getState().tracks.find(t => t.id === target)
+    expect(track.instrument.paletteKey).toBe('classic')
+    expect(track.instrument.params.resonance).toBe(7)
+  })
+
+  it('ApplyPreset drops a key the palette no longer declares', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks.at(-1).id
+    ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey: 'classic' }))
+    ProjectStore.dispatch(SavePreset(trackId, 'Stale', 'preset-3'))
+    // Simulate a preset saved under an old schema with a key the palette
+    // no longer declares.
+    let state = ProjectStore.getState()
+    const preset = state.presets.find(p => p.id === 'preset-3')
+    preset.params.ghostKey = 'x'
+    ProjectStore.dispatch({ label: 'inject stale key', execute: s => ({ ...s, presets: state.presets }), undo: s => s })
+
+    ProjectStore.dispatch(ApplyPreset(trackId, 'preset-3'))
+    const track = ProjectStore.getState().tracks.find(t => t.id === trackId)
+    expect(track.instrument.params).not.toHaveProperty('ghostKey')
+  })
+
+  it('RemovePreset removes only its own row', () => {
+    const trackId = armedMidiTrack()
+    ProjectStore.dispatch(SavePreset(trackId, 'A', 'preset-a'))
+    ProjectStore.dispatch(SavePreset(trackId, 'B', 'preset-b'))
+    ProjectStore.dispatch(RemovePreset('preset-a'))
+    const ids = ProjectStore.getState().presets.map(p => p.id)
+    expect(ids).toEqual(['preset-b'])
+  })
+})
+
+describe('migrate — presets field', () => {
+  it('a project without a presets field gets an empty array, version stays 6', () => {
+    const v6 = { version: 6, tracks: [] }
+    const next = migrate(v6)
+    expect(next.presets).toEqual([])
+    expect(next.version).toBe(6)
+    expect(CURRENT_VERSION).toBe(6)
   })
 })

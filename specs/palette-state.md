@@ -18,7 +18,7 @@ instrument.
 |---|---|
 | 0 — params as data, `createVoice` takes them | shipped |
 | 1 — schema v6 and the knob panel | shipped |
-| 2 — presets | proposed |
+| 2 — presets | shipped |
 
 ## What is actually wrong
 

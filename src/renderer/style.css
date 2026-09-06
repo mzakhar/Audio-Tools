@@ -2084,6 +2084,9 @@ dialog.ib-dialog[open] { width: min(640px, 94vw); }
 .ib-fav.on { color: var(--accent2); }
 .ib-state { font-size: 9px; color: var(--text-dim); text-align: right; }
 .ib-state.missing, .ib-state.unavailable { color: #ff6b6b; }
+.ib-preset-remove { cursor: pointer; }
+.ib-preset-remove:hover { color: var(--danger); }
+.dlg-row .ib-search { flex: 1; width: auto; }
 
 /* --- Instrument settings ------------------------------------------------ */
 .is-tabs { display: flex; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--border); }

@@ -127,7 +127,8 @@ describe('daw assistant plan shape', () => {
     expect(ALLOWLIST).toContain('SetBpm')
     expect(ALLOWLIST).toContain('SetInstrumentParam')
     expect(ALLOWLIST).toContain('SetTrackInstrumentProgram')
-    for (const excluded of ['AddRack', 'RemoveRack', 'LoadRackPatch', 'SetCurrentBar', 'SetBusReturn', 'SetCableColor']) {
+    expect(ALLOWLIST).toContain('SavePreset')
+    for (const excluded of ['AddRack', 'RemoveRack', 'LoadRackPatch', 'SetCurrentBar', 'SetBusReturn', 'SetCableColor', 'ApplyPreset', 'RemovePreset']) {
       expect(ALLOWLIST).not.toContain(excluded)
     }
   })
@@ -237,6 +238,19 @@ describe('daw assistant live validation', () => {
     expect(result.errors[0]).toMatch(/not a palette/)
   })
 
+  it('requires a palette instrument to save a preset', () => {
+    const save = plan({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } })
+    expect(validatePlan(save, state()).ok).toBe(true)
+
+    const rackTrack = state()
+    rackTrack.tracks[0].instrument = { type: 'rack', rackId: 'rack-1' }
+    const result = validatePlan(save, rackTrack)
+    expect(result.ok).toBe(false)
+    expect(result.errors[0]).toMatch(/not a palette/)
+
+    expect(validatePlan(plan({ action: 'SavePreset', args: { trackId: 'nope', name: 'X' } }), state()).ok).toBe(false)
+  })
+
   it('resolves a pack program change against the installed manifest only, refusing an uninstalled pack, an unknown patch and a pinned instrument', () => {
     const packPatchIds = vi.fn(packId => (pack().id === packId ? pack().manifest.patches.map(p => p.id) : []))
     const setProgram = (patchId, packId = 'gm-piano') => plan({ action: 'SetTrackInstrumentProgram', args: { trackId: 'track-1', packId, patchId } })
@@ -291,6 +305,7 @@ describe('daw assistant descriptions and command mapping', () => {
     expect(describeAction({ action: 'AddModule', args: { rackId: 'rack-1', type: 'lfo', rail: 1, hp: 8 } }, current)).toBe('Add a LFO module to Rack 1, rail 2')
     expect(describeAction({ action: 'RemoveTrack', args: { trackId: 'track-1' } }, current)).toBe('Remove track "Kick"')
     expect(describeAction({ action: 'SetMixerParam', args: { channelId: 'channel-1', param: 'volume', value: 0.6 } }, current)).toBe('Set volume on "Kick" to 0.6')
+    expect(describeAction({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } }, current)).toBe('Save the sound on Kick as "Night Pad"')
   })
 
   it('falls back to the id when the target is gone', () => {
@@ -330,6 +345,12 @@ describe('daw assistant descriptions and command mapping', () => {
       factory: 'SetTrackInstrumentProgram',
       args: ['track-1', { packId: 'gm-piano', packVersion: '1.0.0', patchId: 'sf2-0', bankMsb: 0, bankLsb: 0, program: 0 }],
     })
+  })
+
+  it('mints a preset id for a SavePreset plan', () => {
+    const save = plan({ action: 'SavePreset', args: { trackId: 'track-1', name: 'Night Pad' } })
+    const calls = planToCommands(save, state(), { makeId: kind => `${kind}-1` })
+    expect(calls).toEqual([{ factory: 'SavePreset', args: ['track-1', 'Night Pad', 'preset-1'] }])
   })
 
   it('mints different ids for two applies of one plan against one state', () => {

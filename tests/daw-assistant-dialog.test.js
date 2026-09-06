@@ -167,6 +167,22 @@ describe('assistant apply path', () => {
     expect(ProjectStore.getUndoStackSize()).toBe(before + 1)
   })
 
+  it('applies a real SavePreset plan against the real ProjectStore as one batch, landing the pre-minted id', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    const before = ProjectStore.getUndoStackSize()
+    const store = spyStore()
+    const result = applyPlan(plan({ action: 'SavePreset', args: { trackId, name: 'Night Pad' } }), store)
+
+    expect(result.ok).toBe(true)
+    const preset = ProjectStore.getState().presets.at(-1)
+    expect(preset.name).toBe('Night Pad')
+    expect(preset.paletteKey).toBe('classic')
+    expect(preset.id).toBeTruthy()
+    expect(store.dispatchBatch).toHaveBeenCalledTimes(1)
+    expect(ProjectStore.getUndoStackSize()).toBe(before + 1)
+  })
+
   it('mints different clip ids when one plan is applied twice', () => {
     ProjectStore.dispatch(AddTrack('midi', 'Kick'))
     const trackId = ProjectStore.getState().tracks[0].id

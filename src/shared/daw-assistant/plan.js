@@ -204,6 +204,10 @@ const SPECS = {
   // selection (packVersion, bank/program) is resolved from the installed
   // manifest by our code, never taken from model text.
   SetTrackInstrumentProgram: { trackId: idOrRef, packId: str(128), patchId: str(128) },
+
+  // Only saving is wired up (specs/daw-assistant.md phase 5). Applying/removing
+  // a preset needs a real request before the vocabulary grows to cover them.
+  SavePreset: { trackId: idOrRef, name: str(64) },
 }
 
 export const ALLOWLIST = Object.freeze(Object.keys(SPECS))
@@ -518,6 +522,12 @@ export function validatePlan(plan, state, capabilities = {}) {
         if (has(caps.packPatchIds(args.packId), args.patchId) === false) errors.push(`${where}: "${args.patchId}" is not an installed patch of pack "${args.packId}"`)
         break
       }
+      case 'SavePreset': {
+        const track = trackOf(state, args.trackId)
+        if (!track) { errors.push(`${where}: track not found`); break }
+        if (track.instrument?.type !== 'palette') errors.push(`${where}: track instrument is not a palette`)
+        break
+      }
     }
   })
 
@@ -591,6 +601,7 @@ export function describeAction(action, state, actions = [], packs = []) {
     case 'Disconnect': return `Unpatch a cable in ${rack()}`
     case 'SetInstrumentParam': return `Set ${args.key} to ${args.value} on ${track()}`
     case 'SetTrackInstrumentProgram': { const names = patchName(); return `Set the instrument on ${track()} to "${names.patch}" from ${names.pack}` }
+    case 'SavePreset': return `Save the sound on ${track()} as "${args.name}"`
     default: return action.action
   }
 }
@@ -635,6 +646,7 @@ const CALLS = {
   // packSelection is caller-injected (the renderer's installed pack manifest),
   // never the model's packId/patchId strings used as-is.
   SetTrackInstrumentProgram: (a, mint, ids, packSelection) => ['SetTrackInstrumentProgram', a.trackId, packSelection(a.packId, a.patchId)],
+  SavePreset: (a, mint, ids) => ['SavePreset', a.trackId, a.name, ids.presetId],
 }
 
 /** Every id a creating action needs, minted before anything executes — so a
@@ -645,6 +657,7 @@ const MINTED = {
   AddMidiNote: mint => ({ noteId: mint('note') }),
   AddEffect: mint => ({ effectId: mint('effect') }),
   AddModule: mint => ({ moduleId: mint('mod') }),
+  SavePreset: mint => ({ presetId: mint('preset') }),
 }
 
 /** Actions that need an id from the caller (SetMidiClipNotes mints per note). */

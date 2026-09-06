@@ -31,6 +31,7 @@ export const DEFAULT_STATE = {
     { id: 'delay',  name: 'Delay',  returnLevel: 0.6,  params: { time: 0.375, feedback: 0.4 } },
   ],
   racks: {},        // rackId → Rack
+  presets: [],      // { id, name, paletteKey, params }[] — project-level, not a user library
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,8 @@ export function migrate(projectJson) {
       track.instrument = { type: 'palette', paletteKey: track.paletteKey || 'classic' }
     }
   }
+  // Optional array, safe default — no schema bump needed for this alone.
+  if (!next.presets) next.presets = []
   if ((next.version ?? 1) < 6) {
     for (const track of next.tracks || []) {
       const instrument = track.instrument
@@ -182,6 +185,74 @@ export function SetInstrumentParam(trackId, key, value) {
       const nextTrack = next.tracks.find(t => t.id === trackId)
       if (!nextTrack.instrument.params) nextTrack.instrument.params = paletteDefaults(nextTrack.instrument.paletteKey)
       nextTrack.instrument.params[key] = validated
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+/** Copy the armed track's current patch into project data. `id` is
+ *  caller-supplied like AddTrack's ids (so an assistant plan can pre-mint it);
+ *  omitted, one is minted here. Rejects (returns the original state) when the
+ *  track is missing or its instrument is not a palette. */
+export function SavePreset(trackId, name, id = null) {
+  return {
+    label: `Save preset "${name}"`,
+    execute(state) {
+      const track = state.tracks.find(t => t.id === trackId)
+      const instrument = track?.instrument
+      if (!instrument || instrument.type !== 'palette') return state
+      const next = JSON.parse(JSON.stringify(state))
+      if (!next.presets) next.presets = []
+      next.presets.push({
+        id: id || genId('preset'),
+        name,
+        paletteKey: instrument.paletteKey,
+        params: JSON.parse(JSON.stringify(instrument.params || paletteDefaults(instrument.paletteKey)))
+      })
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+/** Write a saved patch onto a track's instrument. Params are re-run through
+ *  the palette's own schema (clampPaletteParam) so a preset saved before the
+ *  palette changed cannot write a key it no longer declares. */
+export function ApplyPreset(trackId, presetId) {
+  return {
+    label: `Apply preset`,
+    execute(state) {
+      const preset = (state.presets || []).find(p => p.id === presetId)
+      const track = state.tracks.find(t => t.id === trackId)
+      if (!preset || !track) return state
+      const next = JSON.parse(JSON.stringify(state))
+      const nextTrack = next.tracks.find(t => t.id === trackId)
+      const declared = paletteParamKeys(preset.paletteKey)
+      const params = {}
+      for (const key of declared) {
+        const validated = clampPaletteParam(preset.paletteKey, key, preset.params?.[key])
+        params[key] = validated !== undefined ? validated : paletteDefaults(preset.paletteKey)[key]
+      }
+      nextTrack.instrument = { type: 'palette', paletteKey: preset.paletteKey, params }
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
+export function RemovePreset(presetId) {
+  return {
+    label: `Remove preset`,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      next.presets = (next.presets || []).filter(p => p.id !== presetId)
       return next
     },
     undo(state) {

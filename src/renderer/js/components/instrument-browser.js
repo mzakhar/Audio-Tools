@@ -4,7 +4,7 @@
 
 import { buildIndex, searchIndex } from '../instruments/patch-index.js'
 import { openDialog, closeDialog } from '../ui/dialog.js'
-import { SetTrackInstrument } from '../store/ProjectStore.js'
+import { SetTrackInstrument, SavePreset, ApplyPreset, RemovePreset } from '../store/ProjectStore.js'
 
 export const BROWSER_DIALOG_ID = 'instrument-browser-dialog'
 
@@ -31,6 +31,7 @@ const SCOPES = [
   { id: 'rack',    label: 'RACKS',    scope: 'rack' },
   { id: 'fav',     label: '♥',        scope: 'all', only: 'fav' },
   { id: 'recent',  label: 'RECENT',   scope: 'all', only: 'recent' },
+  { id: 'preset',  label: 'PRESETS',  scope: 'preset' },
 ]
 
 export class InstrumentBrowser {
@@ -43,6 +44,7 @@ export class InstrumentBrowser {
    *  auditioner      createAuditioner(...) result
    *  ensureTrack()   armed MIDI track, auto-provisioned if the project has none
    *  addTrack()      new armed MIDI track
+   *  presets()       state.presets — project-saved patches, listed beside packs
    *  packState(instrument) → 'ready' | 'unavailable' | 'missing'
    *  openSettings(trackId)
    */
@@ -76,6 +78,8 @@ export class InstrumentBrowser {
       closeDialog(BROWSER_DIALOG_ID)
       if (track) this.deps.openSettings?.(track.id)
     })
+    this.saveName = this.el.querySelector('#ib-save-name')
+    this.el.querySelector('#ib-save-btn')?.addEventListener('click', () => this.savePreset())
     this.search.addEventListener('input', () => this.refresh())
     this.el.addEventListener('keydown', event => this.onKeyDown(event))
   }
@@ -102,7 +106,24 @@ export class InstrumentBrowser {
       packs: this.deps.packCatalog?.() || [],
       palettes: this.deps.palettes?.() || {},
       racks: this.deps.racks?.() || {},
+      presets: this.deps.presets?.() || [],
     })
+  }
+
+  /** Saving is naming a copy of the armed track's current patch — the same
+   *  "one selection" the rest of this dialog reads from, no separate list. */
+  savePreset() {
+    const track = this.deps.ensureTrack?.()
+    if (!track || track.instrument?.type !== 'palette') return
+    const name = this.saveName?.value.trim() || `${track.instrument.paletteKey} patch`
+    this.deps.store.dispatch(SavePreset(track.id, name))
+    if (this.saveName) this.saveName.value = ''
+    this.refresh()
+  }
+
+  removePreset(row) {
+    this.deps.store.dispatch(RemovePreset(row.presetId))
+    this.refresh()
   }
 
   refresh() {
@@ -179,9 +200,17 @@ export class InstrumentBrowser {
     program.textContent = row.program == null ? '—' : String(row.program).padStart(3, '0')
 
     const state = document.createElement('span')
-    const status = row.kind === 'pack' ? (this.deps.packState?.(row.instrument) || 'ready') : 'ready'
-    state.className = `ib-state ${status}`
-    state.textContent = status === 'ready' ? '● loaded' : status === 'missing' ? '○ missing' : '○ no audio'
+    if (row.kind === 'preset') {
+      state.className = 'ib-state ib-preset-remove'
+      state.setAttribute('role', 'button')
+      state.setAttribute('aria-label', `Remove preset ${row.label}`)
+      state.textContent = '✕ remove'
+      state.onclick = event => { event.stopPropagation(); this.removePreset(row) }
+    } else {
+      const status = row.kind === 'pack' ? (this.deps.packState?.(row.instrument) || 'ready') : 'ready'
+      state.className = `ib-state ${status}`
+      state.textContent = status === 'ready' ? '● loaded' : status === 'missing' ? '○ missing' : '○ no audio'
+    }
 
     item.append(fav, label, sub, program, state)
     item.onclick = () => { this.highlight = i; this.paintHighlight(); this.queueAudition() }
@@ -217,7 +246,8 @@ export class InstrumentBrowser {
     // RECENT is a list of what was played, not of what was highlighted — an
     // assignment that never landed on a track does not belong in it.
     if (track) {
-      this.deps.store.dispatch(SetTrackInstrument(track.id, row.instrument))
+      if (row.kind === 'preset') this.deps.store.dispatch(ApplyPreset(track.id, row.presetId))
+      else this.deps.store.dispatch(SetTrackInstrument(track.id, row.instrument))
       this.recent = [row.key, ...this.recent.filter(key => key !== row.key)].slice(0, RECENT_MAX)
       writeList(RECENT_KEY, this.recent)
     }

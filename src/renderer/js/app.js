@@ -1697,6 +1697,7 @@ function boot() {
     // tr909 is the 909 editor's own transport, not a playable voice.
     palettes: () => Object.fromEntries(Object.entries(Palettes).filter(([key]) => key !== 'tr909')),
     racks: () => ProjectStore.getState().racks,
+    presets: () => ProjectStore.getState().presets || [],
     auditioner: _auditioner,
     ensureTrack: ensureMidiTrack,
     addTrack: () => addMidiTrack(),

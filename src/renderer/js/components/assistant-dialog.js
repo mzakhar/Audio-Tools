@@ -18,7 +18,7 @@ import ProjectStore, {
   AddEffect, RemoveEffect, SetEffectParam,
   SetPatternStep, SetBarParam, ClearBar, AddBar, SetChain,
   AddModule, RemoveModule, MoveModule, SetModuleParam, SetAttenuverter, SetModuleBypass, Connect, Disconnect,
-  SetInstrumentParam, SetTrackInstrumentProgram,
+  SetInstrumentParam, SetTrackInstrumentProgram, SavePreset,
 } from '../store/ProjectStore.js'
 import { buildDigest } from '../../../shared/daw-assistant/digest.js'
 import { validatePlan, describeAction, planToCommands } from '../../../shared/daw-assistant/plan.js'
@@ -40,7 +40,7 @@ const FACTORIES = {
   AddEffect, RemoveEffect, SetEffectParam,
   SetPatternStep, SetBarParam, ClearBar, AddBar, SetChain,
   AddModule, RemoveModule, MoveModule, SetModuleParam, SetAttenuverter, SetModuleBypass, Connect, Disconnect,
-  SetInstrumentParam, SetTrackInstrumentProgram,
+  SetInstrumentParam, SetTrackInstrumentProgram, SavePreset,
 }
 
 /** What the shared validator cannot know: the renderer's module and palette

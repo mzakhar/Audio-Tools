@@ -252,13 +252,16 @@ the promise in its summary. So a creating action may **name** what it makes:
 | Effects | `AddEffect`, `RemoveEffect`, `SetEffectParam` |
 | Pattern (909) | `SetPatternStep`, `SetBarParam`, `ClearBar`, `AddBar`, `SetChain` |
 | Rack | `AddModule`, `RemoveModule`, `MoveModule`, `SetModuleParam`, `SetAttenuverter`, `SetModuleBypass`, `Connect`, `Disconnect` |
+| Presets | `SavePreset` |
 
 Deliberately excluded: `AddRack`, `RemoveRack`, `LoadRackPatch`,
-`SetTrackInstrumentProgram`, `SetCableColor`, `SetRackRails`, `RenameRack`,
-`SetCurrentBar`, `RemoveBar`, `SetBusReturn`, and every clip/note command not
-listed. Each is either wholesale-destructive, subtle enough to need its own
-review (pack program resolution), or cosmetic. Add one when a real request needs
-it, with a test.
+`SetCableColor`, `SetRackRails`, `RenameRack`,
+`SetCurrentBar`, `RemoveBar`, `SetBusReturn`, `ApplyPreset`, `RemovePreset`, and
+every clip/note command not listed. Each is either wholesale-destructive,
+subtle enough to need its own review (pack program resolution), or cosmetic —
+`ApplyPreset`/`RemovePreset` specifically: only "save it as a preset" was ever
+the named request (`specs/palette-state.md`, phase 5 of this file), so only
+saving is wired up. Add one when a real request needs it, with a test.
 
 Per-action validation beyond "the id exists": `SetMidiClipNotes` caps notes per
 clip and clamps pitch to 0-127, velocity to 0.01-1, duration to >= 0.0625.
@@ -398,7 +401,7 @@ Scored against the action allowlist, so this is not re-derived each time:
 | 2 | Finding a specific kind of sound | table-stakes | decent — `SetTrackInstrument` and `SetTrackInstrumentProgram` now reach every real source (palette, rack, installed pack patch); still no audition, so a pack pick is blind until Apply |
 | 3 | Playing the controller first time | table-stakes | marginal — `SetTrackMidiChannel` fixes a channel mismatch, nothing else touches devices or CC |
 | 4 | Holding a sound while tweaking it | expected | decent — `SetInstrumentParam` reaches any live palette knob; still no audition, so a change is heard only after Apply |
-| 8 | Locking in a sound worth keeping | expected | none — `SetInstrumentParam` can hold a sound, but naming and saving one still needs the preset half of `specs/palette-state.md` |
+| 8 | Locking in a sound worth keeping | expected | decent — `SetInstrumentParam` shapes a sound and `SavePreset` names and keeps it in one plan ("make the pad darker and save it as Night Pad"); recall and delete are UI-only, not assistant actions |
 | 1, 5, 9, 11 | First sound · recording a take · reopening a project · bouncing a WAV | table-stakes | none, by construction |
 
 The shape of that table is the point: this assistant edits **project structure**,
