@@ -26,9 +26,9 @@ gate, and the "the model proposes, our code decides" posture — and nothing els
 | 2 — assistant dialog, preview, apply | shipped |
 | 3 — Electron parity via existing provider connections | proposed |
 | 4 — conversation, follow-ups, audio-aware suggestions | deferred |
-| 5 — palette param actions | proposed, blocked on `specs/palette-state.md` |
+| 5 — palette param actions | shipped |
 | 6 — ask mode, answering without editing | shipped |
-| 7 — pack program selection | proposed |
+| 7 — pack program selection | shipped |
 
 Settled: web ships first, because the deployed app is where this is wanted and
 Cloudflare Access already protects the whole host. Electron follows using the
@@ -394,11 +394,11 @@ Scored against the action allowlist, so this is not re-derived each time:
 |---|---|---|---|
 | 6 | Getting a drum pattern down | table-stakes | strong — the 909 actions cover it end to end |
 | 7 | Comping in the piano roll | table-stakes | decent — `SetMidiClipNotes` expresses quantize as a bulk rewrite |
-| 10 | Recovering from silence | table-stakes | partial — the digest has mute/solo/volume, but there is no way to answer instead of edit (phase 6) |
-| 2 | Finding a specific kind of sound | table-stakes | weak — palette/rack swap only, no audition, no pack program (phase 7) |
+| 10 | Recovering from silence | table-stakes | strong — ask mode answers directly from the digest's mute/solo/volume/instrument fields, with citations back to the exact value it used |
+| 2 | Finding a specific kind of sound | table-stakes | decent — `SetTrackInstrument` and `SetTrackInstrumentProgram` now reach every real source (palette, rack, installed pack patch); still no audition, so a pack pick is blind until Apply |
 | 3 | Playing the controller first time | table-stakes | marginal — `SetTrackMidiChannel` fixes a channel mismatch, nothing else touches devices or CC |
-| 4 | Holding a sound while tweaking it | expected | none — palette params are not in the store (phase 5) |
-| 8 | Locking in a sound worth keeping | expected | none — same cause; presets need `specs/palette-state.md` |
+| 4 | Holding a sound while tweaking it | expected | decent — `SetInstrumentParam` reaches any live palette knob; still no audition, so a change is heard only after Apply |
+| 8 | Locking in a sound worth keeping | expected | none — `SetInstrumentParam` can hold a sound, but naming and saving one still needs the preset half of `specs/palette-state.md` |
 | 1, 5, 9, 11 | First sound · recording a take · reopening a project · bouncing a WAV | table-stakes | none, by construction |
 
 The shape of that table is the point: this assistant edits **project structure**,
@@ -413,8 +413,8 @@ adding those actions would put it there.
 
 ## Phase 5 — palette param actions
 
-Blocked until `specs/palette-state.md` lands; there is nothing to address until
-knob values live in `ProjectStore`.
+Was blocked until `specs/palette-state.md` phases 0–1 landed; knob values now
+live in `ProjectStore`, so there is something to address.
 
 Adds one action:
 

@@ -18,11 +18,13 @@ import ProjectStore, {
   AddEffect, RemoveEffect, SetEffectParam,
   SetPatternStep, SetBarParam, ClearBar, AddBar, SetChain,
   AddModule, RemoveModule, MoveModule, SetModuleParam, SetAttenuverter, SetModuleBypass, Connect, Disconnect,
+  SetInstrumentParam, SetTrackInstrumentProgram,
 } from '../store/ProjectStore.js'
 import { buildDigest } from '../../../shared/daw-assistant/digest.js'
 import { validatePlan, describeAction, planToCommands } from '../../../shared/daw-assistant/plan.js'
 import { resolveCitations } from '../../../shared/daw-assistant/ask.js'
 import { MODULES, paramDefaults, canConnect } from '../rack/modules/index.js'
+import { paletteParamKeys } from '../palettes.js'
 
 export const ASSISTANT_DIALOG_ID = 'assistant-dialog'
 export const ASSISTANT_ROUTE = '/api/assistant'
@@ -38,14 +40,37 @@ const FACTORIES = {
   AddEffect, RemoveEffect, SetEffectParam,
   SetPatternStep, SetBarParam, ClearBar, AddBar, SetChain,
   AddModule, RemoveModule, MoveModule, SetModuleParam, SetAttenuverter, SetModuleBypass, Connect, Disconnect,
+  SetInstrumentParam, SetTrackInstrumentProgram,
 }
 
-/** What the shared validator cannot know: the renderer's module registry. */
+/** What the shared validator cannot know: the renderer's module and palette
+ *  registries. packPatchIds is added per AssistantDialog instance below,
+ *  since it depends on the installed pack list, not a static registry. */
 export const ASSISTANT_CAPABILITIES = {
   moduleTypes: Object.keys(MODULES),
   moduleParamKeys: type => Object.keys(paramDefaults(type)),
   // Port direction and duplicates — ProjectStore.Connect checks none of it.
   canConnect: (rack, from, to) => canConnect(rack, from, to),
+  paletteParamKeys: key => paletteParamKeys(key),
+}
+
+/** The one place a pack's manifest is read for the assistant path — the digest,
+ *  the packPatchIds capability and the packSelection resolver all go through
+ *  this, so what the model saw and what we validate against cannot drift. */
+const packPatchIds = packs => packId => {
+  const pack = packs().find(item => item?.id === packId)
+  return pack ? (pack.manifest?.patches || []).map(patch => patch.id) : []
+}
+
+const packSelectionFor = packs => (packId, patchId) => {
+  const pack = packs().find(item => item?.id === packId)
+  const patch = pack?.manifest?.patches?.find(item => item?.id === patchId)
+  if (!pack || !patch) return null
+  return {
+    packId: pack.id, packVersion: pack.version, patchId: patch.id,
+    bankMsb: patch.address?.bankMsb, bankLsb: patch.address?.bankLsb, program: patch.address?.program,
+    source: 'assistant',
+  }
 }
 
 let _minted = 0
@@ -63,16 +88,19 @@ export function bindCommands(descriptors) {
 
 /**
  * Re-validate against live state, then apply the whole plan or none of it.
+ * `packs` is the same installed-pack-list function the dialog builds the
+ * digest from, so a pack program change validates against what the model saw.
  * -> { ok: true, summary, count } | { ok: false, errors }
  */
-export function applyPlan(plan, store = ProjectStore) {
+export function applyPlan(plan, store = ProjectStore, packs = () => []) {
   const state = store.getState()
-  const checked = validatePlan(plan, state, ASSISTANT_CAPABILITIES)
+  const caps = { ...ASSISTANT_CAPABILITIES, packPatchIds: packPatchIds(packs) }
+  const checked = validatePlan(plan, state, caps)
   if (!checked.ok) return { ok: false, errors: checked.errors }
   const { summary, actions } = checked.value
   let commands
   try {
-    commands = bindCommands(planToCommands(checked.value, state, { makeId }))
+    commands = bindCommands(planToCommands(checked.value, state, { makeId, packSelection: packSelectionFor(packs) }))
   } catch (error) {
     return { ok: false, errors: [error instanceof Error ? error.message : 'Plan could not be applied'] }
   }
@@ -109,11 +137,13 @@ async function postAnswer(prompt, digest, signal) {
 }
 
 export class AssistantDialog {
-  /** deps: { propose(prompt, digest, signal) → plan, ask(prompt, digest, signal) → { answer, cited }, store } */
+  /** deps: { propose(prompt, digest, signal) → plan, ask(prompt, digest, signal) → { answer, cited }, store,
+   *  packs() → installed pack list, same shape buildDigest expects } */
   constructor(deps = {}) {
     this.propose = deps.propose || postPlan
     this.ask = deps.ask || postAnswer
     this.store = deps.store || ProjectStore
+    this.packs = deps.packs || (() => [])
     this.plan = null
     this.controller = null
     this.el = document.getElementById(ASSISTANT_DIALOG_ID)
@@ -153,7 +183,7 @@ export class AssistantDialog {
     for (const action of plan.actions || []) {
       const row = document.createElement('div')
       row.className = 'asst-action'
-      row.textContent = describeAction(action, state, plan.actions || [])
+      row.textContent = describeAction(action, state, plan.actions || [], this.packs())
       this.planEl.appendChild(row)
     }
   }
@@ -185,7 +215,7 @@ export class AssistantDialog {
     this.showPlan(null)
     this.setStatus('Thinking…')
     try {
-      const plan = await this.propose(prompt, buildDigest(this.store.getState()), controller.signal)
+      const plan = await this.propose(prompt, buildDigest(this.store.getState(), { packs: this.packs() }), controller.signal)
       if (this.controller !== controller) return
       this.showPlan(plan)
       this.setStatus(`${plan.actions?.length || 0} proposed edit${plan.actions?.length === 1 ? '' : 's'}. Nothing has changed yet.`)
@@ -225,7 +255,7 @@ export class AssistantDialog {
 
   runApply() {
     if (!this.plan) return
-    const result = applyPlan(this.plan, this.store)
+    const result = applyPlan(this.plan, this.store, this.packs)
     if (!result.ok) {
       this.setStatus(`Plan refused, nothing applied:\n${result.errors.join('\n')}`)
       return

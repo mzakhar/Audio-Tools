@@ -153,6 +153,20 @@ describe('assistant apply path', () => {
     expect(ProjectStore.getState().tracks).toHaveLength(0)
   })
 
+  it('applies a real SetInstrumentParam plan against the real ProjectStore as one batch', () => {
+    ProjectStore.dispatch(AddTrack('midi', 'Lead'))
+    const trackId = ProjectStore.getState().tracks[0].id
+    // The default MIDI track instrument is already a palette (classic).
+    const before = ProjectStore.getUndoStackSize()
+    const store = spyStore()
+    const result = applyPlan(plan({ action: 'SetInstrumentParam', args: { trackId, key: 'cutoff', value: 800 } }), store)
+
+    expect(result.ok).toBe(true)
+    expect(ProjectStore.getState().tracks[0].instrument.params.cutoff).toBe(800)
+    expect(store.dispatchBatch).toHaveBeenCalledTimes(1)
+    expect(ProjectStore.getUndoStackSize()).toBe(before + 1)
+  })
+
   it('mints different clip ids when one plan is applied twice', () => {
     ProjectStore.dispatch(AddTrack('midi', 'Kick'))
     const trackId = ProjectStore.getState().tracks[0].id

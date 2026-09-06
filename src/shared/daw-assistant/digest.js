@@ -8,6 +8,8 @@ export const MAX_CABLES = 64
 export const MAX_BARS = 8
 export const MAX_NAME = 64
 export const STEPS = 16
+export const MAX_PACKS = 8
+export const MAX_PATCHES = 64
 
 const plainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -36,20 +38,50 @@ const scalars = params => {
 
 const instrument = value => {
   if (!plainObject(value)) return null
+  const params = scalars(value.params)
   return {
     type: text(value.type, 32),
     ...(value.paletteKey ? { paletteKey: text(value.paletteKey, 32) } : {}),
     ...(value.rackId ? { rackId: text(value.rackId) } : {}),
     ...(value.packId ? { packId: text(value.packId) } : {}),
+    ...(value.patchId ? { patchId: text(value.patchId) } : {}),
+    ...(Object.keys(params).length ? { params } : {}),
   }
 }
+
+/** Pack manifests are renderer state, not store state, so the caller injects
+ *  the installed pack list (compiled-pack shape: { id, version, manifest }). */
+const packList = (list, drop) => drop(Array.isArray(list) ? list : [], MAX_PACKS).map(pack => {
+  if (!plainObject(pack)) pack = {}
+  const manifest = plainObject(pack.manifest) ? pack.manifest : {}
+  const patches = Array.isArray(manifest.patches) ? manifest.patches : []
+  return {
+    id: text(pack.id),
+    version: text(pack.version, 32),
+    name: text(manifest.name),
+    patches: drop(patches, MAX_PATCHES).map(patch => ({ id: text(patch?.id), name: text(patch?.name) })),
+  }
+})
+
+/** Same shape, mirrored against a client-supplied digest -- already flat
+ *  ({ id, version, name, patches }), never nested under a manifest. */
+const clampPackList = (list, drop) => drop(Array.isArray(list) ? list : [], MAX_PACKS).map(pack => {
+  if (!plainObject(pack)) pack = {}
+  const patches = Array.isArray(pack.patches) ? pack.patches : []
+  return {
+    id: text(pack.id),
+    version: text(pack.version, 32),
+    name: text(pack.name),
+    patches: drop(patches, MAX_PATCHES).map(patch => (plainObject(patch) ? { id: text(patch.id), name: text(patch.name) } : { id: '', name: '' })),
+  }
+})
 
 /**
  * `truncated` tells the model it saw part of the project, so it can say so.
  * Every cap that drops something sets it.
  */
-export function buildDigest(state) {
-  if (!plainObject(state)) return { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], truncated: false }
+export function buildDigest(state, { packs = [] } = {}) {
+  if (!plainObject(state)) return { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], packs: [], truncated: false }
   let truncated = false
   const drop = (list, cap) => {
     const items = Array.isArray(list) ? list : []
@@ -123,7 +155,7 @@ export function buildDigest(state) {
   return {
     bpm: finite(state.bpm),
     timeSignature: Array.isArray(state.timeSignature) ? state.timeSignature.slice(0, 2).map(finite) : [4, 4],
-    tracks, mixer, racks, patterns, truncated,
+    tracks, mixer, racks, patterns, packs: packList(packs, drop), truncated,
   }
 }
 
@@ -136,7 +168,7 @@ export function buildDigest(state) {
  * every entry from a fixed whitelist of fields.
  */
 export function clampDigest(digest) {
-  const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], truncated: false }
+  const empty = { bpm: 120, timeSignature: [4, 4], tracks: [], mixer: [], racks: [], patterns: [], packs: [], truncated: false }
   if (!plainObject(digest)) return empty
   let truncated = false
   const drop = (list, cap) => {
@@ -207,6 +239,6 @@ export function clampDigest(digest) {
   return {
     bpm: finite(digest.bpm),
     timeSignature: Array.isArray(digest.timeSignature) ? digest.timeSignature.slice(0, 2).map(finite) : [4, 4],
-    tracks, mixer, racks, patterns, truncated,
+    tracks, mixer, racks, patterns, packs: clampPackList(digest.packs, drop), truncated,
   }
 }

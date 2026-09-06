@@ -196,6 +196,14 @@ const SPECS = {
   SetModuleBypass: { rackId: id, moduleId: idOrRef, bypassed: bool },
   Connect: { rackId: id, from: endpoint, to: endpoint },
   Disconnect: { rackId: id, cableId: id },
+
+  // `key` is resolved against the palette definition (capabilities.paletteParamKeys),
+  // never a static list here — same posture as SetModuleParam above.
+  SetInstrumentParam: { trackId: idOrRef, key: objectKey, value: scalar },
+  // packId/patchId name an installed pack patch; every other field of the
+  // selection (packVersion, bank/program) is resolved from the installed
+  // manifest by our code, never taken from model text.
+  SetTrackInstrumentProgram: { trackId: idOrRef, packId: str(128), patchId: str(128) },
 }
 
 export const ALLOWLIST = Object.freeze(Object.keys(SPECS))
@@ -491,6 +499,25 @@ export function validatePlan(plan, state, capabilities = {}) {
         if (!(rack.cables || []).some(cable => cable.id === args.cableId)) errors.push(`${where}: cable not found`)
         break
       }
+      case 'SetInstrumentParam': {
+        const track = trackOf(state, args.trackId)
+        if (!track) { errors.push(`${where}: track not found`); break }
+        if (track.instrument?.type !== 'palette') { errors.push(`${where}: track instrument is not a palette`); break }
+        if (typeof caps.paletteParamKeys !== 'function') break
+        if (has(caps.paletteParamKeys(track.instrument.paletteKey), args.key) === false) errors.push(`${where}: "${args.key}" is not a param of ${track.instrument.paletteKey}`)
+        break
+      }
+      case 'SetTrackInstrumentProgram': {
+        const track = trackOf(state, args.trackId)
+        if (!track) { errors.push(`${where}: track not found`); break }
+        if (track.type !== 'midi') { errors.push(`${where}: track is not a MIDI track`); break }
+        // ProjectStore.js:160 ignores a program change on a pinned instrument —
+        // refuse here rather than emit an action we know will be a no-op.
+        if (track.instrument?.programFollow === 'pinned') { errors.push(`${where}: instrument is pinned and would ignore a program change`); break }
+        if (typeof caps.packPatchIds !== 'function') break
+        if (has(caps.packPatchIds(args.packId), args.patchId) === false) errors.push(`${where}: "${args.patchId}" is not an installed patch of pack "${args.packId}"`)
+        break
+      }
     }
   })
 
@@ -508,8 +535,10 @@ const refPhrase = (slot, wanted, actions) => {
 }
 
 /** One sentence for a preview row; the action name alone if the target is gone.
- *  `actions` is the rest of the plan, needed only to number a $ref's step. */
-export function describeAction(action, state, actions = []) {
+ *  `actions` is the rest of the plan, needed only to number a $ref's step.
+ *  `packs` (same shape buildDigest takes) is only needed to name a patch and
+ *  its pack rather than print their ids. */
+export function describeAction(action, state, actions = [], packs = []) {
   if (!plainObject(action) || !Object.prototype.hasOwnProperty.call(SPECS, action.action)) return 'Unknown action'
   const plan = Array.isArray(actions) ? actions : []
   const args = resolveRefs(plainObject(action.args) ? action.args : {}, (slot, wanted) => refPhrase(slot, wanted, plan))
@@ -522,6 +551,11 @@ export function describeAction(action, state, actions = []) {
   const channel = () => {
     const found = (state?.mixer?.channels || []).find(item => item.id === args.channelId)
     return found ? nameOf(trackOf(state, found.trackId), found.trackId) : args.channelId
+  }
+  const patchName = () => {
+    const pack = (Array.isArray(packs) ? packs : []).find(item => item?.id === args.packId)
+    const patch = pack?.manifest?.patches?.find(item => item?.id === args.patchId)
+    return { pack: text(pack?.manifest?.name) || args.packId, patch: text(patch?.name) || args.patchId }
   }
   switch (action.action) {
     case 'SetBpm': return `Set BPM to ${args.bpm}`
@@ -555,6 +589,8 @@ export function describeAction(action, state, actions = []) {
     case 'SetModuleBypass': return `${args.bypassed ? 'Bypass' : 'Un-bypass'} ${mod()} in ${rack()}`
     case 'Connect': return `Patch ${args.from.port} into ${args.to.port} in ${rack()}`
     case 'Disconnect': return `Unpatch a cable in ${rack()}`
+    case 'SetInstrumentParam': return `Set ${args.key} to ${args.value} on ${track()}`
+    case 'SetTrackInstrumentProgram': { const names = patchName(); return `Set the instrument on ${track()} to "${names.patch}" from ${names.pack}` }
     default: return action.action
   }
 }
@@ -595,6 +631,10 @@ const CALLS = {
   SetModuleBypass: a => ['SetModuleBypass', a.rackId, a.moduleId, a.bypassed],
   Connect: a => ['Connect', a.rackId, a.from, a.to],
   Disconnect: a => ['Disconnect', a.rackId, a.cableId],
+  SetInstrumentParam: a => ['SetInstrumentParam', a.trackId, a.key, a.value],
+  // packSelection is caller-injected (the renderer's installed pack manifest),
+  // never the model's packId/patchId strings used as-is.
+  SetTrackInstrumentProgram: (a, mint, ids, packSelection) => ['SetTrackInstrumentProgram', a.trackId, packSelection(a.packId, a.patchId)],
 }
 
 /** Every id a creating action needs, minted before anything executes — so a
@@ -619,11 +659,14 @@ const MINTS_IDS = new Set([...Object.keys(MINTED), 'SetMidiClipNotes'])
  * here and passed to the store, so a $ref resolves to the id the command will
  * actually use and nothing is minted during execution.
  */
-export function planToCommands(plan, state, { makeId } = {}) {
+export function planToCommands(plan, state, { makeId, packSelection } = {}) {
   const shape = validatePlanShape(plan)
   if (!shape.ok) throw new TypeError(`planToCommands got an invalid plan: ${shape.errors[0]}`)
   if (typeof makeId !== 'function' && shape.value.actions.some(({ action }) => MINTS_IDS.has(action))) {
     throw new TypeError('planToCommands needs a makeId(kind) for plans that create tracks, clips, notes, effects or modules')
+  }
+  if (typeof packSelection !== 'function' && shape.value.actions.some(({ action }) => action === 'SetTrackInstrumentProgram')) {
+    throw new TypeError('planToCommands needs a packSelection(packId, patchId) for plans that select a pack patch')
   }
   const refs = new Map()
   return shape.value.actions.map(({ action, args: named, ref }) => {
@@ -635,7 +678,7 @@ export function planToCommands(plan, state, { makeId } = {}) {
     })
     const ids = MINTED[action] ? MINTED[action](makeId) : {}
     if (ref) refs.set(ref, { action, ids })
-    const [factory, ...factoryArgs] = CALLS[action](args, makeId, ids)
+    const [factory, ...factoryArgs] = CALLS[action](args, makeId, ids, packSelection)
     return { factory, args: factoryArgs }
   })
 }

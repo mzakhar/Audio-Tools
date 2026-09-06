@@ -1731,7 +1731,7 @@ function boot() {
     }
   })
   if (assistantAvailable()) {
-    _assistantDialog = new AssistantDialog({ store: ProjectStore })
+    _assistantDialog = new AssistantDialog({ store: ProjectStore, packs: () => _packCatalog })
     document.addEventListener('open-assistant', () => _assistantDialog.open())
   }
   document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
