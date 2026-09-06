@@ -56,11 +56,11 @@ describe('POST /api/assistant', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
-  it('refuses a model response that is not shape-valid, never returning a plan', async () => {
+  it('refuses a model response that is not shape-valid with a 424 the browser can read', async () => {
     const fetchFn = planFetch({ summary: 'ok', actions: [{ action: 'DeleteEverything', args: {} }] })
     const res = response()
     await handler(fetchFn)(assistantRequest({ prompt: 'do something', digest: validDigest }), res)
-    expect(res.writeHead).toHaveBeenCalledWith(502, expect.any(Object))
+    expect(res.writeHead).toHaveBeenCalledWith(424, expect.any(Object))
     expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty('plan')
   })
 
