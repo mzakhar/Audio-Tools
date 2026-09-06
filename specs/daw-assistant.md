@@ -27,7 +27,7 @@ gate, and the "the model proposes, our code decides" posture — and nothing els
 | 3 — Electron parity via existing provider connections | proposed |
 | 4 — conversation, follow-ups, audio-aware suggestions | deferred |
 | 5 — palette param actions | proposed, blocked on `specs/palette-state.md` |
-| 6 — ask mode, answering without editing | proposed |
+| 6 — ask mode, answering without editing | shipped |
 | 7 — pack program selection | proposed |
 
 Settled: web ships first, because the deployed app is where this is wanted and

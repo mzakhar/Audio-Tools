@@ -5,6 +5,7 @@ import ProjectStore, {
   migrate, DEFAULT_STATE, CURRENT_VERSION
 } from '../src/renderer/js/store/ProjectStore.js'
 import { INSTRUMENTS } from '../src/renderer/js/drums/tr909-kit.js'
+import { paletteDefaults } from '../src/renderer/js/palettes.js'
 
 const PATTERN_ID = '909-main'
 
@@ -19,7 +20,7 @@ describe('tr-909 pattern bars', () => {
     it('defaults to an empty patterns map at version 3', () => {
       expect(ProjectStore.getState().patterns).toEqual({})
       expect(DEFAULT_STATE.version).toBe(CURRENT_VERSION)
-      expect(CURRENT_VERSION).toBe(5)
+      expect(CURRENT_VERSION).toBe(6)
     })
   })
 
@@ -166,7 +167,11 @@ describe('tr-909 pattern bars', () => {
       const next = migrate(v2)
       expect(next.version).toBe(CURRENT_VERSION)
       expect(next.patterns).toEqual({})
-      expect(next.tracks).toEqual(v2.tracks)
+      // v6 backfills palette params, so the instrument gains params — the
+      // rest of the track (and racks) really is untouched.
+      expect(next.tracks).toEqual([
+        { id: 't1', type: 'midi', instrument: { type: 'palette', paletteKey: 'fm', params: paletteDefaults('fm') } }
+      ])
       expect(next.racks).toEqual(v2.racks)
     })
   })

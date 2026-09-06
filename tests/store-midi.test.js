@@ -7,6 +7,7 @@ import ProjectStore, {
   AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity,
   SetTrackMidiChannel, SetTrackInstrument, SetTrackInstrumentProgram, AddRack, RemoveRack
 } from '../src/renderer/js/store/ProjectStore.js'
+import { paletteDefaults } from '../src/renderer/js/palettes.js'
 
 function makeNote(overrides = {}) {
   return { id: 'n1', pitch: 60, startBeat: 0, duration: 0.5, velocity: 0.8, ...overrides }
@@ -139,7 +140,7 @@ describe('SetTrackInstrument', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
     const trackId = ProjectStore.getState().tracks[0].id
     ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'palette', paletteKey: 'fm' }))
-    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'fm' })
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'fm', params: paletteDefaults('fm') })
   })
 
   it('sets a rack instrument when the rack exists', () => {
@@ -154,13 +155,13 @@ describe('SetTrackInstrument', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
     const trackId = ProjectStore.getState().tracks[0].id
     ProjectStore.dispatch(SetTrackInstrument(trackId, { type: 'rack', rackId: 'ghost' }))
-    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic', params: paletteDefaults('classic') })
   })
 
   it('no-ops for an unknown track id', () => {
     ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
     ProjectStore.dispatch(SetTrackInstrument('ghost', { type: 'palette', paletteKey: 'fm' }))
-    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
+    expect(ProjectStore.getState().tracks[0].instrument).toEqual({ type: 'palette', paletteKey: 'classic', params: paletteDefaults('classic') })
   })
 })
 
@@ -205,7 +206,7 @@ describe('RemoveRack with a track on it', () => {
     expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'rack', rackId: 'rack-a' })
 
     ProjectStore.dispatch(RemoveRack('rack-a'))
-    expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'palette', paletteKey: 'classic' })
+    expect(ProjectStore.getState().tracks.at(-1).instrument).toEqual({ type: 'palette', paletteKey: 'classic', params: paletteDefaults('classic') })
   })
 })
 

@@ -8,6 +8,7 @@ import RackEngine from '../rack/rack-engine.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 import { PALETTE_DRUM_NOTES } from '../instruments/pad-map.js'
 import { velocityGain } from '../utils/velocity.js'
+import { paletteDefaults } from '../palettes.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
 
@@ -112,6 +113,7 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
 
   const palette = palettes?.[instrument.paletteKey || 'classic']
   if (!palette) return null
+  const params = instrument.params || paletteDefaults(instrument.paletteKey || 'classic')
 
   const drums = isDrumPalette(palette)
   const voices = new Map() // pitch → voice
@@ -130,10 +132,10 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
         // silent rather than detuned — the pad shows unlit for the same reason.
         const index = PALETTE_DRUM_NOTES[pitch]
         if (index === undefined) return
-        voice = palette.createDrumVoice(ctx, output, index, velocityGain(velocity), t)
+        voice = palette.createDrumVoice(ctx, output, index, velocityGain(velocity), t, params)
       } else {
         const freq = 440 * Math.pow(2, (pitch - 69) / 12)
-        voice = palette.createVoice(ctx, output, freq, velocityGain(velocity), t)
+        voice = palette.createVoice(ctx, output, freq, velocityGain(velocity), t, params)
       }
       voices.set(pitch, voice)
       // A note struck mid-bend has to land in tune, not snap on the next wheel move.

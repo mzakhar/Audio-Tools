@@ -3,7 +3,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { validatePlan } from '../src/shared/daw-assistant/plan.js'
 import ProjectStore, { AddTrack } from '../src/renderer/js/store/ProjectStore.js'
-import { ASSISTANT_CAPABILITIES, bindCommands, applyPlan } from '../src/renderer/js/components/assistant-dialog.js'
+import { ASSISTANT_CAPABILITIES, bindCommands, applyPlan, ASSISTANT_DIALOG_ID, AssistantDialog } from '../src/renderer/js/components/assistant-dialog.js'
+import { paletteDefaults } from '../src/renderer/js/palettes.js'
 
 const plan = (...actions) => ({ summary: 'Test plan', actions })
 
@@ -106,7 +107,7 @@ describe('assistant apply path', () => {
     expect(result.ok).toBe(true)
     const after = ProjectStore.getState()
     const track = after.tracks.find(item => item.name === 'Lead')
-    expect(track.instrument).toEqual({ type: 'palette', paletteKey: 'fm' })
+    expect(track.instrument).toEqual({ type: 'palette', paletteKey: 'fm', params: paletteDefaults('fm') })
     // The channelId slot resolved to that track's own mixer channel.
     expect(after.mixer.channels.find(channel => channel.id === track.mixerChannelId).volume).toBe(0.5)
     // Still one batch, still one undo.
@@ -162,5 +163,54 @@ describe('assistant apply path', () => {
     const ids = ProjectStore.getState().tracks[0].clips.map(clip => clip.id)
     expect(ids).toHaveLength(2)
     expect(new Set(ids).size).toBe(2)
+  })
+})
+
+describe('AssistantDialog ask mode', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <dialog id="${ASSISTANT_DIALOG_ID}">
+        <textarea id="asst-prompt"></textarea>
+        <button id="asst-propose-btn"></button>
+        <button id="asst-ask-btn"></button>
+        <button id="asst-apply-btn" disabled></button>
+        <button id="asst-discard-btn"></button>
+        <div id="asst-status"></div>
+        <div id="asst-plan"></div>
+      </dialog>`
+  })
+
+  it('renders the answer and its resolved citations, and never enables Apply', async () => {
+    const ask = vi.fn(async () => ({ answer: 'The tempo is 120 BPM.', cited: ['bpm', 'tracks.9.nope'] }))
+    const dialog = new AssistantDialog({ store: ProjectStore, ask })
+    dialog.promptEl.value = 'what is the tempo?'
+
+    await dialog.runAsk()
+
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(dialog.planEl.textContent).toContain('The tempo is 120 BPM.')
+    expect(dialog.planEl.textContent).toContain('bpm')
+    expect(dialog.plan).toBeNull()
+    expect(dialog.applyBtn.disabled).toBe(true)
+
+    // No path to dispatch from an ask result, even if Apply were clicked.
+    const undoCountBefore = ProjectStore.getUndoStackSize()
+    dialog.runApply()
+    expect(ProjectStore.getUndoStackSize()).toBe(undoCountBefore)
+  })
+
+  it('Ask never calls propose, and Propose never calls ask', async () => {
+    const ask = vi.fn(async () => ({ answer: 'ok', cited: [] }))
+    const propose = vi.fn(async () => ({ summary: 'noop', actions: [{ action: 'SetBpm', args: { bpm: 128 } }] }))
+    const dialog = new AssistantDialog({ store: ProjectStore, ask, propose })
+    dialog.promptEl.value = 'anything'
+
+    await dialog.runAsk()
+    expect(propose).not.toHaveBeenCalled()
+    expect(ask).toHaveBeenCalledTimes(1)
+
+    await dialog.runPropose()
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(dialog.plan).toEqual({ summary: 'noop', actions: [{ action: 'SetBpm', args: { bpm: 128 } }] })
   })
 })

@@ -16,8 +16,8 @@ instrument.
 
 | Phase | State |
 |---|---|
-| 0 — params as data, `createVoice` takes them | proposed |
-| 1 — schema v6 and the knob panel | proposed |
+| 0 — params as data, `createVoice` takes them | shipped |
+| 1 — schema v6 and the knob panel | shipped |
 | 2 — presets | proposed |
 
 ## What is actually wrong

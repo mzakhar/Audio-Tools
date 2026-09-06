@@ -21,6 +21,7 @@ import ProjectStore, {
 } from '../store/ProjectStore.js'
 import { buildDigest } from '../../../shared/daw-assistant/digest.js'
 import { validatePlan, describeAction, planToCommands } from '../../../shared/daw-assistant/plan.js'
+import { resolveCitations } from '../../../shared/daw-assistant/ask.js'
 import { MODULES, paramDefaults, canConnect } from '../rack/modules/index.js'
 
 export const ASSISTANT_DIALOG_ID = 'assistant-dialog'
@@ -84,7 +85,7 @@ async function postPlan(prompt, digest, signal) {
   const response = await fetch(ASSISTANT_ROUTE, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt, digest }),
+    body: JSON.stringify({ prompt, digest, mode: 'plan' }),
     signal,
   })
   const data = await response.json().catch(() => ({}))
@@ -93,10 +94,25 @@ async function postPlan(prompt, digest, signal) {
   return data.plan
 }
 
+/** Ask mode: prose plus digest paths, never a plan. Same route, no Apply. */
+async function postAnswer(prompt, digest, signal) {
+  const response = await fetch(ASSISTANT_ROUTE, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, digest, mode: 'ask' }),
+    signal,
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || 'Assistant unavailable')
+  if (typeof data.answer !== 'string') throw new Error('Assistant returned no answer')
+  return { answer: data.answer, cited: Array.isArray(data.cited) ? data.cited : [] }
+}
+
 export class AssistantDialog {
-  /** deps: { propose(prompt, digest, signal) → plan, store } */
+  /** deps: { propose(prompt, digest, signal) → plan, ask(prompt, digest, signal) → { answer, cited }, store } */
   constructor(deps = {}) {
     this.propose = deps.propose || postPlan
+    this.ask = deps.ask || postAnswer
     this.store = deps.store || ProjectStore
     this.plan = null
     this.controller = null
@@ -107,7 +123,9 @@ export class AssistantDialog {
     this.planEl = this.el.querySelector('#asst-plan')
     this.proposeBtn = this.el.querySelector('#asst-propose-btn')
     this.applyBtn = this.el.querySelector('#asst-apply-btn')
+    this.askBtn = this.el.querySelector('#asst-ask-btn')
     this.proposeBtn.addEventListener('click', () => this.runPropose())
+    this.askBtn.addEventListener('click', () => this.runAsk())
     this.applyBtn.addEventListener('click', () => this.runApply())
     this.el.querySelector('#asst-discard-btn').addEventListener('click', () => closeDialog(ASSISTANT_DIALOG_ID))
     // Esc, the ✕ and Discard all land here, so a request never outlives the UI.
@@ -140,6 +158,23 @@ export class AssistantDialog {
     }
   }
 
+  /** An ask result is never a plan: Apply stays disabled, always. */
+  showAnswer(result, digest) {
+    this.showPlan(null)
+    this.planEl.innerHTML = ''
+    if (!result) return
+    const answer = document.createElement('p')
+    answer.className = 'asst-summary'
+    answer.textContent = result.answer || ''
+    this.planEl.appendChild(answer)
+    for (const { path, value } of resolveCitations(digest, result.cited)) {
+      const row = document.createElement('div')
+      row.className = 'asst-action asst-citation'
+      row.textContent = `${path}: ${JSON.stringify(value)}`
+      this.planEl.appendChild(row)
+    }
+  }
+
   async runPropose() {
     const prompt = (this.promptEl.value || '').trim()
     if (!prompt) { this.setStatus('Describe the edit first.'); return }
@@ -160,6 +195,31 @@ export class AssistantDialog {
     } finally {
       if (this.controller === controller) this.controller = null
       this.proposeBtn.disabled = false
+    }
+  }
+
+  async runAsk() {
+    const prompt = (this.promptEl.value || '').trim()
+    if (!prompt) { this.setStatus('Describe the question first.'); return }
+    this.controller?.abort()
+    const controller = new AbortController()
+    this.controller = controller
+    this.askBtn.disabled = true
+    this.showPlan(null)
+    this.setStatus('Thinking…')
+    // Resolve citations against exactly what the model saw, not live state.
+    const digest = buildDigest(this.store.getState())
+    try {
+      const result = await this.ask(prompt, digest, controller.signal)
+      if (this.controller !== controller) return
+      this.showAnswer(result, digest)
+      this.setStatus('Answer only — nothing changed.')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      this.setStatus(error instanceof Error ? error.message : 'Assistant unavailable')
+    } finally {
+      if (this.controller === controller) this.controller = null
+      this.askBtn.disabled = false
     }
   }
 
