@@ -262,7 +262,10 @@ export function createWebDiscoveryHandler(options = {}) {
       return send(res, 200, { candidates: rankCandidates(reviewed.length ? reviewed : sourced, normalized.value) })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Discovery unavailable'
-      const status = /Access token|Access keys/.test(message) ? 403 : /JSON|too large/.test(message) ? 400 : 502
+      // 424 rather than 502 for an upstream failure: Cloudflare replaces an
+      // origin 5xx with its own branded error page, so a 502 loses the JSON
+      // body and the browser can never say WHY the provider refused.
+      const status = /Access token|Access keys/.test(message) ? 403 : /JSON|too large/.test(message) ? 400 : 424
       return send(res, status, { error: message })
     }
   }
