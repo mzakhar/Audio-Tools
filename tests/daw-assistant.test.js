@@ -332,6 +332,40 @@ describe('daw assistant forward references', () => {
     expect(validatePlan(shadow, state()).errors[0]).toMatch(/collides with an id already in the project/)
   })
 
+  it('refuses a slug whose derived channel id shadows a real mixer channel', () => {
+    // The slug itself is free; the `${ref}#channel` id it stands for is not.
+    const taken = state()
+    taken.mixer.channels.push({ id: 'lead#channel', trackId: 'track-1', volume: 1, pan: 0, mute: false, solo: false, sends: {} })
+    const shadow = plan(
+      { action: 'AddTrack', args: { name: 'Lead' }, ref: 'lead' },
+      { action: 'SetMixerParam', args: { channelId: { $ref: 'lead' }, param: 'volume', value: 0.5 } },
+    )
+    expect(validatePlan(shadow, taken).errors[0]).toMatch(/collides with an id already in the project/)
+    expect(validatePlan(shadow, state()).ok).toBe(true)
+  })
+
+  it('refuses "constructor" and "prototype" as ref slugs', () => {
+    for (const name of ['constructor', 'prototype']) {
+      expect(validatePlanShape(plan({ action: 'AddTrack', args: {}, ref: name })).ok).toBe(false)
+      expect(validatePlanShape(plan({ action: 'RemoveTrack', args: { trackId: { $ref: name } } })).ok).toBe(false)
+    }
+  })
+
+  it('refuses a Connect where one ref slot fails and the other resolves', () => {
+    // Today the null from the failed slot is also caught by the existence
+    // check; the accumulate-never-clear rule in validatePlan is what keeps that
+    // true for the next action that grows a second ref-bearing sub-field.
+    const half = plan(
+      { action: 'AddModule', args: { rackId: 'rack-1', type: 'lfo' }, ref: 'lfo' },
+      { action: 'Connect', args: { rackId: 'rack-1', from: { moduleId: { $ref: 'missing' }, port: 'out' }, to: { moduleId: { $ref: 'lfo' }, port: 'in' } } },
+    )
+    const canConnect = vi.fn(() => ({ ok: true }))
+    const result = validatePlan(half, state(), { canConnect })
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /unknown ref "missing"/.test(e))).toBe(true)
+    expect(canConnect).not.toHaveBeenCalled()
+  })
+
   it('refuses a malformed $ref, and a $ref in a slot no action can fill', () => {
     expect(validatePlanShape(plan({ action: 'SetBpm', args: { bpm: { $ref: 'lead' } } })).ok).toBe(false)
     expect(validatePlanShape(plan({ action: 'AddModule', args: { rackId: { $ref: 'lead' }, type: 'lfo' } })).ok).toBe(false)

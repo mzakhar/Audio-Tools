@@ -32,7 +32,7 @@ const id = value => {
 }
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,31}$/
-const slug = value => (typeof value === 'string' && SLUG.test(value)) ? value : null
+const slug = value => (typeof value === 'string' && SLUG.test(value) && !UNSAFE.has(value)) ? value : null
 const refValue = value => (plainObject(value) && slug(value.$ref) !== null) ? { $ref: value.$ref } : null
 
 /** An id slot: a real id, or { $ref } naming something an earlier action makes. */
@@ -376,20 +376,29 @@ export function validatePlan(plan, state, capabilities = {}) {
     let broken = false
     const args = resolveRefs(named, (slot, wanted) => {
       const entry = refs.get(wanted)
-      broken = true
+      // Only ever set, never cleared: an action with two ref slots (Connect)
+      // must stay broken when the first fails and the second resolves, or the
+      // checks below run against a half-resolved arg.
       if (!entry) {
+        broken = true
         errors.push(declared.has(wanted)
           ? `${where}: ref "${wanted}" is created by a later action`
           : `${where}: unknown ref "${wanted}"`)
         return null
       }
       const key = REF_SLOTS[slot][entry.action]
-      if (!key) { errors.push(`${where}: ref "${wanted}" is ${CREATED_NOUN[entry.action]}, not usable as ${slot}`); return null }
-      broken = false
+      if (!key) {
+        broken = true
+        errors.push(`${where}: ref "${wanted}" is ${CREATED_NOUN[entry.action]}, not usable as ${slot}`)
+        return null
+      }
       return entry.ids[key]
     })
     if (ref) {
-      if (stateIds.has(ref)) errors.push(`${where}: ref "${ref}" collides with an id already in the project`)
+      // Every id the ref stands for, not just the slug: AddTrack also derives a
+      // channel id, and that must not alias a real mixer channel either.
+      const collision = [ref, ...Object.values(stubIds(ref))].find(candidate => stateIds.has(candidate))
+      if (collision) errors.push(`${where}: ref "${ref}" collides with an id already in the project`)
       refs.set(ref, { action, ids: stubIds(ref) })
     }
     const state = live   // shadows the parameter: the checks below run against
