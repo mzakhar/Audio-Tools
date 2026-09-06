@@ -72,6 +72,29 @@ describe('POST /api/assistant', () => {
     expect(JSON.parse(res.end.mock.calls[0][0]).plan).toMatchObject(validPlan)
   })
 
+  it('does not ask for a strict schema, which OpenAI rejects while args stays open', async () => {
+    const fetchFn = planFetch(validPlan)
+    await handler(fetchFn)(assistantRequest({ prompt: 'set bpm to 128', digest: validDigest }), response())
+    const call = fetchFn.mock.calls.find(([url]) => String(url) === 'https://api.openai.com/v1/responses')
+    const sent = JSON.parse(call[1].body)
+    expect(sent.text.format.strict).toBe(false)
+    expect(sent.text.format.schema.properties.actions.items.properties.args.additionalProperties).toBe(true)
+  })
+
+  it('names the upstream status when the provider refuses, and calls out exhausted credit', async () => {
+    const refuse = status => vi.fn(async url => {
+      if (String(url) === `${teamDomain}/cdn-cgi/access/certs`) return certsResponse
+      return { ok: false, status, json: async () => ({}) }
+    })
+    const quota = response()
+    await handler(refuse(429))(assistantRequest({ prompt: 'set bpm to 128', digest: validDigest }), quota)
+    expect(JSON.parse(quota.end.mock.calls[0][0]).error).toMatch(/credit/i)
+
+    const other = response()
+    await handler(refuse(500))(assistantRequest({ prompt: 'set bpm to 128', digest: validDigest }), other)
+    expect(JSON.parse(other.end.mock.calls[0][0]).error).toMatch(/500/)
+  })
+
   it('429s past the assistant limit while /leads for the same identity still works', async () => {
     const fetchFn = planFetch(validPlan)
     const run = handler(fetchFn, { assistantLimit: 1 })

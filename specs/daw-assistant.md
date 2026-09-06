@@ -262,6 +262,14 @@ Changes to `src/web-discovery/`:
    runs longer) — matching the discipline already in
    `openai-compatible.js:32`, and preferably by extracting that call rather than
    writing a third copy of it.
+
+   The schema is deliberately **not** `strict`. Strict mode requires
+   `additionalProperties: false` on every object, and `args` differs per action,
+   so a strict schema is rejected outright:
+   `'additionalProperties' is required to be supplied and to be false`. The
+   schema stays a strong hint — including the `action` enum, imported from the
+   shared allowlist — and `validatePlanShape` remains the actual gate, which is
+   what item 4 already assumes.
 4. Validate the returned plan with the shared `validatePlanShape` before
    responding, so a malformed plan never reaches a browser. The server has no
    project state and the rack registry is renderer-only (see "Contracts —
