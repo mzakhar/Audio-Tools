@@ -112,10 +112,10 @@ VID 4353 / PID 4B4D, bcdDevice 1.00, class-compliant (Microsoft `usbaudio`).
 | 16 pads | note-on/off **ch 10**, notes **36–51** chromatic | note-off velocity always 64; gate median 20 ms (pad releases fast) |
 | Pad velocity | observed **69–109** only, median 85 | very compressed range: soft hits never go low. A software curve that expands ~65–115 to 1–127 is mandatory, not optional |
 | Pad pressure | **channel aftertouch** `D9`, ch 10, seen 5–45 | mono, not poly. Enough for pressure-driven Repeat velocity |
-| 8 encoders | **CC 30–37, ch 1**, absolute 0–127, ±1 per detent | device holds the value; convert to deltas. Behaviour at the 0/127 ends unknown |
-| Buttons (5 pressed) | **CC 25–29, ch 1**, 127 press / 0 release | momentary. Remaining buttons and their labels not yet captured |
+| 8 encoders | **CC 30–37, ch 1**, absolute 0–127, exactly ±1 per message, no acceleration, clamps at 0 | knobs 1→8 (as turned) = CC **36, 37, 34, 35, 32, 33, 30, 31**, so the profile needs an explicit order map. The device holds the value; convert to deltas |
+| 5 buttons | **CC 25–29, ch 1**, 127 press / 0 release, momentary | pressed in order 25→29. Labels still to confirm |
 | Ports | `SMC-PAD` and `MIDIIN2` carry identical streams; `MIDIIN3` silent | open one input only |
-| SysEx | universal identity request (`F0 7E 7F 06 01 F7`) gets no reply on any out port | |
+| SysEx | universal identity request (`F0 7E 7F 06 01 F7`) gets no reply on any out port. The **M-VAVE vendor query** `F0 00 32 45 00 00 00 40 7F F7` on the first out port answers `SMC-PAD_004` | vendor protocol per github.com/spectalive/smc-pad (Apache-2.0): logical `00 59 cmd len24 data ~sum`, whole message bit-packed LSB-first into 7-bit bytes. That repo's unit was `SMC-PAD_003` and did not light from note-on; this one does, so firmware differs |
 | Double triggers | none seen (one 40 ms retrigger was a real roll) | |
 | Pad order | note 36 = bottom-left, ascending (row by row from the bottom assumed) | |
 | Banks | hold the bank button: the pads turn blue (device-side menu); pick a bank on the pads. The button sends **no MIDI**. Bank 2 = notes 52–67, so bank *n* = `36 + 16(n−1)` on ch 10 | the note number tells the host the bank, so the host keeps no bank state. Banks 3–4 inferred |
@@ -142,6 +142,15 @@ any rate. States are coded by pattern, never by colour:
 
 The on-screen twins carry full colour and labels. The hardware carries the
 pattern, so eyes can stay on the pads.
+
+**Colour upgrade (unverified on this unit):** the vendor protocol has a per-pad
+RGB write (`cmd 0x22`, address `profile*3539 + 211 + padIndex*26 + 5`). Per the
+reverse-engineered app, it changes working memory only; persisting needs a
+separate save command, which we never send. If that holds, the plan is to write
+each pad's kit colour once on kit load and keep note on/off for the live
+pattern, so the pink becomes the pad's own colour. It needs `sysex: true` (a
+reviewed change) and a session (identity query, then config reads). Verify on
+`SMC-PAD_004` before designing around it.
 
 Target layout:
 
