@@ -83,9 +83,13 @@
   font: 12px var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--text);
+  background: none;
+  padding: 0;
   min-width: 24px;
   text-align: right;
 }
+/* .knob-val is the synth panel's LCD readout; the command bar keeps a plain value. */
+#command-bar .knob-val::before { content: none; }
 
 .cmd-token {
   display: inline-flex;

@@ -1,6 +1,6 @@
 # Playful retro instrument UI — design and implementation plan
 
-Status: phases 0–1 done, phase 2 in progress (umbrella PR #50). Applies to the whole renderer. `specs/ui-shell.md`,
+Status: phases 0–3 done (umbrella PR #50). Final shots: `specs/ui-baseline/final/`. Applies to the whole renderer. `specs/ui-shell.md`,
 `specs/instrument-browser.md` and existing accessibility behaviour stay
 authoritative for workflows; this plan changes appearance, not structure.
 Companion: `specs/fm1-emulator.md` (consumes this visual system; does not gate it).
@@ -120,12 +120,12 @@ parallel agents because phase 1 gave them disjoint CSS files.
 |---|---|---|---|
 | 0 — Baseline + direction | done | `specs/ui-baseline/0/` (63 shots); token values in `styles/tokens.css`. | Contrast test passes all three themes. |
 | 1 — Foundations | done (canvases move with their surface in 2d/2e) | Split CSS (decision 4); `theme-colors.js` + every canvas on tokens and repainting on `themechange`; new tokens and values from phase 0; system fonts; shared primitives; global reduced-motion block; no-literal and contrast tests. | Tests + build green. Screenshot diff: dark visually equivalent except fonts/token values; light/rainbow canvases now follow theme. |
-| 2a — Shell + dialogs | planned | `shell.css`, `dialogs.css` | per-surface checklist below |
-| 2b — Synth (knobs, keys, pads, sequencer) | planned | `synth.css`, knob panel markup only if needed for group markers | " |
-| 2c — 909 | planned | `tr909.css`, `tr909-view.js` colours | " |
-| 2d — Arrange, mixer, piano roll | planned | `arrange.css`, `piano-roll.css`, canvas palettes | " + track-count and grid-density check vs baseline |
-| 2e — Rack | planned | `rack.css`, module canvases | " + cable/port colours unchanged in meaning |
-| 3 — Consistency pass | planned | Cross-view review in Electron and browser, all themes, three viewport sizes; fix drift; update this table and AGENTS.md. | User review of final screenshots. |
+| 2a — Shell + dialogs | done | `shell.css`, `dialogs.css` | per-surface checklist below |
+| 2b — Synth (knobs, keys, pads, sequencer) | done | `synth.css`, knob panel markup only if needed for group markers | " |
+| 2c — 909 | done | `tr909.css`, `tr909-view.js` colours | " |
+| 2d — Arrange, mixer, piano roll | done | `arrange.css`, `piano-roll.css`, canvas palettes | " + track-count and grid-density check vs baseline |
+| 2e — Rack | done | `rack.css`, module canvases | " + cable/port colours unchanged in meaning |
+| 3 — Consistency pass | done | Cross-view review in Electron and browser, all themes, three viewport sizes; fix drift; update this table and AGENTS.md. | User review of final screenshots. |
 
 Per-surface checklist (2a–2e): `npm test` and `npm run build` pass; screenshots
 at the three viewports × light/dark saved next to baseline; keyboard-only pass of
@@ -165,3 +165,15 @@ reading as a pure function on a fake style object).
 Merging the two knob implementations; a new theme or theme setting; FM-1 device
 and F5 Pads view (they adopt the system when built); any layout/IA change from
 `ui-shell.md`; pixel-diff tooling; manufacturer branding.
+
+## Outcome notes
+
+- Known, pre-existing: the default rack shows the VC module overlapping the
+  VCO row; layout was out of scope.
+- Not built because the code has nothing to style: track-header arm button,
+  mixer meters (`--canvas-meter-*` are used by the rack meter only).
+- Knob panel scrolls horizontally at 390 px, as before.
+- `js/components/canvas-colors.js` (`withAlpha`, `trackToken`, `canvasFont`)
+  sits beside `js/ui/theme-colors.js` for canvas-specific helpers.
+- Parallel worktree agents started from `main`, not the feature branch; each
+  fast-forwarded itself. Brief future agents with the base commit explicitly.
