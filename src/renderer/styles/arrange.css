@@ -35,6 +35,11 @@
 .instrument-empty { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
 #arrangement-container canvas {
   display: block;
+  /* Out of flow: a bitmap sized from the container must not size the container,
+     or opening the mixer drawer pushes it off-screen instead of shrinking the canvas. */
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 
 .arrangement-wrapper {
@@ -51,7 +56,7 @@
   bottom: 0;  /* without this the absolutely-positioned list is 0px tall and clips every header */
   width: 210px;   /* keep in sync with TRACK_HEADER_W in arrangement-view.js */
   overflow: hidden;
-  background: var(--bg2);
+  background: var(--surface-panel);
   border-right: 1px solid var(--border);
   z-index: 2;
   pointer-events: none;
@@ -61,78 +66,81 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  padding: 0 8px;
-  gap: 6px;
+  align-content: center;
+  padding: 0 8px 0 10px;
+  gap: 3px 6px;
+  background: var(--surface-panel);
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  /* track identity stripe; --track-color is set per row by arrangement-view.js */
+  border-left: 4px solid var(--track-color, var(--track-1));
+  font: 12px var(--font-ui);
   pointer-events: all;
 }
 .track-header-item .track-name {
-  width: 100%;
+  flex: 1 1 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font: 600 12px/18px var(--font-ui);
   color: var(--text);
 }
+/* M / S compose .btn .btn--toggle; letters carry the meaning, fill carries state. */
 .track-header-item .mute-btn,
 .track-header-item .solo-btn {
-  padding: 2px 5px;
-  font-size: 9px;
-  letter-spacing: 1px;
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  cursor: pointer;
-  line-height: 1.4;
-}
-.track-header-item .mute-btn.active {
-  border-color: #ff4444;
-  color: #ff4444;
-}
-.track-header-item .solo-btn.active {
-  border-color: var(--accent);
-  color: var(--accent);
+  min-height: 22px;
+  min-width: 24px;
+  padding: 0 6px;
+  font-size: 11px;
 }
 .track-header-item .track-midi-ch {
-  width: 52px;
-  font-size: 9px;
-  background: var(--bg4);
+  width: 56px;
+  min-height: 22px;
+  font: 11px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-control);
   border: 1px solid var(--border);
-  color: var(--text-dim);
+  border-radius: var(--radius-s);
+  color: var(--text);
 }
 .track-header-item .track-instrument-gear {
   /* Sits on the instrument line, not wrapped onto one of its own. */
   order: 4;
   flex: 0 0 auto;
-  font-size: 9px;
+  min-height: 22px;
+  min-width: 24px;
+  font-size: 12px;
   padding: 0 4px;
   color: var(--text-dim);
-  background: var(--bg4);
+  background: var(--surface-control);
   border: 1px solid var(--border);
+  border-radius: var(--radius-s);
   cursor: pointer;
 }
-.track-header-item .track-instrument-gear:hover { color: var(--accent); border-color: var(--accent); }
+.track-header-item .track-instrument-gear:hover { color: var(--text); border-color: var(--border-strong); }
 .track-header-item .track-instrument-chip {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9px;
+  font: 11px var(--font-ui);
   text-align: left;
-  color: var(--text-dim);
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  padding: 2px 5px;
+  color: var(--text);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+  padding: 2px 6px;
+  min-height: 22px;
   line-height: 1.4;
   cursor: pointer;
   /* Its own line: sharing a 210 px row with name, mute, solo and channel left
      it about ten pixels wide, which read as a blank white square. */
-  flex: 1 1 100%;
+  flex: 1 1 calc(100% - 36px); /* wraps onto its own line with the gear beside it */
   order: 3;
 }
-.track-header-item .track-instrument-chip.missing { color: #ff6b6b; }
-.track-header-item .track-instrument-chip:hover { color: var(--accent); }
+.track-header-item .track-instrument-chip.missing { color: var(--danger); border-color: var(--danger); }
+.track-header-item .track-instrument-chip:hover { border-color: var(--border-strong); }
+.track-header-item :is(button, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 /* ── Arrangement scrollbars ──────────────────────────────────────────────── */
 .arr-scrollbar {
   position: absolute;
@@ -154,7 +162,7 @@
 }
 .arr-scroll-thumb {
   position: absolute;
-  background: #444;
+  background: var(--border-strong);
   border-radius: 4px;
   cursor: grab;
   transition: background 0.1s;
@@ -167,19 +175,19 @@
 }
 .arr-scroll-thumb:hover,
 .arr-scroll-thumb:active {
-  background: #666;
+  background: var(--text-dim);
 }
 
 /* ── Arrangement context menu ─────────────────────────────────────────────── */
 .arr-ctx-menu {
   position: fixed;
   z-index: 1000;
-  background: var(--bg3);
+  background: var(--surface-panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-m);
   padding: 4px 0;
   min-width: 160px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 28%, transparent);
 }
 .arr-ctx-item {
   display: block;
@@ -188,76 +196,91 @@
   background: none;
   border: none;
   color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
+  font: 12px var(--font-ui);
   text-align: left;
   cursor: pointer;
-  letter-spacing: 0.5px;
 }
-.arr-ctx-item:hover {
-  background: var(--bg4);
-}
-.arr-ctx-item.danger {
-  color: #ff5555;
-}
-.arr-ctx-item.danger:hover {
-  background: rgba(255,85,85,0.15);
-}
+.arr-ctx-item:hover { background: var(--bg3); }
+.arr-ctx-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.arr-ctx-item.danger { color: var(--danger); }
+.arr-ctx-item.danger:hover { background: var(--danger-subtle); }
 
 /* --- Mixer drawer: closed by default, session state only ---------------- */
 #mixer-bar {
   height: 0;
   flex-shrink: 0;
   display: flex;
+  gap: 4px;
   overflow: hidden;
   background: var(--bg2);
   border-top: 1px solid var(--border);
-  transition: height 0.16s ease;
+  transition: height 0.12s ease;
 }
 #mixer-bar.open {
-  height: 120px;
+  height: 148px;
+  padding: 6px;
   overflow-x: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   #mixer-bar { transition: none; }
 }
+/* One panel per strip: label on top, then fader/pan, M S side by side. */
 .mixer-strip {
-  width: 80px;
+  width: 88px;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  justify-items: center;
   padding: 6px 4px;
   gap: 4px;
-  border-right: 1px solid var(--border);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.mixer-strip > :is(.mixer-strip-label, .mixer-fader, .mixer-pan, .mixer-effect-slots, .mixer-sends) {
+  grid-column: 1 / -1;
 }
 .mixer-strip-label {
-  font-size: 9px;
-  color: var(--text-dim);
-  letter-spacing: 1px;
+  font: 600 11px var(--font-ui);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 72px;
+  max-width: 78px;
   text-align: center;
 }
 /* Attribute selector needed: plain `.mixer-fader` loses to `input[type=range] { width: 90px }`,
-   which is wider than the 80px strip and spills over the neighbouring channel. */
+   which is wider than the strip and spills over the neighbouring channel. */
 input[type=range].mixer-fader {
-  width: 64px;
+  width: 72px;
 }
 input[type=range].mixer-pan {
-  width: 48px;
+  width: 56px;
 }
 .mixer-strip .mute-btn,
 .mixer-strip .solo-btn {
-  font-size: 9px;
-  padding: 1px 4px;
-  background: var(--bg4);
-  border: 1px solid var(--border);
+  min-height: 24px;
+  min-width: 30px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.mixer-effect-slots { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+.effect-slot-btn {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  font: 10px var(--font-mono);
   color: var(--text-dim);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
   cursor: pointer;
 }
-.mixer-strip .mute-btn.active { border-color: var(--danger); color: var(--danger); }
-.mixer-strip .solo-btn.active { border-color: var(--accent); color: var(--accent); }
-
+.effect-slot-btn.occupied { color: var(--text); border-color: var(--border-strong); }
+.effect-slot-btn:focus-visible,
+.mixer-strip :is(.mute-btn, .solo-btn):focus-visible,
+.mixer-strip input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.mixer-sends { display: flex; flex-direction: column; gap: 2px; }
+.mixer-send-label { font: 600 10px var(--font-ui); color: var(--text-dim); }

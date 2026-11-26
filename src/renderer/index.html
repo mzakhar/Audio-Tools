@@ -110,9 +110,9 @@
     <div class="pr-drawer-header">
       <span id="pr-dialog-title" class="pr-title">PIANO ROLL — <span id="pr-clip-name"></span></span>
       <div class="pr-tools" role="radiogroup" aria-label="Piano roll tool">
-        <button class="pr-tool-btn active" data-pr-tool="draw" role="radio" aria-checked="true" title="Draw notes (D)">✎ DRAW</button>
-        <button class="pr-tool-btn" data-pr-tool="select" role="radio" aria-checked="false" title="Select notes (S)">⊹ SELECT</button>
-        <button class="pr-tool-btn" data-pr-tool="erase" role="radio" aria-checked="false" title="Erase notes (E)">✕ ERASE</button>
+        <button class="pr-tool-btn btn btn--toggle active" data-pr-tool="draw" role="radio" aria-checked="true" title="Draw notes (D)">✎ DRAW</button>
+        <button class="pr-tool-btn btn btn--toggle" data-pr-tool="select" role="radio" aria-checked="false" title="Select notes (S)">⊹ SELECT</button>
+        <button class="pr-tool-btn btn btn--toggle" data-pr-tool="erase" role="radio" aria-checked="false" title="Erase notes (E)">✕ ERASE</button>
         <span class="pr-sep" aria-hidden="true">|</span>
         <label for="pr-quantize" class="pr-label">SNAP</label>
         <select id="pr-quantize" aria-label="Quantize snap">
@@ -124,7 +124,7 @@
           <option value="1">1 bar</option>
         </select>
       </div>
-      <button id="close-piano-roll-btn" class="pr-close-btn" aria-label="Close piano roll (Escape)">✕ CLOSE</button>
+      <button id="close-piano-roll-btn" class="pr-close-btn btn" aria-label="Close piano roll (Escape)">✕ CLOSE</button>
     </div>
     <div id="piano-roll-container"></div>
   </dialog>
