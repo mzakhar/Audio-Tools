@@ -110,7 +110,7 @@ VID 4353 / PID 4B4D, bcdDevice 1.00, class-compliant (Microsoft `usbaudio`).
 | Control | Message | Notes |
 |---|---|---|
 | 16 pads | note-on/off **ch 10**, notes **36–51** chromatic | note-off velocity always 64; gate median 20 ms (pad releases fast) |
-| Pad velocity | observed **69–109** only, median 85 | very compressed range: soft hits never go low. A software curve that expands ~65–115 to 1–127 is mandatory, not optional |
+| Pad velocity | observed **69–109** only, median 85, on the factory curve | The device has 4 curves (SHIFT + Pad 9–12). Measured soft to hard on pad 1: **Pad 9 = 24–104**, Pad 10 = 60–116, Pad 11 = 72–119, Pad 12 = fixed 127. Lessons step 0 tells the user to pick Pad 9. The software curve stays (per device) but only lifts the top end |
 | Pad pressure | **channel aftertouch** `D9`, ch 10, seen 5–45 | mono, not poly. Enough for pressure-driven Repeat velocity |
 | 8 encoders | **CC 30–37, ch 1**, absolute 0–127, exactly ±1 per message, no acceleration, clamps at 0 | knobs 1→8 (as turned) = CC **36, 37, 34, 35, 32, 33, 30, 31**, so the profile needs an explicit order map. The device holds the value; convert to deltas |
 | 5 buttons | **CC 25–29, ch 1**, 127 press / 0 release, momentary | pressed in order 25→29. Labels still to confirm |
@@ -311,6 +311,10 @@ Phase 1 is shippable alone and should fix most of today's complaint.
 
 - SMC-PAD: pad grid order, banks, remaining buttons and LED protocol (see
   captured facts above for what is known).
-- Does Cube Suite (the vendor editor) expose a velocity curve good enough to
-  skip ours? Ours ships regardless; it is per-device in software.
+- Device velocity curve: answered by the printed manual (SHIFT + Pad 9–12) and
+  measured; see the captured facts. Also from the manual: on-device Note Repeat
+  (rate, swing, latch, tap tempo, and sync that needs host MIDI clock) overlaps
+  our Repeat. Decide whether the app sends clock or tells the user to leave
+  device repeat off. Transpose and octave shift (SHIFT + Pad 13–16) move pad
+  notes, so map pads from the records or by learn, never by fixed note.
 - Measured input-to-sound latency on Electron vs Chrome; record in phase 0.
