@@ -162,11 +162,13 @@ that is a guess. A working-memory colour write may therefore change nothing
 visible. Replies over ~1 KB truncate in rtmidi/WinMM, so read in ≤400-byte
 chunks.
 
-**Result: colour upgrade is dead on this unit.** Writing green to all 128 pad
-records (4 profiles × 32 pads) was acked and read back as green, but the
-host-lit pads stayed pink. All writes were restored and verified 128/128, and
-no save was sent. Design for pink on/off plus blink codes only, and leave
-`sysex: false`.
+**Colour upgrade: unresolved, lead found.** Writing green to records 0–31 of
+profiles 0–3 was acked and read back, but the host-lit pads stayed pink. That
+test missed the live bank. Each of the 8 profiles holds 128 pad records (8 banks
+× 16 pads). Records 32–47 store notes 36–51 (the live bank 1) in `f0 00 f0`
+(the pink we see). Records 48–63 store notes 52–67 in `00 00 f0`, which matches
+the blue shown while the bank button is held. Next test: write records 32–47.
+All writes so far were restored and verified, and no save was sent.
 
 Target layout:
 
