@@ -7,3 +7,8 @@ dist/
 .DS_Store
 .chrome-debug/
 .chrome-visible-debug/
+
+# UI screenshots: keep the phase-0 baseline and the final set only
+specs/ui-baseline/*
+!specs/ui-baseline/0/
+!specs/ui-baseline/final/

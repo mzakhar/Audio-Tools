@@ -1,0 +1,92 @@
+/* The piano roll is a modal dialog now, not a bottom drawer. */
+dialog.pr-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 94vw);
+  height: min(560px, 82vh);
+  max-width: 94vw;
+  max-height: 88vh;
+}
+
+.pr-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pr-title {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.pr-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.pr-tool-btn {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 8px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+.pr-tool-btn:hover { color: var(--text); }
+.pr-tool-btn.active { border-color: var(--accent); color: var(--accent); }
+
+.pr-sep {
+  color: var(--border);
+  font-size: 12px;
+  margin: 0 2px;
+}
+
+.pr-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+#pr-quantize {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 4px;
+}
+
+.pr-close-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.pr-close-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+#piano-roll-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.piano-roll-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+

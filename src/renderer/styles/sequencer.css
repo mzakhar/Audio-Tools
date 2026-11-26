@@ -1,0 +1,147 @@
+/* ─── Sequencer ────────────────────────────────────────────────────────────── */
+#sequencer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 12px;
+}
+
+#seq-tracks {
+  overflow-x: auto;
+}
+
+.seq-track-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.seq-track-row.header {
+  margin-bottom: 4px;
+}
+
+.seq-ctrl-spacer {
+  width: 164px;
+  flex-shrink: 0;
+}
+
+.seq-track-ctrl {
+  width: 164px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+
+.track-sel {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 2px;
+  cursor: pointer;
+  outline: none;
+}
+.track-sel:focus { border-color: var(--accent); }
+
+.track-kind-sel { width: 46px; flex-shrink: 0; }
+.track-note-sel { flex: 1; min-width: 0; }
+
+.track-remove-btn {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.track-remove-btn:hover { color: #ff4444; }
+
+.seq-steps {
+  display: flex;
+  gap: 3px;
+}
+
+.step-num {
+  width: 34px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+.step-num.beat-marker { color: var(--accent); }
+
+.seq-cell {
+  width: 34px;
+  height: 34px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.08s, border-color 0.08s;
+  border-radius: 2px;
+}
+.seq-cell:hover { border-color: var(--accent); background: #1e1e1e; }
+
+/* beat group separator (every 4 steps) */
+.seq-cell:nth-child(4n+1) { margin-left: 4px; }
+.seq-cell:first-child { margin-left: 0; }
+
+/* Playhead highlight */
+.seq-cell.playing {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+.seq-cell.active.playing {
+  background: #fff;
+  box-shadow: 0 0 10px #fff, 0 0 20px currentColor;
+}
+
+/* Per-row active colors — rows differ by kind, pad rows by bank */
+[data-kind="note"] .seq-cell.active           { background: #00e5ff; border-color: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
+[data-kind="pad"][data-bank="A"] .seq-cell.active { background: #ff4444; border-color: #ff4444; box-shadow: 0 0 6px #ff4444; }
+[data-kind="pad"][data-bank="B"] .seq-cell.active { background: #ffaa00; border-color: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
+
+/* ─── Sequencer Controls ───────────────────────────────────────────────────── */
+#sequencer-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.transport {
+  display: flex;
+  gap: 6px;
+}
+
+.transport-btn {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.1s;
+}
+.transport-btn:hover { border-color: var(--accent); color: var(--accent); }
+.transport-btn.play:active, .transport-btn.play.active-btn {
+  background: var(--accent3);
+  color: #000;
+  border-color: var(--accent3);
+  box-shadow: 0 0 8px var(--accent3);
+}
+.transport-btn.stop:hover { border-color: #ff4444; color: #ff4444; }
+.transport-btn.clear:hover { border-color: var(--accent2); color: var(--accent2); }
+

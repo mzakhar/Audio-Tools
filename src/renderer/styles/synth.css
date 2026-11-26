@@ -1,0 +1,426 @@
+/* ─── Recorder ──────────────────────────────────────────────────────────────── */
+.rec-btn {
+  background: var(--bg4);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 14px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.1s;
+}
+.rec-btn:hover { background: var(--danger-subtle); }
+.rec-btn.recording { background: var(--danger); color: var(--danger-on); }
+
+.rec-timer {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  min-width: 40px;
+}
+
+/* ─── Instrument slot ──────────────────────────────────────────────────────── */
+/* Lives inside the synth view, never above it — the shell owns the only bar. */
+#instrument-bar {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.instrument-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.instrument-slot:hover { border-color: var(--accent); }
+.instrument-slot:focus-visible,
+.slot-gear:focus-visible,
+.oct-btn:focus-visible,
+.pad-bank:focus-visible,
+.drum-pad:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.slot-icon { color: var(--accent); font-size: 15px; flex: 0 0 auto; }
+.slot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: bold;
+}
+.slot-meta { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+.slot-meta.slot-warn { color: var(--danger); }
+
+.slot-gear {
+  flex: 0 0 auto;
+  width: 38px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+.slot-gear:hover { border-color: var(--accent); color: var(--text); }
+
+.knob-note { color: var(--text); font-size: 12px; letter-spacing: 1px; }
+.knob-open-btn {
+  background: var(--bg3);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 6px 12px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+.knob-open-btn:hover { background: var(--bg4); }
+
+/* ─── Knob Panel ───────────────────────────────────────────────────────────── */
+#knob-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  min-height: 80px;
+}
+
+.knob-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+}
+
+.knob-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.knob-val {
+  font-size: 10px;
+  color: var(--accent);
+  min-width: 36px;
+  text-align: center;
+}
+
+.knob-divider {
+  width: 1px;
+  height: 50px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.knob-select-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 80px;
+}
+
+select.knob-select {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+}
+select.knob-select:focus { border-color: var(--accent); }
+
+/* ─── Range Input (Slider) ─────────────────────────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg4);
+  outline: none;
+  cursor: pointer;
+  width: 90px;
+  border: none;
+  position: relative;
+}
+
+/* Fill effect via JS-set CSS variable */
+input[type=range].filled {
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill, 50%),
+    var(--bg4) var(--fill, 50%),
+    var(--bg4) 100%
+  );
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent);
+  border: 2px solid #000;
+  transition: box-shadow 0.1s;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 12px var(--accent), 0 0 20px var(--accent);
+}
+input[type=range]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent);
+  border: 2px solid #000;
+}
+
+/* Master vol slider (wider) */
+#master-vol { width: 70px; }
+
+/* ─── Keyboard Section ─────────────────────────────────────────────────────── */
+/* The playing surface owns the window's width instead of floating as a small
+   island in the middle of it — the 909 view is the reference. */
+#keyboard-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 0 4px;
+  width: min(1500px, 100%);
+  margin: 0 auto;
+}
+
+#keyboard-wrap {
+  overflow-x: auto;
+  width: 100%;
+}
+
+/* Which window of the full range is on screen — the octave buttons of a 25-key
+   controller, made visible. */
+#keyboard-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+#keyboard-range-label { min-width: 78px; text-align: center; color: var(--text); }
+.oct-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.oct-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.oct-btn:disabled { opacity: 0.35; cursor: default; }
+
+#keyboard {
+  position: relative;
+  display: flex;
+  user-select: none;
+  touch-action: none;
+}
+
+/* White keys */
+.key-white {
+  position: relative;
+  width: 44px;
+  height: 130px;
+  background: var(--white-key);
+  border: 1px solid #888;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  transition: background 0.04s;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.key-white:hover { background: #f0f0f0; }
+.key-white.active {
+  background: var(--key-active);
+  box-shadow: 0 0 10px var(--accent), 0 0 2px var(--accent) inset;
+}
+
+/* Black keys */
+.key-black {
+  position: absolute;
+  width: 28px;
+  height: 80px;
+  background: var(--black-key);
+  border: 1px solid #000;
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+  transition: background 0.04s;
+}
+.key-black:hover { background: #222; }
+.key-black.active {
+  background: var(--key-active);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.key-label {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  pointer-events: none;
+  text-transform: uppercase;
+}
+.key-white .key-label { color: #888; }
+.key-black .key-label { color: #555; }
+.key-white.active .key-label,
+.key-black.active .key-label { color: #000; font-weight: bold; }
+
+#keyboard-hint,
+#drum-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+#keyboard-hint kbd {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: var(--text);
+}
+
+/* ─── Pads ─────────────────────────────────────────────────────────────────── */
+/* Input, not a drum kit — visible for every instrument. Bank A lamps white,
+   bank B orange, the way the hardware tells the two apart. */
+#pad-section {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+}
+
+/* Four across, two rows — one bank laid out the way the hardware's pads are,
+   so a pad on screen and a pad under your finger are in the same place. */
+#drum-pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+#drum-pads[data-bank="A"] { --pad-color: var(--text-bright); }
+#drum-pads[data-bank="B"] { --pad-color: var(--tr909-accent); }
+
+#pad-banks { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; width: 44px; }
+.pad-bank {
+  width: 34px;
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.pad-bank-a[aria-pressed="true"] { border-color: var(--text-bright); color: var(--text-bright); box-shadow: 0 0 8px color-mix(in srgb, var(--text-bright) 40%, transparent); }
+.pad-bank-b[aria-pressed="true"] { border-color: var(--tr909-accent); color: var(--tr909-accent); box-shadow: 0 0 8px color-mix(in srgb, var(--tr909-accent) 40%, transparent); }
+
+.drum-pad {
+  min-height: 68px;
+  padding: 4px;
+  background: var(--bg3);
+  border: 2px solid var(--pad-color, var(--border));
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  user-select: none;
+  touch-action: none;
+  transition: background 0.06s, box-shadow 0.06s;
+}
+/* An instrument that cannot make this note reads unlit rather than pretending. */
+.drum-pad.pad-off {
+  border-color: var(--border);
+  opacity: 0.4;
+  cursor: default;
+}
+.drum-pad:hover {
+  background: var(--bg4);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pad-color) 40%, transparent);
+}
+.drum-pad.active {
+  background: var(--pad-color);
+  box-shadow: 0 0 18px var(--pad-color), 0 0 40px color-mix(in srgb, var(--pad-color) 50%, transparent);
+}
+
+.drum-pad-label {
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  line-height: 1.15;
+  text-align: center;
+  color: var(--pad-color);
+  transition: color 0.06s;
+}
+.drum-pad.pad-off .drum-pad-label { color: var(--text-dim); }
+.drum-pad.active .drum-pad-label { color: #000; }
+
+.drum-pad-key {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+.drum-pad.active .drum-pad-key { background: rgba(0,0,0,0.25); border-color: transparent; color: #000a; }
+
