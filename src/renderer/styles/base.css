@@ -16,8 +16,8 @@ html, body {
 #sidebar {
   width: 72px;
   flex-shrink: 0;
-  background: var(--bg2);
-  border-right: 1px solid var(--border);
+  background: var(--surface-panel);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -25,9 +25,12 @@ html, body {
   gap: 4px;
 }
 
+/* Flat instrument keys: active = fill + left bar + heavier label, not colour alone. */
 .tool-btn {
-  width: 56px;
-  padding: 10px 0;
+  position: relative;
+  width: 62px;
+  min-height: 48px;
+  padding: 6px 0;
   border: 1px solid transparent;
   background: none;
   color: var(--text-dim);
@@ -35,14 +38,30 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  font-family: var(--font-mono);
-  border-radius: 4px;
+  justify-content: center;
+  gap: 3px;
+  font-family: var(--font-ui);
+  border-radius: var(--radius-s);
 }
 .tool-btn:hover { background: var(--bg3); color: var(--text); }
-.tool-btn.active { background: var(--bg3); border-color: var(--accent); color: var(--accent); }
-.tool-icon { font-size: 20px; }
-.tool-label { font-size: 9px; letter-spacing: 1px; }
+.tool-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tool-btn.active, .tool-btn[aria-pressed="true"] {
+  background: var(--bg3);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: var(--shadow-pressed);
+}
+.tool-btn.active::before, .tool-btn[aria-pressed="true"]::before {
+  content: '';
+  position: absolute;
+  left: -1px; top: 6px; bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--state-on);
+}
+.tool-icon { font-size: 18px; line-height: 1; }
+.tool-label { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.tool-btn.active .tool-label, .tool-btn[aria-pressed="true"] .tool-label { color: var(--text); }
 
 #main {
   flex: 1;

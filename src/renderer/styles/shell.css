@@ -4,8 +4,8 @@
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
   flex-shrink: 0;
   /* Never wrap: anything that does not fit is already in the menu. */
   flex-wrap: nowrap;
@@ -19,13 +19,23 @@
 @media (max-width: 620px) {
   /* Narrow windows drop the readouts, not the controls. */
   #command-bar .cmd-label, #command-bar #master-vol-display { display: none; }
-  #command-bar #master-vol { width: 60px; }
-  #project-name { max-width: 90px; }
+  #command-bar #master-vol { width: 60px; flex-basis: 60px; }
+  #project-name { max-width: 90px; min-width: 24px; }
+  /* MIDI token collapses to its dot (full name stays in the aria-label). */
+  #command-bar #midi-token-name { display: none; }
+  #command-bar { gap: 4px; padding: 5px 6px; }
+  #command-bar #global-bpm { width: 50px; padding: 3px 2px; font-size: 12px; }
+}
+@media (max-width: 480px) {
+  /* Transport, tempo and the menu outrank the project name. */
+  #project-name, #project-dirty { display: none; }
+  #command-bar #master-vol { width: 44px; flex-basis: 44px; min-width: 30px; }
+  #command-bar .cmd-btn, #command-bar .rec-btn { padding: 0 6px; }
 }
 
 #project-name {
-  color: var(--accent);
-  font-size: 11px;
+  color: var(--text);
+  font: 600 13px/1 var(--font-ui);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -40,43 +50,50 @@
 }
 .cmd-spacer { flex: 1 1 auto; min-width: 8px; }
 .cmd-label {
+  font: 600 10px/1.2 var(--font-ui);
+  letter-spacing: 0.08em;
   color: var(--text-dim);
-  font-size: 9px;
-  letter-spacing: 1px;
   flex-shrink: 0;
 }
 
-.cmd-btn {
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1;
-  padding: 4px 9px;
-  cursor: pointer;
-  letter-spacing: 1px;
+/* Buttons compose .btn (base.css); only sizing lives here. */
+#command-bar .cmd-btn {
+  min-width: 28px;
+  padding: 0 9px;
   flex-shrink: 0;
-  transition: border-color 0.1s, color 0.1s;
+  font-size: 13px;
 }
-.cmd-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.cmd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.cmd-btn:disabled { opacity: 0.35; cursor: default; }
-.cmd-btn.stop:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
-.cmd-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#command-bar .cmd-btn.play[aria-pressed="false"] { color: var(--state-on); }
+#command-bar .cmd-btn.stop:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+#command-bar .rec-btn { padding: 0 9px; letter-spacing: 0; }
+#command-bar .rec-btn:hover:not(.recording) { background: var(--danger-subtle); }
+#command-bar .rec-btn.recording,
+#command-bar .rec-btn[aria-pressed="true"] {
+  color: var(--danger-on);
+  background: var(--state-record);
+  border-color: var(--state-record);
+}
+#command-bar .rec-timer {
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+#command-bar #master-vol { flex: 0 1 110px; min-width: 50px; }
+#command-bar .knob-val {
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 24px;
+  text-align: right;
+}
 
 .cmd-token {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: none;
-  border: 1px solid transparent;
   color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 1px;
-  padding: 3px 6px;
-  cursor: pointer;
+  font: 600 11px/1 var(--font-ui);
+  padding: 0 8px;
   max-width: 140px;
   overflow: hidden;
   white-space: nowrap;
@@ -87,22 +104,18 @@
   flex-shrink: 1;
   min-width: 0;
 }
-.cmd-token:hover { border-color: var(--border); color: var(--text); }
-.cmd-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cmd-dot { color: var(--accent3); font-size: 10px; }
 
+/* BPM is an .lcd readout that stays an editable input. */
 #global-bpm {
-  width: 52px;
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  color: var(--text);
+  width: 54px;
   padding: 3px 6px;
-  font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
-  border-radius: 3px;
   flex-shrink: 0;
 }
+#global-bpm:focus-visible,
+#master-vol:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* --- Overflow menu (native popover) ------------------------------------- */
 #app-menu {
@@ -113,10 +126,11 @@
   margin: 0;
   min-width: 230px;
   padding: 4px;
-  background: var(--bg3);
-  border: 1px solid var(--border);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
   color: var(--text);
-  box-shadow: 0 6px 20px #0009;
+  box-shadow: var(--shadow-raised);
 }
 #app-menu::backdrop { background: transparent; }
 .menu-item {
@@ -125,36 +139,38 @@
   justify-content: space-between;
   gap: 16px;
   width: 100%;
+  min-height: 28px;
   background: none;
   border: 0;
+  border-radius: var(--radius-s);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font: 13px var(--font-ui);
   text-align: left;
-  padding: 5px 8px;
+  padding: 4px 8px;
   cursor: pointer;
 }
-.menu-item:hover:not(:disabled) { background: var(--bg4); color: var(--accent); }
-.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.menu-item:disabled { opacity: 0.35; cursor: default; }
-.menu-shortcut { color: var(--text-dim); font-size: 9px; letter-spacing: 1px; }
-.menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+.menu-item:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.menu-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.menu-item:disabled { opacity: 0.45; cursor: default; }
+.menu-shortcut { color: var(--text-dim); font: 11px var(--font-mono); }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--border-subtle); }
 .menu-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 5px 8px;
-  font-size: 11px;
+  padding: 4px 8px;
+  font-size: 13px;
 }
 #theme-select {
-  background: var(--bg4);
+  background: var(--surface-control);
   border: 1px solid var(--border);
+  border-radius: var(--radius-s);
   color: var(--text);
-  font: inherit;
-  font-size: 10px;
+  font: 12px var(--font-ui);
   padding: 3px;
 }
+#theme-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* --- Toast: transient status, replaces the permanent rec-status span ----- */
 #toast {
@@ -164,16 +180,16 @@
   transform: translateX(-50%);
   z-index: 50;
   padding: 6px 14px;
-  background: var(--bg3);
-  border: 1px solid var(--accent);
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--state-on);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-raised);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 1px;
+  font: 13px var(--font-ui);
   max-width: 70vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 #toast[hidden] { display: none; }
-

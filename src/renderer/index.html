@@ -32,21 +32,21 @@
     <div id="command-bar" role="toolbar" aria-label="Commands">
       <span id="project-name" title="Project">No Project</span>
       <span id="project-dirty" class="dirty-mark" aria-label="Unsaved changes" hidden>*</span>
-      <button id="global-play-btn" class="cmd-btn play" data-cmd="play" aria-label="Play" aria-pressed="false">▶</button>
-      <button id="global-stop-btn" class="cmd-btn stop" data-cmd="stop" aria-label="Stop">■</button>
-      <button id="rec-btn" class="cmd-btn rec-btn" data-cmd="record" aria-label="Record master audio" aria-pressed="false">●</button>
+      <button id="global-play-btn" class="btn cmd-btn play btn--toggle" data-cmd="play" aria-label="Play" aria-pressed="false">▶</button>
+      <button id="global-stop-btn" class="btn cmd-btn stop" data-cmd="stop" aria-label="Stop">■</button>
+      <button id="rec-btn" class="btn cmd-btn rec-btn btn--danger" data-cmd="record" aria-label="Record master audio" aria-pressed="false">●</button>
       <span id="rec-timer" class="rec-timer" aria-live="off" hidden>00:00</span>
       <label class="cmd-label" for="global-bpm">BPM</label>
-      <input type="number" id="global-bpm" min="40" max="240" value="120" aria-label="Tempo in BPM">
+      <input type="number" id="global-bpm" class="lcd" min="40" max="240" value="120" aria-label="Tempo in BPM">
       <label class="cmd-label" for="master-vol">VOL</label>
       <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume">
       <span class="knob-val" id="master-vol-display" aria-hidden="true">80</span>
       <span class="cmd-spacer" aria-hidden="true"></span>
-      <button id="mixer-toggle-btn" class="cmd-btn" data-cmd="mixer" aria-pressed="false" aria-label="Mixer (Ctrl+Shift+M)" hidden>MIX</button>
-      <button id="midi-token" class="cmd-token" data-cmd="midi-token" aria-label="MIDI setup (Ctrl+M)" hidden>
+      <button id="mixer-toggle-btn" class="btn cmd-btn btn--toggle" data-cmd="mixer" aria-pressed="false" aria-label="Mixer (Ctrl+Shift+M)" hidden>MIX</button>
+      <button id="midi-token" class="btn cmd-token" data-cmd="midi-token" aria-label="MIDI setup (Ctrl+M)" hidden>
         <span class="cmd-dot" aria-hidden="true">●</span><span id="midi-token-name"></span>
       </button>
-      <button id="app-menu-btn" class="cmd-btn" popovertarget="app-menu" aria-label="More commands" aria-haspopup="menu">⋯</button>
+      <button id="app-menu-btn" class="btn cmd-btn" popovertarget="app-menu" aria-label="More commands" aria-haspopup="menu">⋯</button>
     </div>
     <div id="app-menu" popover role="menu" aria-label="Commands"></div>
     <div id="arrange-view">
@@ -132,12 +132,12 @@
   <dialog id="midi-setup-dialog" class="app-dialog" aria-labelledby="midi-setup-title">
     <div class="dlg-header">
       <span id="midi-setup-title" class="dlg-title">MIDI SETUP</span>
-      <button class="dlg-close-btn" data-close-dialog="midi-setup-dialog" aria-label="Close MIDI setup">✕</button>
+      <button class="btn dlg-close-btn" data-close-dialog="midi-setup-dialog" aria-label="Close MIDI setup">✕</button>
     </div>
     <div class="dlg-body">
       <div class="dlg-row">
         <span id="midi-status" class="midi-status" aria-live="polite" aria-atomic="true">MIDI OFF</span>
-        <button id="midi-enable-btn" class="midi-btn">ENABLE MIDI</button>
+        <button id="midi-enable-btn" class="btn midi-btn">ENABLE MIDI</button>
       </div>
       <div class="dlg-row">
         <label class="dlg-label" for="midi-device-select">INPUT</label>
@@ -146,7 +146,7 @@
         </select>
       </div>
       <div class="dlg-row">
-        <button id="midi-record-btn" class="midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ MIDI REC</button>
+        <button id="midi-record-btn" class="btn btn--danger midi-rec-btn" aria-label="Record MIDI" aria-pressed="false" style="display:none" disabled>⏺ MIDI REC</button>
       </div>
       <p class="dlg-note">Web MIDI needs a secure context (https or localhost). On the plain-http LAN address there is no MIDI at all.</p>
     </div>
@@ -155,15 +155,15 @@
   <dialog id="instrument-browser-dialog" class="app-dialog ib-dialog" aria-labelledby="ib-title">
     <div class="dlg-header">
       <span id="ib-title" class="dlg-title">INSTRUMENT</span>
-      <button id="ib-settings-btn" class="dlg-close-btn" aria-label="Instrument settings">⚙ SETTINGS</button>
-      <button class="dlg-close-btn" data-close-dialog="instrument-browser-dialog" aria-label="Close instrument browser">✕</button>
+      <button id="ib-settings-btn" class="btn dlg-close-btn" aria-label="Instrument settings">⚙ SETTINGS</button>
+      <button class="btn dlg-close-btn" data-close-dialog="instrument-browser-dialog" aria-label="Close instrument browser">✕</button>
     </div>
     <div class="dlg-body">
       <input type="search" id="ib-search" class="ib-search" placeholder="Search instruments" aria-label="Search instruments" autocomplete="off">
       <div id="ib-scopes" class="ib-scopes" role="group" aria-label="Scope"></div>
       <div class="dlg-row">
         <input type="text" id="ib-save-name" class="ib-search" placeholder="Name for the armed track's sound" aria-label="Preset name" autocomplete="off">
-        <button id="ib-save-btn" class="midi-btn" type="button">SAVE PATCH</button>
+        <button id="ib-save-btn" class="btn midi-btn" type="button">SAVE PATCH</button>
       </div>
       <div id="ib-list" class="ib-list" role="listbox" aria-label="Instruments" tabindex="-1"></div>
       <p class="dlg-note">↑↓ audition · Enter assign · Shift+Enter new track · Tab scope · Ctrl+D favourite · Esc cancel</p>
@@ -173,7 +173,7 @@
   <dialog id="instrument-settings-dialog" class="app-dialog" aria-labelledby="is-title">
     <div class="dlg-header">
       <span id="is-title" class="dlg-title">INSTRUMENT</span>
-      <button class="dlg-close-btn" data-close-dialog="instrument-settings-dialog" aria-label="Close instrument settings">✕</button>
+      <button class="btn dlg-close-btn" data-close-dialog="instrument-settings-dialog" aria-label="Close instrument settings">✕</button>
     </div>
     <div id="is-tabs" class="is-tabs" role="tablist" aria-label="Instrument settings"></div>
     <div id="is-body" class="dlg-body" role="tabpanel"></div>
@@ -182,17 +182,17 @@
   <dialog id="library-dialog" class="app-dialog" aria-labelledby="lib-title">
     <div class="dlg-header">
       <span id="lib-title" class="dlg-title">LIBRARY</span>
-      <button class="dlg-close-btn" data-close-dialog="library-dialog" aria-label="Close library">✕</button>
+      <button class="btn dlg-close-btn" data-close-dialog="library-dialog" aria-label="Close library">✕</button>
     </div>
     <div class="dlg-body">
       <div class="dlg-row">
-        <button id="lib-import-btn" class="midi-btn">+ IMPORT .SF2</button>
+        <button id="lib-import-btn" class="btn midi-btn">+ IMPORT .SF2</button>
       </div>
       <div id="lib-list" class="lib-list"></div>
       <div id="lib-browse" class="lib-browse" hidden>
         <div class="dlg-row">
-          <button id="lib-add-folder" class="midi-btn">+ FOLDER</button>
-          <button id="lib-rescan" class="midi-btn">RESCAN</button>
+          <button id="lib-add-folder" class="btn midi-btn">+ FOLDER</button>
+          <button id="lib-rescan" class="btn midi-btn">RESCAN</button>
         </div>
         <div id="lib-folders" class="lib-folders"></div>
         <input id="lib-search" class="lib-search" type="search" placeholder="Search presets…" aria-label="Search presets">
@@ -204,15 +204,15 @@
   <dialog id="assistant-dialog" class="app-dialog" aria-labelledby="asst-title">
     <div class="dlg-header">
       <span id="asst-title" class="dlg-title">ASSISTANT</span>
-      <button class="dlg-close-btn" data-close-dialog="assistant-dialog" aria-label="Close assistant">✕</button>
+      <button class="btn dlg-close-btn" data-close-dialog="assistant-dialog" aria-label="Close assistant">✕</button>
     </div>
     <div class="dlg-body">
       <textarea id="asst-prompt" class="asst-prompt" rows="3" placeholder="Describe the edit…" aria-label="Describe the edit"></textarea>
       <div class="dlg-row">
-        <button id="asst-propose-btn" class="midi-btn">PROPOSE</button>
-        <button id="asst-ask-btn" class="midi-btn">ASK</button>
-        <button id="asst-apply-btn" class="midi-btn" disabled>APPLY</button>
-        <button id="asst-discard-btn" class="midi-btn">DISCARD</button>
+        <button id="asst-propose-btn" class="btn midi-btn">PROPOSE</button>
+        <button id="asst-ask-btn" class="btn midi-btn">ASK</button>
+        <button id="asst-apply-btn" class="btn midi-btn" disabled>APPLY</button>
+        <button id="asst-discard-btn" class="btn midi-btn">DISCARD</button>
       </div>
       <div id="asst-status" class="asst-status" role="status" aria-live="polite"></div>
       <div id="asst-plan" class="asst-plan"></div>

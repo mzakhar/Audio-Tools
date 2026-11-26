@@ -1,15 +1,26 @@
 /* --- Assistant ---------------------------------------------------------- */
 .asst-prompt {
   width: 100%;
+  box-sizing: border-box;
   resize: vertical;
-  background: var(--bg2);
+  background: var(--surface-inset);
   border: 1px solid var(--border);
+  border-radius: var(--radius-s);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 6px;
+  font: 13px/1.4 var(--font-ui);
+  padding: 6px 8px;
 }
-.asst-status { font-size: 10px; color: var(--text-dim); white-space: pre-line; }
+.asst-prompt:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.asst-status { font-size: 12px; color: var(--text-dim); white-space: pre-line; overflow-wrap: anywhere; }
 .asst-plan { display: flex; flex-direction: column; gap: 4px; max-height: min(46vh, 360px); overflow-y: auto; }
-.asst-summary { margin: 0; font-size: 11px; color: var(--text); }
-.asst-action { font-size: 10px; color: var(--text-dim); padding: 4px 6px; background: var(--bg2); border: 1px solid var(--border); }
+.asst-summary { margin: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.asst-action {
+  font-size: 12px;
+  color: var(--text);
+  padding: 4px 8px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-s);
+  overflow-wrap: anywhere;
+}
