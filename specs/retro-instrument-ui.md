@@ -1,6 +1,6 @@
 # Playful retro instrument UI — design and implementation plan
 
-Status: phase 0 not started. Applies to the whole renderer. `specs/ui-shell.md`,
+Status: phases 0–1 done, phase 2 in progress (umbrella PR #50). Applies to the whole renderer. `specs/ui-shell.md`,
 `specs/instrument-browser.md` and existing accessibility behaviour stay
 authoritative for workflows; this plan changes appearance, not structure.
 Companion: `specs/fm1-emulator.md` (consumes this visual system; does not gate it).
@@ -47,23 +47,25 @@ Facts the plan is built on. Re-verify pointers before each phase; line numbers d
    values, clocks, BPM and canvas labels only. Bundle a face only if phase 0
    mockups prove system fonts fail the look; CSP already permits same-origin fonts.
 3. **Canvases read tokens.** One pure-ish helper `js/ui/theme-colors.js`:
-   `readThemeColors(el) → { gridMajor, gridMinor, clip, playhead, … }` via
-   `getComputedStyle`, called at paint setup and on `themechange`. Every canvas
+   `readThemeColors(names, style) → { 'canvas-bg': …, … }` over
+   `getComputedStyle`, read per paint or refreshed in `onThemeChange`. Every canvas
    listed above repaints on theme change. This also fixes today's light/rainbow
    bug and is a prerequisite for every DAW surface.
 4. **Split `style.css` by surface before restyling.** `styles/tokens.css`,
-   `base.css`, `shell.css`, `synth.css`, `arrange.css`, `rack.css`, `tr909.css`,
-   `dialogs.css`, `piano-roll.css`, imported in today's cascade order. Pure move,
-   zero visual change. It exists so restyle agents own disjoint files and do not
+   `base.css`, `rack.css`, `synth.css`, `tr909.css`, `sequencer.css`, `util.css`,
+   `shell.css`, `arrange.css`, `dialogs.css`, `piano-roll.css`, `assistant.css`,
+   `@import`ed from `style.css` in the old cascade order. Pure move, verified
+   pixel-identical on all 63 baseline shots. It exists so restyle agents own disjoint files and do not
    collide.
 5. **Shared primitives are CSS, not new JS.** Add `.btn`, `.btn--toggle`,
    `.btn--danger`, `.panel`, `.lcd` (dark display treatment), `.knob` styling.
    Existing classes adopt them by composition. Merging the two knob
    implementations is **out of scope**; both get the same look via tokens.
-6. **Colour roles, not colours.** Tokens are named by role:
-   `--surface-*`, `--ink-*`, `--line-*`, `--focus`, `--state-record`,
-   `--state-danger`, `--state-on`, `--group-1..4` (orange/blue/green/yellow
-   control groups), `--track-1..n` (track identity), `--signal-audio/cv/gate`.
+6. **Colour roles, not colours.** Existing token names (`--bg*`, `--text*`,
+   `--surface-*`, `--border*`, 463 uses) are already roles and stay; new ones:
+   `--focus`, `--state-record`, `--state-on`, `--group-1..4`
+   (orange/blue/green/yellow control groups), `--track-1..8`, `--lcd-*`,
+   `--canvas-*`, `--radius-s/m`, `--shadow-raised/pressed`, `--font-ui`.
    Record/error/destructive stay red **plus** text or icon. No component may
    introduce a colour literal; a test enforces it (see Verify).
 7. **Add spacing/radius/type tokens** (`--space-1..6`, `--radius-s/m`,
@@ -71,9 +73,13 @@ Facts the plan is built on. Re-verify pointers before each phase; line numbers d
 8. **FM-1 device UI is not a phase here.** Its dialog uses these tokens and
    primitives when `fm1-emulator.md` phase 2 builds it. The F5 Pads view does the
    same when built.
-9. **Visual baseline without new deps.** Screenshots via Chrome DevTools MCP
-   against `npm run dev` renderer at 1440×900, 390×844 and 200 % zoom, each view,
-   each theme, saved to `specs/ui-baseline/<phase>/`. No Playwright.
+9. **Visual baseline without new deps.** `scripts/ui-snap.ps1` drives the
+   installed Electron offscreen against a served `out/renderer` build:
+   7 shots × 3 themes × (1440×900, 390×844, 200 % zoom) into
+   `specs/ui-baseline/<phase>/`. Only `0/` and `final/` are committed. No Playwright.
+10. **No separate mockup page.** Phase 0 direction is the token set itself,
+   reviewed on real screenshots after phase 1 — cheaper and more honest than a
+   static mockup.
 
 ## Visual direction
 
@@ -106,13 +112,14 @@ textures or deep shadows. Uppercase micro-labels are accents, never the only lab
 
 ## Phases
 
-Each phase is its own PR to `main`, deployable alone. Phases 2a–2e run as
+All phases land on one branch / umbrella PR (#50); each surface is a separate
+commit merged from its agent worktree. Phases 2a–2e run as
 parallel agents because phase 1 gave them disjoint CSS files.
 
 | Phase | State | Deliverable | Exit gate |
 |---|---|---|---|
-| 0 — Baseline + direction | planned | Baseline screenshots (decision 9). Token table with real values for light and dark, plus a static mockup page (`specs/ui-mockups/index.html`, uses the token CSS directly) showing shell, synth, arrange and 909 at realistic density. | **User signs off** on direction. Contrast test passes for the proposed tokens. |
-| 1 — Foundations | planned | Split CSS (decision 4); `theme-colors.js` + every canvas on tokens and repainting on `themechange`; new tokens and values from phase 0; system fonts; shared primitives; global reduced-motion block; no-literal and contrast tests. | Tests + build green. Screenshot diff: dark visually equivalent except fonts/token values; light/rainbow canvases now follow theme. |
+| 0 — Baseline + direction | done | `specs/ui-baseline/0/` (63 shots); token values in `styles/tokens.css`. | Contrast test passes all three themes. |
+| 1 — Foundations | done (canvases move with their surface in 2d/2e) | Split CSS (decision 4); `theme-colors.js` + every canvas on tokens and repainting on `themechange`; new tokens and values from phase 0; system fonts; shared primitives; global reduced-motion block; no-literal and contrast tests. | Tests + build green. Screenshot diff: dark visually equivalent except fonts/token values; light/rainbow canvases now follow theme. |
 | 2a — Shell + dialogs | planned | `shell.css`, `dialogs.css` | per-surface checklist below |
 | 2b — Synth (knobs, keys, pads, sequencer) | planned | `synth.css`, knob panel markup only if needed for group markers | " |
 | 2c — 909 | planned | `tr909.css`, `tr909-view.js` colours | " |
