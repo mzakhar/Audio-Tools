@@ -170,6 +170,21 @@ test missed the live bank. Each of the 8 profiles holds 128 pad records (8 banks
 the blue shown while the bank button is held. Next test: write records 32–47.
 All writes so far were restored and verified, and no save was sent.
 
+**Colour control proven (2026-11-26).** SHIFT + Pad 1–8 selects the preset
+(per the Sinco manual): 1 = Performance, 2 = DAW, 3–8 = user presets. In a user
+preset (SHIFT+Pad 3), idle pads show their stored record colour and send that
+record's notes: bank 1 pad 1 = note 20 = record 16, stored yellow. Writing
+`00 ff 00` to record 16 (profiles 0 and 1) turned pad 1 green **immediately**,
+with no save. Region 4 tracks the mode: bytes 6/10 read `02/06` in Performance
+and `01/01` in user preset 1.
+
+Plan consequence: Pads view asks the user to select a user preset (SHIFT+Pad
+3), confirms it by reading region 4, then writes each pad's kit colour on kit
+load (16 writes, working memory only, never save). This needs `sysex: true` in
+`requestMIDIAccess`, which is a reviewed change. Still open: whether host
+note-on can flash pads in user mode, which profile byte 10 selects, and the
+note map to expect in user mode (read it from the records, never assume).
+
 Target layout:
 
 | Control | Default role | Shift / hold role |
