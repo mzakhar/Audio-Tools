@@ -3,7 +3,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 13px;
   overflow-x: hidden;
 }
@@ -65,3 +65,45 @@ html, body {
   min-height: 0;
 }
 
+
+/* ─── Shared primitives (specs/retro-instrument-ui.md decision 5) ───────────
+   Compose these into existing markup; surface files keep their own selectors
+   and adopt the look by sharing these declarations or adding the class. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 28px; padding: 0 10px;
+  font: 600 12px/1 var(--font-ui); letter-spacing: 0.02em;
+  color: var(--text); background: var(--surface-control);
+  border: 1px solid var(--border); border-radius: var(--radius-s);
+  box-shadow: var(--shadow-raised); cursor: pointer;
+}
+.btn:hover { border-color: var(--border-strong); }
+.btn:active, .btn[aria-pressed="true"], .btn.active { box-shadow: var(--shadow-pressed); background: var(--bg3); }
+.btn--toggle[aria-pressed="true"], .btn--toggle.active { color: var(--text-inverse); background: var(--state-on); border-color: var(--state-on); }
+.btn--danger { color: var(--danger); border-color: var(--danger); }
+.btn--danger[aria-pressed="true"], .btn--danger.active { color: var(--danger-on); background: var(--state-record); border-color: var(--state-record); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: default; box-shadow: none; }
+.btn:focus-visible, .panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.panel {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-m);
+}
+
+/* The one dark display treatment — identical in every theme. */
+.lcd {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--lcd-ink); background: var(--lcd-bg);
+  border: 1px solid var(--lcd-bg); border-radius: var(--radius-s);
+  padding: 2px 6px;
+}
+.lcd .dim, .lcd-dim { color: var(--lcd-dim); }
+
+/* Micro-label: an accent over a real label, never the only label. */
+.micro-label { font: 600 10px/1.2 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+
+/* Control-group marker: a coloured tick tying a control to its readout. */
+[data-group="1"] { --group: var(--group-1); }
+[data-group="2"] { --group: var(--group-2); }
+[data-group="3"] { --group: var(--group-3); }
+[data-group="4"] { --group: var(--group-4); }

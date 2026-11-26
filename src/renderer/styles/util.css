@@ -5,5 +5,5 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 /* ─── Utility ──────────────────────────────────────────────────────────────── */
-button { font-family: var(--font-mono); }
+button { font-family: inherit; }
 

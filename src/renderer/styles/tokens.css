@@ -1,84 +1,181 @@
 /* ─── Reset & Base ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Theme tokens. The base :root is the default warm "instrument" light theme;
+   [data-theme="light"] is the same theme and needs no block. Every theme block
+   defines every colour token — tests/theme-tokens.test.js enforces it.
+   Components never use colour literals; add a token here instead. */
 :root {
-  /* Native widgets follow the active theme. */
-  color-scheme: dark;
+  color-scheme: light;
   accent-color: var(--accent);
 
-  --bg:        #0d0d0d;
-  --bg2:       #141414;
-  --bg3:       #1c1c1c;
-  --bg4:       #242424;
-  --border:    #2a2a2a;
-  --accent:    #00e5ff;
-  --accent2:   #ff00aa;
-  --accent3:   #39ff14;
-  --text:      #c8c8c8;
-  --text-dim:  #555;
-  --text-bright: #eee;
-  --white-key: #e8e8e8;
-  --black-key: #111;
-  --key-active: #00e5ff;
-  --glow:      0 0 8px #00e5ff, 0 0 16px #00e5ff44;
-  --surface-canvas: #080808;
-  --surface-panel: #30343a;
-  --surface-control: #1b1e22;
-  --surface-inset: #0d1114;
-  --border-strong: #59616c;
-  --border-subtle: #3d444c;
-  --text-rack-label: #b9c4d0;
-  --text-rack-muted: #97a3b0;
-  --text-inverse: #050505;
-  --rack-rail: #191919;
-  --rack-util: #1d1d1d;
-  --rack-knob: #4c545e;
-  --danger: #ff4444;
-  --danger-subtle: #ff44441a;
-  --danger-on: #000;
-  --tr909-accent: #f05a28;
-  --signal-audio: #00e5ff;
-  --signal-cv: #ff00aa;
-  --signal-gate: #39ff14;
-  --font-mono: 'Courier New', Courier, monospace;
+  /* Surfaces and ink */
+  --bg:        #ebe7de;
+  --bg2:       #f7f4ee;
+  --bg3:       #dfdad0;
+  --bg4:       #d1cbbf;
+  --border:    #b8b1a3;
+  --accent:    #1f5fbf;
+  --accent2:   #b84708;
+  --accent3:   #2b7a3b;
+  --text:      #24221e;
+  --text-dim:  #686256;
+  --text-bright: #0f0e0c;
+  --text-inverse: #fbf8f0;
+  --white-key: #fdfcf8;
+  --black-key: #2a2722;
+  --key-active: #ee6a1f;
+  --glow:      0 0 0 2px #ee6a1f66;
+  --surface-canvas: #e3ded3;
+  --surface-panel: #f0ece4;
+  --surface-control: #faf8f3;
+  --surface-inset: #ddd7cb;
+  --border-strong: #8c8577;
+  --border-subtle: #c9c2b4;
+  --focus: #1f5fbf;
+
+  /* Rack */
+  --text-rack-label: #2f2c27;
+  --text-rack-muted: #5c574d;
+  --rack-rail: #cfc8ba;
+  --rack-util: #e4dfd5;
+  --rack-knob: #6e685c;
+  --signal-audio: #1f6fd6;
+  --signal-cv: #c2367a;
+  --signal-gate: #2f8f45;
+
+  /* State. Red always travels with a label or icon, never alone. */
+  --danger: #c8322a;
+  --danger-subtle: #c8322a1a;
+  --danger-on: #ffffff;
+  --state-record: #d6332a;
+  --state-on: #ee6a1f;
+  --tr909-accent: #d4520b;
+
+  /* Control groups (OP-style colour-coded encoders) */
+  --group-1: #ee6a1f;
+  --group-2: #2f6fdb;
+  --group-3: #2f9e55;
+  --group-4: #f2b705;
+
+  /* Track identity */
+  --track-1: #ee6a1f;
+  --track-2: #2f6fdb;
+  --track-3: #2f9e55;
+  --track-4: #e0a800;
+  --track-5: #c2367a;
+  --track-6: #6c5ce7;
+  --track-7: #0f9aa0;
+  --track-8: #8a6d3b;
+
+  /* Dark display panel (.lcd): the same in every theme on purpose */
+  --lcd-bg: #1d1e20;
+  --lcd-ink: #f3efe4;
+  --lcd-dim: #9b968b;
+  --lcd-accent: #ff8f45;
+
+  /* Canvas surfaces (read from JS via js/ui/theme-colors.js) */
+  --canvas-bg: #efebe3;
+  --canvas-ruler-bg: #dcd6ca;
+  --canvas-ruler-ink: #4a463e;
+  --canvas-grid-bar: #b3ab9b;
+  --canvas-grid-beat: #d2cbbd;
+  --canvas-grid-sub: #e2ddd3;
+  --canvas-playhead: #d4520b;
+  --canvas-selection: #2f6fdb33;
+  --canvas-clip: #2f6fdb;
+  --canvas-clip-ink: #ffffff;
+  --canvas-note: #2f6fdb;
+  --canvas-note-selected: #ee6a1f;
+  --canvas-meter-ok: #2f9e55;
+  --canvas-meter-hot: #e0a800;
+  --canvas-meter-clip: #d6332a;
+
+  /* Shape and type */
+  --radius-s: 3px;
+  --radius-m: 6px;
+  --shadow-raised: 0 1px 0 #00000014, 0 1px 2px #0000001f;
+  --shadow-pressed: inset 0 1px 2px #00000033;
+  --font-ui: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #edf0f4;
-  --bg2: #ffffff;
-  --bg3: #e2e7ed;
-  --bg4: #d5dce5;
-  --border: #aab5c2;
-  --accent: #006f9e;
-  --accent2: #b00067;
-  --accent3: #167a08;
-  --text: #17212b;
-  --text-dim: #53616f;
-  --text-bright: #081018;
-  --white-key: #ffffff;
-  --black-key: #202932;
-  --key-active: #00a6db;
-  --glow: 0 0 8px #00a6db88;
-  --surface-canvas: #c7d0da;
-  --surface-panel: #d9e0e8;
-  --surface-control: #eef2f6;
-  --surface-inset: #c2ccd7;
-  --border-strong: #748394;
-  --border-subtle: #9ba8b6;
-  --text-rack-label: #283746;
-  --text-rack-muted: #405161;
-  --text-inverse: #ffffff;
-  --rack-rail: #b6c0cb;
-  --rack-util: #cbd4dd;
-  --rack-knob: #8795a4;
-  --danger: #c62d2d;
-  --danger-subtle: #c62d2d1a;
-  --danger-on: #fff;
-  --tr909-accent: #bd4a1f;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:        #161719;
+  --bg2:       #1e1f22;
+  --bg3:       #26282b;
+  --bg4:       #2f3135;
+  --border:    #3b3d42;
+  --accent:    #6aa5ff;
+  --accent2:   #ff8a3d;
+  --accent3:   #5cc878;
+  --text:      #e4e0d6;
+  --text-dim:  #9c978c;
+  --text-bright: #fbf8f0;
+  --text-inverse: #121214;
+  --white-key: #ece8de;
+  --black-key: #121214;
+  --key-active: #ff7a2e;
+  --glow:      0 0 0 2px #ff7a2e66;
+  --surface-canvas: #111214;
+  --surface-panel: #2a2c30;
+  --surface-control: #1c1d20;
+  --surface-inset: #121315;
+  --border-strong: #767982;
+  --border-subtle: #3f4247;
+  --focus: #6aa5ff;
+  --text-rack-label: #d9d4c8;
+  --text-rack-muted: #a7a196;
+  --rack-rail: #18191b;
+  --rack-util: #1c1d20;
+  --rack-knob: #55585f;
+  --signal-audio: #4f9dff;
+  --signal-cv: #ff5fa8;
+  --signal-gate: #5cd67a;
+  --danger: #ff5a4f;
+  --danger-subtle: #ff5a4f1f;
+  --danger-on: #000000;
+  --state-record: #ff4b3e;
+  --state-on: #ff7a2e;
+  --tr909-accent: #ff7a2e;
+  --group-1: #ff7a2e;
+  --group-2: #4f8fff;
+  --group-3: #43c06a;
+  --group-4: #ffcf33;
+  --track-1: #ff7a2e;
+  --track-2: #4f8fff;
+  --track-3: #43c06a;
+  --track-4: #ffcf33;
+  --track-5: #ff5fa8;
+  --track-6: #9d8cff;
+  --track-7: #2ec4c9;
+  --track-8: #c9a46a;
+  --lcd-bg: #0c0d0e;
+  --lcd-ink: #f3efe4;
+  --lcd-dim: #8d897f;
+  --lcd-accent: #ff8f45;
+  --canvas-bg: #121315;
+  --canvas-ruler-bg: #1b1c1f;
+  --canvas-ruler-ink: #a7a196;
+  --canvas-grid-bar: #45484f;
+  --canvas-grid-beat: #2c2e33;
+  --canvas-grid-sub: #1f2124;
+  --canvas-playhead: #ff7a2e;
+  --canvas-selection: #4f8fff33;
+  --canvas-clip: #2f68cc;
+  --canvas-clip-ink: #ffffff;
+  --canvas-note: #4f8fff;
+  --canvas-note-selected: #ff7a2e;
+  --canvas-meter-ok: #43c06a;
+  --canvas-meter-hot: #ffcf33;
+  --canvas-meter-clip: #ff4b3e;
+  --shadow-raised: 0 1px 0 #ffffff0a, 0 1px 2px #00000066;
+  --shadow-pressed: inset 0 1px 3px #00000080;
 }
 
 :root[data-theme="rainbow"] {
+  color-scheme: dark;
   --bg: #160b2e;
   --bg2: #211044;
   --bg3: #30165d;
@@ -90,6 +187,7 @@
   --text: #efe8ff;
   --text-dim: #b69bd7;
   --text-bright: #ffffff;
+  --text-inverse: #160b2e;
   --white-key: #fbf7ff;
   --black-key: #1d0a3a;
   --key-active: #ffdd33;
@@ -100,17 +198,61 @@
   --surface-inset: #19082f;
   --border-strong: #af7ee8;
   --border-subtle: #8152bb;
+  --focus: #ffdd33;
   --text-rack-label: #f0dbff;
   --text-rack-muted: #d0b5ee;
-  --text-inverse: #160b2e;
   --rack-rail: #240e48;
   --rack-util: #32145f;
   --rack-knob: #a05bdd;
-  --danger: #ff5a70;
-  --danger-subtle: #ff5a701a;
-  --danger-on: #1a0610;
-  --tr909-accent: #ff9d3d;
   --signal-audio: #00e5ff;
   --signal-cv: #ff43d0;
   --signal-gate: #b8ff36;
+  --danger: #ff5a70;
+  --danger-subtle: #ff5a701a;
+  --danger-on: #1a0610;
+  --state-record: #ff5a70;
+  --state-on: #ffdd33;
+  --tr909-accent: #ff9d3d;
+  --group-1: #ff9d3d;
+  --group-2: #00e5ff;
+  --group-3: #b8ff36;
+  --group-4: #ffdd33;
+  --track-1: #ff5a70;
+  --track-2: #ff9d3d;
+  --track-3: #ffdd33;
+  --track-4: #b8ff36;
+  --track-5: #00e5ff;
+  --track-6: #6c8cff;
+  --track-7: #b26bff;
+  --track-8: #ff43d0;
+  --lcd-bg: #0b0418;
+  --lcd-ink: #f6efff;
+  --lcd-dim: #a88cc9;
+  --lcd-accent: #ffdd33;
+  --canvas-bg: #10051f;
+  --canvas-ruler-bg: #1b0b36;
+  --canvas-ruler-ink: #d0b5ee;
+  --canvas-grid-bar: #6c3da1;
+  --canvas-grid-beat: #3b1a68;
+  --canvas-grid-sub: #24104a;
+  --canvas-playhead: #ffdd33;
+  --canvas-selection: #00e5ff33;
+  --canvas-clip: #8a3fe0;
+  --canvas-clip-ink: #ffffff;
+  --canvas-note: #00e5ff;
+  --canvas-note-selected: #ffdd33;
+  --canvas-meter-ok: #b8ff36;
+  --canvas-meter-hot: #ffdd33;
+  --canvas-meter-clip: #ff5a70;
+  --shadow-raised: 0 1px 0 #ffffff0f, 0 1px 3px #00000080;
+  --shadow-pressed: inset 0 1px 3px #00000099;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
