@@ -90,6 +90,9 @@ const ALLOW = {
   'styles/base.css': 0, 'styles/rack.css': 0, 'styles/synth.css': 0, 'styles/tr909.css': 0,
   'styles/sequencer.css': 0, 'styles/util.css': 0, 'styles/shell.css': 0, 'styles/arrange.css': 0,
   'styles/dialogs.css': 0, 'styles/piano-roll.css': 0, 'styles/assistant.css': 0,
+  'js/components/arrangement-view.js': 0, 'js/components/piano-roll.js': 0,
+  'js/components/rack-cables.js': 0, 'js/rack/modules/meter.js': 0, 'js/rack/modules/scope.js': 0,
+  'js/components/tr909-view.js': 0, 'js/components/mixer-strip.js': 0, 'js/components/knob.js': 0,
 }
 
 describe('no colour literals outside tokens', () => {
