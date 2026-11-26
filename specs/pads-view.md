@@ -72,8 +72,8 @@ microphone sampling (AGENTS.md: `audio-in` never requests the mic); song mode
 | Lessons scoring windows | After latency calibration: ≤25 ms perfect, ≤50 good, ≤90 ok, else miss. Always show signed early/late bias | Rhythm-game windows (Rock Band 100 ms slop); bias teaches more than a score |
 | Schema | Bump `CURRENT_VERSION` 6 → 7, add `state.kits{}`, migration seeds one default kit | `store/ProjectStore.js:16` |
 
-**DECIDE** before phase 2: confirm recordings go to the armed track's clip
-(recommended above) rather than a separate pad-pattern store like the 909's.
+**Decided 2026-11-26 (user):** recordings go to the armed track's MIDI clip,
+not a separate pad-pattern store.
 
 ## Screen
 
@@ -290,7 +290,7 @@ hit.
 | Phase | Ships | Verify |
 |---|---|---|
 | **0 Capture** (needs the user, ~10 min) | `pads/profiles/smc-pad.js` and a hardware table appended here: per-port notes/CCs/buttons, encoder mode, aftertouch yes/no, LED protocol yes/no, velocity floor, double-trigger rate | capture log committed under `specs/hardware/` |
-| **1 Feel fixes** (no new view) | hot-path cache + arm-time prewarm; `kit` instrument with a default 16-pad 909 kit; choke groups; velocity → timbre; all ports of the device | new tests green; manual: each of 16 pads a distinct sound, open hat chokes |
+| **1 Feel fixes** (no new view) — **built 2026-11-26, awaiting hardware check** | hot-path cache + arm-time prewarm; `kit` instrument with a default 16-pad 909 kit; choke groups; velocity → timbre; all ports of the device | new tests green; manual: each of 16 pads a distinct sound, open hat chokes |
 | **2 Pads view core** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
 | **3 Performance** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
 | **4 Lessons** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
@@ -298,14 +298,23 @@ hit.
 
 Phase 1 is shippable alone and should fix most of today's complaint.
 
+Phase 1 notes: the kit is `{ type: 'kit', kitId: 'default-909' }` (code data in
+`pads/kit.js`, GM 36–51 distinct, no schema change). The velocity curve is applied in
+`MidiController` per input (SMC-PAD: `inMax` 110, linear), so recordings store what was
+heard. Mirror ports (`MIDIIN2 (SMC-PAD)`, `MIDIIN3 (SMC-PAD)`) collapse into one device
+entry. Known leak: `tr909-kit.js` keeps the open hat in a module global, so a kit closed
+hat can also choke the 909 view's open hat.
+
 ## Constraints that still apply
 
 - Web MIDI is secure-context only: on the LAN http route the Pads view works
   with mouse, touch and keyboard twins, not the controller.
 - No worklet or secure-context API on the pad audio path.
 - CSP `connect-src 'none'`: lessons and kits ship in the bundle.
-- `requestMIDIAccess` stays `sysex: false` unless phase 0 shows LEDs need
-  SysEx; that is a reviewed change.
+- `requestMIDIAccess` moves to `sysex: true`, **approved by the user
+  2026-11-26** for SMC-PAD colour writes and region-4 reads. It lands with the
+  LED work, not phase 1, and the PR must call it out. Never send the save
+  command.
 
 ## Open questions
 

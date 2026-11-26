@@ -9,6 +9,8 @@ import { beatsToSeconds } from '../utils/timeline-math.js'
 import { audioBufferToWAV } from '../utils/wav-encoder.js'
 import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 import { paletteDefaults } from '../palettes.js'
+import { kitFor } from '../pads/kit.js'
+import { kitInstrument } from '../pads/kit-voices.js'
 
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
@@ -48,6 +50,12 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, packF
     const handle = rackHandles.find(entry => entry.rack.id === instrument.rackId)
     const moduleId = handle && [...handle.mods].find(([, entry]) => entry.def?.type === 'midi-in')?.[0]
     return moduleId ? rackInstrument(handle, moduleId) : null
+  }
+  if (instrument.type === 'kit') {
+    const kit = kitFor(instrument.kitId)
+    if (!kit) return null
+    const inst = kitInstrument(kit, { ctx, output })
+    return (note, time) => inst.hit(note.pitch, note.velocity ?? 0.8, time)
   }
   if (instrument.type !== 'palette') return null
   const paletteKey = instrument.paletteKey || track.paletteKey || 'classic'

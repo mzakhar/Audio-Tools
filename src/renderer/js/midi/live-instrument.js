@@ -9,6 +9,8 @@ import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 import { PALETTE_DRUM_NOTES } from '../instruments/pad-map.js'
 import { velocityGain } from '../utils/velocity.js'
 import { paletteDefaults } from '../palettes.js'
+import { kitFor } from '../pads/kit.js'
+import { kitInstrument } from '../pads/kit-voices.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
 
@@ -19,6 +21,11 @@ const isDrumPalette = palette => palette?.type === 'drum' && !!palette.createDru
 export function paletteAcceptsNote(palette, note) {
   if (!palette) return false
   return isDrumPalette(palette) ? PALETTE_DRUM_NOTES[note] !== undefined : true
+}
+
+/** Does the kit have a sound for this note? Drives the unlit pad. */
+export function kitAcceptsNote(instrument, note) {
+  return !!kitFor(instrument?.kitId)?.slots[note]
 }
 
 export function liveInstrumentFor(track, deps) {
@@ -72,6 +79,7 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
     }
 
     return {
+      prewarm: ensureMounted,
       noteOn(pitch, velocity, time = ctx.currentTime) {
         if (held.has(pitch)) return
         ensureMounted()
@@ -105,6 +113,11 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
         standingMod = null
       }
     }
+  }
+
+  if (instrument.type === 'kit') {
+    const kit = kitFor(instrument.kitId)
+    return kit ? kitInstrument(kit, { ctx, output }) : null
   }
 
   // Pack playback is added with the pack sample store. Never substitute a

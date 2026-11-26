@@ -3,6 +3,7 @@
 // pinning down "program 89 of bank 0:0", which a fuzzy search cannot say.
 
 import Palettes from '../palettes.js'
+import { kitFor, DEFAULT_KIT_ID } from '../pads/kit.js'
 import { openDialog } from '../ui/dialog.js'
 import { SetTrackInstrument, SetTrackMidiChannel } from '../store/ProjectStore.js'
 
@@ -120,6 +121,7 @@ export class InstrumentSettings {
     option(source, 'palette', 'Internal Synth')
     option(source, 'pack', 'Instrument Pack')
     option(source, 'rack', 'Rack')
+    option(source, 'kit', 'Drum Kit')
     source.value = instrument.type || 'palette'
     source.onchange = () => {
       const keep = { ...(instrument.bendRange != null ? { bendRange: instrument.bendRange } : {}), ...(instrument.modDest ? { modDest: instrument.modDest } : {}) }
@@ -129,12 +131,14 @@ export class InstrumentSettings {
         if (pack && patch) this.choosePatch(pack, patch, 'pinned', keep)
         else this.render()
       }
+      if (source.value === 'kit') this.set({ type: 'kit', kitId: DEFAULT_KIT_ID, ...keep })
       if (source.value === 'rack' && racks[0]) this.set({ type: 'rack', rackId: racks[0].id, ...keep })
     }
     this.bodyEl.append(field('Source', source))
 
     if (instrument.type === 'pack') this.renderPack(instrument, packs)
     else if (instrument.type === 'rack') this.renderRack(instrument, racks)
+    else if (instrument.type === 'kit') this.renderKit(instrument)
     else this.renderInternal(instrument)
   }
 
@@ -144,6 +148,14 @@ export class InstrumentSettings {
     select.value = instrument.paletteKey || 'classic'
     select.onchange = () => this.set({ ...instrument, paletteKey: select.value })
     this.bodyEl.append(field('Engine', select))
+  }
+
+  renderKit(instrument) {
+    const select = document.createElement('select')
+    option(select, DEFAULT_KIT_ID, kitFor(DEFAULT_KIT_ID).name)
+    select.value = kitFor(instrument.kitId) ? instrument.kitId : DEFAULT_KIT_ID
+    select.onchange = () => this.set({ ...instrument, kitId: select.value })
+    this.bodyEl.append(field('Kit', select))
   }
 
   renderRack(instrument, racks) {

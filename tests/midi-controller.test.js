@@ -123,3 +123,21 @@ describe('isGranted', () => {
     expect(MidiController.isGranted()).toBe(true)
   })
 })
+
+describe('device velocity curve', () => {
+  const noteOn = velocity => ({ data: new Uint8Array([0x99, 38, velocity]), timeStamp: 1 })
+
+  it('stretches an SMC-PAD hit to the full range and leaves other devices alone', async () => {
+    setupMockMidi([{ id: 'p', name: 'SMC-PAD' }, { id: 'k', name: 'Keystation' }])
+    await MidiController.requestAccess()
+    const seen = []
+    const listener = e => seen.push(e.detail.velocity)
+    document.addEventListener('midi-event', listener)
+    MidiController.selectInput('p')
+    MidiController._input.onmidimessage(noteOn(110))
+    MidiController.selectInput('k')
+    MidiController._input.onmidimessage(noteOn(110))
+    document.removeEventListener('midi-event', listener)
+    expect(seen).toEqual([127, 110])
+  })
+})
