@@ -17,7 +17,21 @@
 // create() runs the ballistics on the shared poll; panel() only paints what
 // uiMeters() hands it, the same split algo.js uses.
 
+import { readThemeColors, themeStyle, onThemeChange } from '../../ui/theme-colors.js'
 import { levels, bipolar, dbfs, dbToFraction, approach, peakHold } from '../viz.js'
+
+// Theme colours, read lazily at paint time (never in create()) and cached until
+// the theme changes. Named fallbacks only apply with no document (tests).
+let colors = null
+function palette() {
+  if (colors) return colors
+  if (typeof document === 'undefined') return { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray', 'canvas-meter-ok': 'green', 'canvas-meter-hot': 'gold', 'canvas-meter-clip': 'red' }
+  colors = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim', 'canvas-meter-ok', 'canvas-meter-hot', 'canvas-meter-clip'], themeStyle())
+  return colors
+}
+if (typeof window !== 'undefined') onThemeChange(() => { colors = null })
+const tint = (c, pct) => `color-mix(in srgb, ${c} ${pct}%, transparent)`
+
 
 const FLOOR = -60      // dBFS
 const ATTACK = 0.01    // s
@@ -111,7 +125,7 @@ export default {
       if (w < 4 || h < 4) return
       g.clearRect(0, 0, w, h)
       const cv = params().mode === 'cv'
-      if (cv) { g.fillStyle = '#ffffff1a'; g.fillRect(0, Math.round(h / 2), w, 1) }
+      if (cv) { g.fillStyle = tint(palette()['lcd-dim'], 45); g.fillRect(0, Math.round(h / 2), w, 1) }
       else ladder(g, w, h)
       const slot = w / meters.length
       const bw = Math.max(3, slot - 4)
@@ -146,7 +160,7 @@ function fit(canvas, g, fallbackW, fallbackH) {
 }
 
 function ladder(g, w, h) {
-  g.fillStyle = '#ffffff14'
+  g.fillStyle = tint(palette()['lcd-dim'], 35)
   for (const db of [0, -6, -12, -24, -48]) {
     g.fillRect(0, Math.round(h - dbToFraction(db, FLOOR) * h), w, 1)
   }
@@ -155,19 +169,19 @@ function ladder(g, w, h) {
 function paintDb(g, x, bw, h, m) {
   const fill = dbToFraction(m.db, FLOOR) * h
   const hot = dbToFraction(-6, FLOOR) * h
-  g.fillStyle = '#6ee07a'
+  g.fillStyle = palette()['canvas-meter-ok']
   g.fillRect(x, h - fill, bw, fill)
   if (fill > hot) {
-    g.fillStyle = '#ffcf5c'
+    g.fillStyle = palette()['canvas-meter-hot']
     g.fillRect(x, h - fill, bw, fill - hot)
   }
   const cap = dbToFraction(m.hold, FLOOR) * h
   if (cap > 0) {
-    g.fillStyle = '#e8f4ff'
+    g.fillStyle = palette()['lcd-ink']
     g.fillRect(x, Math.max(0, h - cap - 1), bw, 2)
   }
   if (m.clip) {
-    g.fillStyle = '#ff5a4d'
+    g.fillStyle = palette()['canvas-meter-clip']
     g.fillRect(x, 0, bw, 3)
   }
 }
@@ -176,6 +190,6 @@ function paintCv(g, x, bw, h, m) {
   const mid = h / 2
   const v = Math.max(-1, Math.min(1, m.cv))
   const span = Math.abs(v) * (mid - 1)
-  g.fillStyle = v < 0 ? '#ffb36b' : '#7ee0ff'
+  g.fillStyle = v < 0 ? palette()['lcd-ink'] : palette()['lcd-accent']
   g.fillRect(x, v < 0 ? mid : mid - span, bw, Math.max(1, span))
 }
