@@ -67,7 +67,7 @@ microphone sampling (AGENTS.md: `audio-in` never requests the mic); song mode
 | Swing formula | Second 16th of each pair lands at `swing × eighth`; delay = `(swing − 0.5) × eighth`. Knob snaps to 50/54/58/62/66/70/75 with Shift for fine | Linn's definition; 66 % = triplet feel |
 | Velocity | Software curve per device: threshold (ghost-hit floor), curve (linear/soft/hard/compress), Full toggle. Velocity also drives timbre (decay, tone, accent on 909 voices) | Cheap pads have narrow uneven ranges; gain-only velocity is cause 2 |
 | Hardware map | Device profile = data (`pads/profiles/*.js`) resolving raw MIDI to semantic actions; MIDI learn writes the same shape | No generic controller abstraction beyond the one device plus learn |
-| LED feedback | Build only if phase 0 finds a usable protocol. It is the first MIDI-out use; it needs nothing from midi-bridge phase 5 beyond `output.send` | Build MIDI out when something on the other end needs it (AGENTS.md) — the pads now do |
+| LED feedback | Yes: note-on/off to the device's first out port (captured). One colour, so the state is coded by blink pattern (see LED vocabulary). It is the first MIDI-out use; it needs nothing from midi-bridge phase 5 beyond `output.send` | Build MIDI out when something on the other end needs it (AGENTS.md) — the pads now do |
 | Lessons progress | `localStorage` behind try/catch, never project state | Per-user convenience, not a project fact |
 | Lessons scoring windows | After latency calibration: ≤25 ms perfect, ≤50 good, ≤90 ok, else miss. Always show signed early/late bias | Rhythm-game windows (Rock Band 100 ms slop); bias teaches more than a score |
 | Schema | Bump `CURRENT_VERSION` 6 → 7, add `state.kits{}`, migration seeds one default kit | `store/ProjectStore.js:16` |
@@ -117,9 +117,31 @@ VID 4353 / PID 4B4D, bcdDevice 1.00, class-compliant (Microsoft `usbaudio`).
 | Ports | `SMC-PAD` and `MIDIIN2` carry identical streams; `MIDIIN3` silent | open one input only |
 | SysEx | universal identity request (`F0 7E 7F 06 01 F7`) gets no reply on any out port | |
 | Double triggers | none seen (one 40 ms retrigger was a real roll) | |
+| Pad order | note 36 = bottom-left, ascending (row by row from the bottom assumed) | |
+| Banks | hold the bank button: the pads turn blue (device-side menu); pick a bank on the pads. The button sends **no MIDI**. Bank 2 = notes 52–67, so bank *n* = `36 + 16(n−1)` on ch 10 | the note number tells the host the bank, so the host keeps no bank state. Banks 3–4 inferred |
+| Pressure burst | every strike emits a channel-AT burst (up to ~106) that decays to 0 within ~30 ms | smooth or gate it before pressure drives Repeat |
+| LEDs from host | note-on to `SMC-PAD` out port, **any channel, any velocity ≥ 1** lights the pad with that note; note-off clears it | colour is always the device's pink. Velocity, channel, poly AT and CC (tested) do not change it |
 
-Still unknown: pad order on the grid, bank/scene behaviour, the rest of the
-buttons, LED control from the host.
+Still unknown: whether pad 2 is right of pad 1 or above it, the rest of the
+buttons, and whether vendor SysEx (Cube Suite) can set colours. The next way
+to find out is to sniff the editor with USBPcap + Wireshark.
+
+### LED vocabulary (one colour, so time carries the meaning)
+
+The host can only switch a pad between dark and pink, but it can switch it at
+any rate. States are coded by pattern, never by colour:
+
+| Pattern | Means |
+|---|---|
+| dark | empty slot |
+| solid | slot has a sound |
+| flash off ~80 ms on hit | played (live or by the loop playhead) |
+| slow blink (1 Hz) | lessons: next target pad, or Wipe armed on this pad |
+| fast blink (4 Hz) | muted |
+| on, all others dark | Overlay menu item available |
+
+The on-screen twins carry full colour and labels. The hardware carries the
+pattern, so eyes can stay on the pads.
 
 Target layout:
 
@@ -135,7 +157,8 @@ Target layout:
 | Button: Rec | arm Layer at next bar (count-in first time) | undo last pass |
 | Button: Repeat | hold = Repeat; | latch |
 | Button: Wipe | hold + pad = wipe pad; hold alone = wipe all at bar end | — |
-| Button: Bank | hold: pads 1–4 = banks A–D, 5–16 = mute/solo grid | — |
+| Device bank button | handled on the device (notes shift by 16 per bank); the host reads the bank from the note | — |
+| Overlay button (TBD) | hold: pads = mute/solo grid | — |
 | Button: Full | toggle Full | Ladder (pick parameter on pads) |
 
 Fallbacks, decided now so missing buttons cannot block the plan:
