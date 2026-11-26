@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { instrumentFor, liveInstrumentFor } from '../src/renderer/js/midi/live-instrument.js'
+import { instrumentFor, liveInstrumentFor, kitAcceptsNote } from '../src/renderer/js/midi/live-instrument.js'
 
 // A fake context in the shape the rack and sample-instrument tests already use.
 function fakeCtx() {
@@ -164,5 +164,45 @@ describe('instrumentFor', () => {
     liveInstrumentFor({ instrument: { type: 'palette', paletteKey: 'classic' } }, deps).noteOn(60, 100)
     liveInstrumentFor({ paletteKey: 'classic' }, deps).noteOn(60, 100)
     expect(voices).toHaveLength(2)
+  })
+})
+
+describe('instrumentFor kit', () => {
+  const kitCtx = () => {
+    const param = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} })
+    const node = extra => ({ connect: d => d, disconnect() {}, ...extra })
+    const sources = []
+    return {
+      sources,
+      ctx: {
+        currentTime: 0,
+        sampleRate: 44100,
+        createGain: () => node({ gain: param() }),
+        createBiquadFilter: () => node({ frequency: param(), Q: param(), gain: param(), detune: param() }),
+        createWaveShaper: () => node({}),
+        createOscillator: () => { const s = node({ frequency: param(), detune: param(), start() {}, stop() {} }); sources.push(s); return s },
+        createBufferSource: () => { const s = node({ playbackRate: param(), start() {}, stop() {} }); sources.push(s); return s },
+        createBuffer: (ch, len) => ({ getChannelData: () => new Float32Array(len) })
+      }
+    }
+  }
+
+  it('builds a kit instrument that plays and exposes prewarm', () => {
+    const { ctx, sources } = kitCtx()
+    const inst = instrumentFor({ type: 'kit', kitId: 'default-909' }, { ctx, output: ctx.createGain() })
+    inst.prewarm()
+    inst.noteOn(38, 100, 0)
+    expect(sources.length).toBeGreaterThan(0)
+  })
+
+  it('an unknown kit builds nothing', () => {
+    const { ctx } = kitCtx()
+    expect(instrumentFor({ type: 'kit', kitId: 'nope' }, { ctx, output: {} })).toBeNull()
+  })
+
+  it('kitAcceptsNote reflects the kit slots', () => {
+    expect(kitAcceptsNote({ type: 'kit', kitId: 'default-909' }, 42)).toBe(true)
+    expect(kitAcceptsNote({ type: 'kit', kitId: 'default-909' }, 20)).toBe(false)
+    expect(kitAcceptsNote({ type: 'kit', kitId: 'nope' }, 42)).toBe(false)
   })
 })
