@@ -39,8 +39,9 @@ Facts the plan is built on. Re-verify pointers before each phase; line numbers d
 1. **No new theme.** Re-value the existing `dark` and `light` token sets into the
    new language: `light` becomes the warm-neutral instrument surface, `dark` the
    same system on dark display panels. `rainbow` keeps its character but is
-   re-expressed in the new tokens so it does not rot. Saved `synth_theme` values
-   keep working; no migration.
+   re-expressed in the new tokens so it does not rot. `light` becomes the
+   **default** when no `synth_theme` is saved (`theme.js`, `public/theme-init.js`);
+   saved values keep working; no migration.
 2. **Fonts: system stacks, zero bytes.** `--font-ui: system-ui, "Segoe UI", sans-serif`;
    `--font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace`. Mono for
    values, clocks, BPM and canvas labels only. Bundle a face only if phase 0
