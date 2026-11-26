@@ -181,9 +181,24 @@ and `01/01` in user preset 1.
 Plan consequence: Pads view asks the user to select a user preset (SHIFT+Pad
 3), confirms it by reading region 4, then writes each pad's kit colour on kit
 load (16 writes, working memory only, never save). This needs `sysex: true` in
-`requestMIDIAccess`, which is a reviewed change. Still open: whether host
-note-on can flash pads in user mode, which profile byte 10 selects, and the
-note map to expect in user mode (read it from the records, never assume).
+`requestMIDIAccess`, which is a reviewed change.
+
+**User-mode LED facts (tested 2026-11-26):**
+
+| Test | Result |
+|---|---|
+| Plain note-on, any note, channel or port | ignored; pads stay at their stored colour |
+| Hit a pad | the pad flashes white by itself (free hit feedback) |
+| Region 4 byte 10 | **active profile index**: writes to that profile show; writes to others do not |
+| Colour writes at 4 per second, each acked | clean red/yellow blink on pad 1 |
+| Identity query first | sent in every working run, and the official app does it, so keep it |
+
+So in user mode, the host owns base colour and animation (target, mute and
+Wipe blinks) through cmd 0x22. The target is profile = region4[10] and record
+= bank*16 + pad (the bank → record mapping in user mode is unverified beyond
+bank 1 = records 16–31). The device draws the hit flash itself. Re-read region
+4 whenever the user may have changed preset; the official app polls it. Read
+the note map from the records, never assume it.
 
 Target layout:
 
