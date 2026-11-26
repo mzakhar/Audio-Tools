@@ -152,6 +152,16 @@ pattern, so the pink becomes the pad's own colour. It needs `sysex: true` (a
 reviewed change) and a session (identity query, then config reads). Verify on
 `SMC-PAD_004` before designing around it.
 
+Config read on this unit (read-only, 2026-11-26): all four stored profiles are
+identical. Pad records sit at the documented offsets: `00 09 <note> 00 7f R G B
+ff`, ch10, notes 4–35, RGB `96 c8 f0` (pale blue) for pads 0–15 and `f0 f0 00`
+(yellow) for 16–31. **None of that matches live behaviour** (notes 36–51, pink
+host LEDs, blue on bank hold), so the active map is not the stored profile.
+Profile select may be in region 4 (`78 00 32 04 00 00 02 00 02 01 06 00`), but
+that is a guess. A working-memory colour write may therefore change nothing
+visible. Replies over ~1 KB truncate in rtmidi/WinMM, so read in ≤400-byte
+chunks.
+
 Target layout:
 
 | Control | Default role | Shift / hold role |
