@@ -162,6 +162,12 @@ that is a guess. A working-memory colour write may therefore change nothing
 visible. Replies over ~1 KB truncate in rtmidi/WinMM, so read in ≤400-byte
 chunks.
 
+**Result: colour upgrade is dead on this unit.** Writing green to all 128 pad
+records (4 profiles × 32 pads) was acked and read back as green, but the
+host-lit pads stayed pink. All writes were restored and verified 128/128, and
+no save was sent. Design for pink on/off plus blink codes only, and leave
+`sysex: false`.
+
 Target layout:
 
 | Control | Default role | Shift / hold role |
