@@ -1,4 +1,7 @@
-const COLORS = { audio: '#00e5ff', cv: '#ff00aa', gate: '#39ff14' }
+import { readThemeColors, themeStyle, onThemeChange } from '../ui/theme-colors.js'
+
+const COLORS = { audio: 'signal-audio', cv: 'signal-cv', gate: 'signal-gate' }
+const NAMES = [...Object.values(COLORS), 'text-bright', 'text-dim']
 
 export const MAX_SAG = 140
 // Extra canvas below the rails so a cable's droop is never clipped away.
@@ -14,7 +17,7 @@ export function cableSag(a, b) {
 }
 
 export class RackCables {
-  constructor(canvas, root) { this.canvas = canvas; this.root = root; this.ctx = canvas.getContext('2d'); this.cables = []; this.preview = null; this.resize = () => this.draw(); new ResizeObserver(this.resize).observe(root) }
+  constructor(canvas, root) { this.canvas = canvas; this.root = root; this.ctx = canvas.getContext('2d'); this.cables = []; this.preview = null; this.resize = () => this.draw(); new ResizeObserver(this.resize).observe(root); onThemeChange(this.resize) }
   // The rails are CSS-scaled by --rack-zoom, so client rects come back in screen px.
   // Everything here works in unscaled layout px; divide the deltas by the live scale.
   zoom() { const w = this.root.offsetWidth; return w ? this.root.getBoundingClientRect().width / w : 1 }
@@ -24,11 +27,11 @@ export class RackCables {
   draw() {
     const w = this.root.offsetWidth, h = this.root.offsetHeight + SAG_HEADROOM, dpr = devicePixelRatio || 1
     this.canvas.width = w * dpr; this.canvas.height = h * dpr; this.canvas.style.width = `${w}px`; this.canvas.style.height = `${h}px`
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); this.ctx.clearRect(0, 0, w, h)
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); this.ctx.clearRect(0, 0, w, h); this.theme = readThemeColors(NAMES, themeStyle())
     for (const cable of this.cables) this.line(this.point(cable.from.moduleId, cable.from.port), this.point(cable.to.moduleId, cable.to.port), cable.color)
-    if (this.preview) this.line(this.preview.from, this.preview.to, '#eee')
+    if (this.preview) this.line(this.preview.from, this.preview.to, this.theme['text-bright'])
   }
-  line(a, b, color) { if (!a || !b) return; const sag = cableSag(a, b); this.ctx.strokeStyle = color || COLORS[a.kind] || '#aaa'; this.ctx.lineWidth = 3; this.ctx.beginPath(); this.ctx.moveTo(a.x, a.y); this.ctx.bezierCurveTo(a.x, a.y + sag, b.x, b.y + sag, b.x, b.y); this.ctx.stroke() }
+  line(a, b, color) { if (!a || !b) return; const sag = cableSag(a, b); this.ctx.strokeStyle = color || this.theme[COLORS[a.kind]] || this.theme['text-dim']; this.ctx.lineWidth = 3; this.ctx.beginPath(); this.ctx.moveTo(a.x, a.y); this.ctx.bezierCurveTo(a.x, a.y + sag, b.x, b.y + sag, b.x, b.y); this.ctx.stroke() }
   // Nearest point on the drawn curve, not a bounding box: adjacent modules give a box
   // barely taller than a jack, while the cable itself sags well below both endpoints.
   hitTest(x, y, tolerance = 7) {
