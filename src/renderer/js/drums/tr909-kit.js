@@ -1,15 +1,15 @@
 const INSTRUMENTS = [
-  { id: 'bd', label: 'BD', name: 'Bass Drum', color: '#ff5a3d', params: { level: 0.9, tune: 0.45, decay: 0.55, attack: 0.55 } },
-  { id: 'sd', label: 'SD', name: 'Snare Drum', color: '#ffb238', params: { level: 0.78, tune: 0.48, tone: 0.62, snappy: 0.7 } },
-  { id: 'lt', label: 'LT', name: 'Low Tom', color: '#d7c45a', params: { level: 0.68, tune: 0.34, decay: 0.48 } },
-  { id: 'mt', label: 'MT', name: 'Mid Tom', color: '#aee36a', params: { level: 0.64, tune: 0.5, decay: 0.42 } },
-  { id: 'ht', label: 'HT', name: 'High Tom', color: '#63d878', params: { level: 0.62, tune: 0.66, decay: 0.34 } },
-  { id: 'rs', label: 'RS', name: 'Rim Shot', color: '#4ed6b5', params: { level: 0.68, tone: 0.58 } },
-  { id: 'cp', label: 'CP', name: 'Hand Clap', color: '#45caff', params: { level: 0.72, decay: 0.34, tone: 0.58 } },
-  { id: 'ch', label: 'CH', name: 'Closed Hat', color: '#69a8ff', params: { level: 0.6, tune: 0.62, decay: 0.12 } },
-  { id: 'oh', label: 'OH', name: 'Open Hat', color: '#9d8cff', params: { level: 0.58, tune: 0.6, decay: 0.6 } },
-  { id: 'cr', label: 'CR', name: 'Crash', color: '#d676ff', params: { level: 0.54, tune: 0.54, decay: 1.25 } },
-  { id: 'rd', label: 'RD', name: 'Ride', color: '#ff6fc7', params: { level: 0.52, tune: 0.56, decay: 1.0 } },
+  { id: 'bd', label: 'BD', name: 'Bass Drum', params: { level: 0.9, tune: 0.45, decay: 0.55, attack: 0.55 } },
+  { id: 'sd', label: 'SD', name: 'Snare Drum', params: { level: 0.78, tune: 0.48, tone: 0.62, snappy: 0.7 } },
+  { id: 'lt', label: 'LT', name: 'Low Tom', params: { level: 0.68, tune: 0.34, decay: 0.48 } },
+  { id: 'mt', label: 'MT', name: 'Mid Tom', params: { level: 0.64, tune: 0.5, decay: 0.42 } },
+  { id: 'ht', label: 'HT', name: 'High Tom', params: { level: 0.62, tune: 0.66, decay: 0.34 } },
+  { id: 'rs', label: 'RS', name: 'Rim Shot', params: { level: 0.68, tone: 0.58 } },
+  { id: 'cp', label: 'CP', name: 'Hand Clap', params: { level: 0.72, decay: 0.34, tone: 0.58 } },
+  { id: 'ch', label: 'CH', name: 'Closed Hat', params: { level: 0.6, tune: 0.62, decay: 0.12 } },
+  { id: 'oh', label: 'OH', name: 'Open Hat', params: { level: 0.58, tune: 0.6, decay: 0.6 } },
+  { id: 'cr', label: 'CR', name: 'Crash', params: { level: 0.54, tune: 0.54, decay: 1.25 } },
+  { id: 'rd', label: 'RD', name: 'Ride', params: { level: 0.52, tune: 0.56, decay: 1.0 } },
 ]
 
 const PARAM_DEFS = {

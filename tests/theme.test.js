@@ -13,9 +13,9 @@ describe('theme', () => {
     expect(changed).toHaveBeenCalledWith(expect.objectContaining({ detail: { theme: 'light' } }))
   })
 
-  it('falls back to dark for unknown themes', () => {
-    expect(applyTheme('neon')).toBe('dark')
-    expect(savedTheme()).toBe('dark')
+  it('falls back to light for unknown themes', () => {
+    expect(applyTheme('neon')).toBe('light')
+    expect(savedTheme()).toBe('light')
   })
 
   it('restores a saved light theme', () => {

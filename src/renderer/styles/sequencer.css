@@ -1,0 +1,160 @@
+/* ─── Sequencer ────────────────────────────────────────────────────────────── */
+#sequencer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  padding: 12px;
+}
+
+#seq-tracks {
+  overflow-x: auto;
+}
+
+.seq-track-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.seq-track-row.header {
+  margin-bottom: 4px;
+}
+
+.seq-ctrl-spacer {
+  width: 164px;
+  flex-shrink: 0;
+}
+
+.seq-track-ctrl {
+  width: 164px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+}
+
+.track-sel {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 600 11px/1 var(--font-ui);
+  padding: 3px 2px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.track-sel:hover { border-color: var(--border-strong); }
+.track-sel:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.track-kind-sel { width: 56px; flex-shrink: 0; }
+.track-note-sel { flex: 1; min-width: 0; }
+
+.track-remove-btn {
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 5px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.track-remove-btn:hover { color: var(--danger); border: none; }
+
+.seq-steps {
+  display: flex;
+  gap: 3px;
+}
+
+.step-num {
+  width: 34px;
+  text-align: center;
+  font: 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.step-num.beat-marker { color: var(--text); font-weight: 700; }
+
+.seq-cell {
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.08s, border-color 0.08s;
+  border-radius: var(--radius-s);
+  --cell-on: var(--state-on);
+}
+.seq-cell:hover { border-color: var(--border-strong); background: var(--surface-inset); }
+.seq-cell:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* beat group separator (every 4 steps) */
+.seq-cell:nth-child(4n+1) { margin-left: 4px; }
+.seq-cell:first-child { margin-left: 0; }
+
+/* On = filled with an inset edge; the playhead is an outline, not a colour. */
+.seq-cell.active {
+  background: var(--cell-on);
+  border-color: var(--cell-on);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text-inverse) 35%, transparent);
+}
+.seq-cell.playing {
+  outline: 2px solid var(--text-bright);
+  outline-offset: 1px;
+}
+.seq-cell.playing:not(.active) { background: var(--surface-inset); }
+
+/* Per-row active colours — rows differ by kind, pad rows by bank */
+[data-kind="note"] .seq-cell { --cell-on: var(--accent); }
+[data-kind="pad"][data-bank="A"] .seq-cell { --cell-on: var(--state-on); }
+[data-kind="pad"][data-bank="B"] .seq-cell { --cell-on: var(--tr909-accent); }
+
+/* ─── Sequencer Controls ───────────────────────────────────────────────────── */
+#sequencer-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.transport {
+  display: flex;
+  gap: 6px;
+}
+
+/* Same look as .btn; kept as its own class because the 909 view shares it. */
+.transport-btn {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-raised);
+  color: var(--text);
+  min-height: 28px;
+  padding: 4px 14px;
+  font: 600 12px/1 var(--font-ui);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background 0.1s;
+}
+.transport-btn:hover { border-color: var(--border-strong); }
+.transport-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.transport-btn.play:active, .transport-btn.play.active-btn {
+  background: var(--state-on);
+  color: var(--text-inverse);
+  border-color: var(--state-on);
+  box-shadow: var(--shadow-pressed);
+}
+.transport-btn.stop:hover { border-color: var(--danger); color: var(--danger); }
+.transport-btn.clear:hover { border-color: var(--accent2); color: var(--accent2); }

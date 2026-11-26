@@ -131,19 +131,19 @@ export class Tr909View {
             <strong>909</strong>
           </div>
           <div class="tr909-transport" role="toolbar" aria-label="909 transport">
-            <button class="transport-btn play" data-action="play-bar" aria-pressed="${this.mode === 'bar'}">▸ Bar</button>
-            <button class="transport-btn play" data-action="play-chain" aria-pressed="${this.mode === 'chain'}">▸ Chain</button>
-            <button class="transport-btn stop" data-action="stop">■ Stop</button>
-            <button class="transport-btn clear" data-action="clear">Clear</button>
-            <button class="transport-btn" data-action="randomize">Random</button>
+            <button class="transport-btn btn play" data-action="play-bar" aria-pressed="${this.mode === 'bar'}">▸ Bar</button>
+            <button class="transport-btn btn play" data-action="play-chain" aria-pressed="${this.mode === 'chain'}">▸ Chain</button>
+            <button class="transport-btn btn stop" data-action="stop">■ Stop</button>
+            <button class="transport-btn btn clear" data-action="clear">Clear</button>
+            <button class="transport-btn btn" data-action="randomize">Random</button>
           </div>
           <div class="tr909-barstrip" role="toolbar" aria-label="Pattern bars">
             <span class="tr909-barstrip-label">BARS</span>
             <div class="tr909-bar-buttons">
               ${pattern.bars.map((b, i) => this.renderBarButton(pattern, i)).join('')}
             </div>
-            <button class="tr909-bar-add" data-action="add-bar" aria-label="Add bar" title="Add empty bar">+</button>
-            <button class="tr909-bar-copy" data-action="copy-bar" title="Copy current bar into a new bar">⧉ Copy Bar</button>
+            <button class="tr909-bar-add btn" data-action="add-bar" aria-label="Add bar" title="Add empty bar">+</button>
+            <button class="tr909-bar-copy btn" data-action="copy-bar" title="Copy current bar into a new bar">⧉ Copy Bar</button>
           </div>
         </div>
 
@@ -162,17 +162,17 @@ export class Tr909View {
               <option value="1/32"${bar.scale === '1/32' ? ' selected' : ''}>1/32</option>
             </select>
           </label>
-          <button class="tr909-toggle${this.showAllLanes ? ' active' : ''}" data-action="toggle-lanes" aria-pressed="${this.showAllLanes}">All Lanes</button>
+          <button class="tr909-toggle btn btn--toggle${this.showAllLanes ? ' active' : ''}" data-action="toggle-lanes" aria-pressed="${this.showAllLanes}">All Lanes</button>
         </div>
 
         <div class="tr909-body">
           <div class="tr909-instruments" role="listbox" aria-label="909 instruments">
             ${INSTRUMENTS.map(inst => this.renderInstrumentStrip(inst)).join('')}
           </div>
-          <div class="tr909-editor">
+          <div class="tr909-editor" data-lane="${this.selectedInstrumentId}">
             <div class="tr909-lane-head">
               <span>${this.selectedInstrument().name}</span>
-              <button class="tr909-audition" data-action="audition">Trig</button>
+              <button class="tr909-audition btn" data-action="audition">Trig</button>
             </div>
             <div class="tr909-lane-row tr909-selected-lane" role="grid" aria-label="Selected instrument steps">
               <span class="tr909-lane-label">${this.selectedInstrument().label}</span>
@@ -228,7 +228,7 @@ export class Tr909View {
     const params = this.kitParams[inst.id]
     const isSelected = inst.id === this.selectedInstrumentId
     return `
-      <button class="tr909-strip${isSelected ? ' selected' : ''}" data-inst="${inst.id}" style="--inst-color:${inst.color}" role="option" aria-selected="${isSelected}">
+      <button class="tr909-strip${isSelected ? ' selected' : ''}" data-inst="${inst.id}" data-lane="${inst.id}" role="option" aria-selected="${isSelected}">
         <span class="tr909-strip-label">${inst.label}</span>
         <span class="tr909-strip-meter" style="height:${Math.round((params.level ?? 0.7) * 42)}px"></span>
       </button>
@@ -263,7 +263,7 @@ export class Tr909View {
 
   renderAllLane(bar, inst) {
     return `
-      <div class="tr909-lane-row" style="--inst-color:${inst.color}">
+      <div class="tr909-lane-row" data-lane="${inst.id}">
         <button class="tr909-lane-label tr909-grid-label" data-inst="${inst.id}">${inst.label}</button>
         <div class="tr909-grid-steps">
           ${Array.from({ length: STEPS }, (_, i) => this.renderGridCell(bar, inst.id, i)).join('')}

@@ -6,6 +6,8 @@
 import ProjectStore, {
   AddMidiNote, RemoveMidiNote, MoveMidiNote, ResizeMidiNote, SetMidiNoteVelocity
 } from '../store/ProjectStore.js'
+import { readThemeColors, themeStyle, onThemeChange } from '../ui/theme-colors.js'
+import { ARRANGE_TOKENS, withAlpha, shade, canvasFont } from './canvas-colors.js'
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 const PIANO_W   = 48    // px — left piano key column
@@ -73,6 +75,7 @@ export class PianoRoll {
 
     // Store subscription
     this._unsub = this._store.subscribe(() => this.render())
+    this._themeUnsub = onThemeChange(() => { this._c = null; this.render() })
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -103,6 +106,8 @@ export class PianoRoll {
     const ctx = this._ctx
     const w = this._canvas.width
     const h = this._canvas.height
+    // Cached: one style recalc per theme change, not per drag/playhead frame.
+    this._c ??= readThemeColors(ARRANGE_TOKENS, themeStyle())
     ctx.clearRect(0, 0, w, h)
     this._drawGrid(ctx, clip, w, h)
     this._drawPianoKeys(ctx, h)
@@ -116,6 +121,7 @@ export class PianoRoll {
 
   destroy() {
     this._unsub()
+    this._themeUnsub()
     this._ro.disconnect()
     this._canvas.removeEventListener('mousedown', this._onMouseDown)
     this._canvas.removeEventListener('mousemove', this._onMouseMove)
@@ -135,6 +141,7 @@ export class PianoRoll {
   // ── Draw helpers ──────────────────────────────────────────────────────────────
 
   _drawGrid(ctx, clip, w, h) {
+    const c = this._c
     const gridH = this._gridH()
 
     // Row backgrounds
@@ -142,15 +149,19 @@ export class PianoRoll {
       const y = this._pitchToY(pitch)
       if (y + NOTE_H < RULER_H || y > RULER_H + gridH) continue
       const semitone = pitch % 12
-      ctx.fillStyle = WHITE_SET.has(semitone) ? '#181818' : '#121212'
+      ctx.fillStyle = c['canvas-bg']
       ctx.fillRect(PIANO_W, y, w - PIANO_W, NOTE_H)
+      if (!WHITE_SET.has(semitone)) {
+        ctx.fillStyle = shade(0.07)
+        ctx.fillRect(PIANO_W, y, w - PIANO_W, NOTE_H)
+      }
       // C separator
       if (semitone === 0) {
-        ctx.strokeStyle = '#252525'
+        ctx.strokeStyle = c['canvas-grid-bar']
         ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(PIANO_W, y)
-        ctx.lineTo(w, y)
+        ctx.moveTo(PIANO_W, y + 0.5)
+        ctx.lineTo(w, y + 0.5)
         ctx.stroke()
       }
     }
@@ -163,18 +174,19 @@ export class PianoRoll {
       const x = this._beatToX(b)
       if (x < PIANO_W || x > w) continue
       const isBeat = Math.abs(b - Math.round(b)) < 1e-9
-      ctx.strokeStyle = isBeat ? '#2a2a2a' : '#1c1c1c'
+      const isBar = isBeat && Math.round(b) % 4 === 0
+      ctx.strokeStyle = isBar ? c['canvas-grid-bar'] : isBeat ? c['canvas-grid-beat'] : c['canvas-grid-sub']
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.moveTo(x, RULER_H)
-      ctx.lineTo(x, RULER_H + gridH)
+      ctx.moveTo(x + 0.5, RULER_H)
+      ctx.lineTo(x + 0.5, RULER_H + gridH)
       ctx.stroke()
     }
 
     // Clip duration boundary
     const endX = this._beatToX(clip.duration || 16)
     if (endX > PIANO_W && endX < w) {
-      ctx.strokeStyle = '#ff00aa33'
+      ctx.strokeStyle = withAlpha(c['canvas-playhead'], 0.5)
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(endX, RULER_H)
@@ -184,9 +196,10 @@ export class PianoRoll {
   }
 
   _drawPianoKeys(ctx, h) {
+    const c = this._c
     const gridH = this._gridH()
     // Column background
-    ctx.fillStyle = '#0e0e0e'
+    ctx.fillStyle = c['canvas-ruler-bg']
     ctx.fillRect(0, RULER_H, PIANO_W, gridH)
 
     for (let pitch = MAX_PITCH; pitch >= MIN_PITCH; pitch--) {
@@ -194,17 +207,25 @@ export class PianoRoll {
       if (y + NOTE_H < RULER_H || y > RULER_H + gridH) continue
       const semitone = pitch % 12
       const isWhite = WHITE_SET.has(semitone)
-      ctx.fillStyle = isWhite ? '#d0d0d0' : '#1a1a1a'
+      // Warm ivory white keys, short dark black keys
+      ctx.fillStyle = c['canvas-clip-ink']
       ctx.fillRect(1, y + 1, PIANO_W - 2, NOTE_H - 1)
+      if (isWhite) {
+        ctx.fillStyle = withAlpha(c['canvas-note-selected'], 0.08)
+        ctx.fillRect(1, y + 1, PIANO_W - 2, NOTE_H - 1)
+      } else {
+        ctx.fillStyle = shade(0.85)
+        ctx.fillRect(1, y + 1, PIANO_W * 0.62, NOTE_H - 1)
+      }
       if (semitone === 0) {
-        ctx.fillStyle = '#555'
-        ctx.font = '8px monospace'
-        ctx.fillText(pitchName(pitch), 2, y + NOTE_H - 2)
+        ctx.fillStyle = shade(0.7)
+        ctx.font = canvasFont(9, c['font-mono'], '600')
+        ctx.fillText(pitchName(pitch), PIANO_W - 22, y + NOTE_H - 1)
       }
     }
 
     // Right border
-    ctx.strokeStyle = '#2a2a2a'
+    ctx.strokeStyle = c['canvas-grid-bar']
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(PIANO_W, RULER_H)
@@ -213,7 +234,8 @@ export class PianoRoll {
   }
 
   _drawRuler(ctx, clip, w) {
-    ctx.fillStyle = '#111'
+    const c = this._c
+    ctx.fillStyle = c['canvas-ruler-bg']
     ctx.fillRect(0, 0, w, RULER_H)
     // Beat numbers
     const start = Math.max(0, Math.floor(this._xToBeat(PIANO_W)))
@@ -221,18 +243,19 @@ export class PianoRoll {
     for (let b = start; b <= end; b++) {
       const x = this._beatToX(b)
       if (x < PIANO_W || x > w) continue
-      ctx.strokeStyle = '#333'
+      const isBar = b % 4 === 0
+      ctx.strokeStyle = isBar ? c['canvas-ruler-ink'] : withAlpha(c['canvas-ruler-ink'], 0.45)
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.moveTo(x, 4)
-      ctx.lineTo(x, RULER_H)
+      ctx.moveTo(x + 0.5, isBar ? 2 : 8)
+      ctx.lineTo(x + 0.5, RULER_H)
       ctx.stroke()
-      ctx.fillStyle = '#777'
-      ctx.font = '9px monospace'
-      ctx.fillText(b + 1, x + 2, RULER_H - 4)
+      ctx.fillStyle = c['canvas-ruler-ink']
+      ctx.font = canvasFont(10, c['font-mono'], isBar ? '600' : '')
+      ctx.fillText(b + 1, x + 3, RULER_H - 6)
     }
     // Bottom border
-    ctx.strokeStyle = '#2a2a2a'
+    ctx.strokeStyle = c['canvas-grid-bar']
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, RULER_H)
@@ -241,6 +264,7 @@ export class PianoRoll {
   }
 
   _drawNotes(ctx, clip, w, h) {
+    const c = this._c
     const gridH = this._gridH()
     const notes = clip.notes || []
     for (const note of notes) {
@@ -265,35 +289,39 @@ export class PianoRoll {
       if (y + NOTE_H < RULER_H || y > RULER_H + gridH) continue
 
       const sel = this._selected.has(note.id)
-      ctx.fillStyle = sel ? '#ff00bb' : '#00e5ff'
+      ctx.fillStyle = sel ? c['canvas-note-selected'] : c['canvas-note']
       ctx.fillRect(x, y + 1, nw - 1, NOTE_H - 2)
+      ctx.strokeStyle = sel ? c['canvas-clip-ink'] : shade(0.35)
+      ctx.lineWidth = 1
+      ctx.strokeRect(x + 0.5, y + 1.5, nw - 2, NOTE_H - 3)
 
       // Pitch label for wide enough notes
       if (nw > 24) {
         ctx.save()
         ctx.rect(x, y + 1, nw - 1, NOTE_H - 2)
         ctx.clip()
-        ctx.fillStyle = '#000a'
-        ctx.font = '8px monospace'
-        ctx.fillText(pitchName(note.pitch), x + 2, y + NOTE_H - 2)
+        ctx.fillStyle = c['canvas-clip-ink']
+        ctx.font = canvasFont(8, c['font-mono'], '600')
+        ctx.fillText(pitchName(note.pitch), x + 3, y + NOTE_H - 2)
         ctx.restore()
       }
     }
   }
 
   _drawVelocityLane(ctx, clip, w, h) {
+    const c = this._c
     const velY = h - VEL_H
-    ctx.fillStyle = '#0d0d0d'
+    ctx.fillStyle = c['canvas-ruler-bg']
     ctx.fillRect(0, velY, w, VEL_H)
-    ctx.strokeStyle = '#2a2a2a'
+    ctx.strokeStyle = c['canvas-grid-bar']
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, velY)
     ctx.lineTo(w, velY)
     ctx.stroke()
-    ctx.fillStyle = '#444'
-    ctx.font = '8px monospace'
-    ctx.fillText('VEL', 2, velY + 12)
+    ctx.fillStyle = c['canvas-ruler-ink']
+    ctx.font = canvasFont(10, c['font-ui'], '600')
+    ctx.fillText('VEL', 6, velY + 14)
 
     const notes = clip.notes || []
     const barW  = Math.max(2, 8)
@@ -303,8 +331,10 @@ export class PianoRoll {
       const barH = Math.max(2, (note.velocity || 0.8) * (VEL_H - 8))
       const barY = h - 4 - barH
       const sel  = this._selected.has(note.id)
-      ctx.fillStyle = sel ? '#ff00bb99' : '#00e5ff66'
+      ctx.fillStyle = sel ? c['canvas-note-selected'] : withAlpha(c['canvas-note'], 0.8)
       ctx.fillRect(x, barY, barW, barH)
+      ctx.fillStyle = sel ? c['canvas-clip-ink'] : c['canvas-note']
+      ctx.fillRect(x, barY, barW, 2)
     }
   }
 
@@ -314,8 +344,8 @@ export class PianoRoll {
     const x  = this._beatToX(startBeat)
     const y  = this._pitchToY(pitch)
     const nw = duration * this._ppb
-    ctx.fillStyle = '#00e5ff55'
-    ctx.strokeStyle = '#00e5ff'
+    ctx.fillStyle = withAlpha(this._c['canvas-note'], 0.35)
+    ctx.strokeStyle = this._c['canvas-note']
     ctx.lineWidth = 1
     ctx.fillRect(x, y + 1, Math.max(2, nw - 1), NOTE_H - 2)
     ctx.strokeRect(x, y + 1, Math.max(2, nw - 1), NOTE_H - 2)

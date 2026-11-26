@@ -1,0 +1,9 @@
+/* ─── Scrollbars ───────────────────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-s); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ─── Utility ──────────────────────────────────────────────────────────────── */
+button { font-family: inherit; }

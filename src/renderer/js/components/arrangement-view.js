@@ -15,6 +15,8 @@ import {
 import ProjectStore, { MoveClip, TrimClip, RemoveTrack, DuplicateClip, RemoveClip, TileClip, SetTrackMidiChannel } from '../store/ProjectStore.js'
 import AudioStore from '../audio-store.js'
 import { trackInstrumentLabel } from '../instruments/instrument-label.js'
+import { readThemeColors, themeStyle, onThemeChange } from '../ui/theme-colors.js'
+import { ARRANGE_TOKENS, withAlpha, shade, trackToken, canvasFont } from './canvas-colors.js'
 
 function catalogPacks(catalog) {
   const packs = typeof catalog === 'function' ? catalog() : catalog
@@ -219,6 +221,9 @@ export class ArrangementView {
 
     // Re-render when waveform LOD becomes ready
     this._lodUnsub = this._audioStore.onLodReady(() => this.render())
+
+    // Theme switch repaints without a reload
+    this._themeUnsub = onThemeChange(() => { this._c = null; this.render() })
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -248,6 +253,8 @@ export class ArrangementView {
     const w = this._canvas.width
     const h = this._canvas.height
 
+    // Cached: one style recalc per theme change, not per drag/playhead frame.
+    this._c ??= readThemeColors(ARRANGE_TOKENS, themeStyle())
     ctx.clearRect(0, 0, w, h)
     this._drawRuler(ctx, state)
     this._drawTracks(ctx, state)
@@ -259,6 +266,7 @@ export class ArrangementView {
   destroy() {
     this._unsub()
     this._lodUnsub()
+    this._themeUnsub()
     this._canvas.removeEventListener('mousedown',   this._onMouseDown)
     this._canvas.removeEventListener('mousemove',   this._onMouseMove)
     this._canvas.removeEventListener('mouseup',     this._onMouseUp)
@@ -281,8 +289,9 @@ export class ArrangementView {
   // ── Draw methods ─────────────────────────────────────────────────────────────
 
   _drawRuler(ctx, state) {
+    const c = this._c
     const w = this._canvas.width
-    ctx.fillStyle = '#141414'
+    ctx.fillStyle = c['canvas-ruler-bg']
     ctx.fillRect(0, 0, w, RULER_H)
 
     const { startBeat, endBeat } = visibleBeatRange(this._scrollLeft, w - TRACK_HEADER_W, this._ppb)
@@ -293,54 +302,85 @@ export class ArrangementView {
       if (x < TRACK_HEADER_W || x > w) continue
 
       if (tick.isBar) {
-        ctx.strokeStyle = '#555'
+        ctx.strokeStyle = c['canvas-ruler-ink']
         ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(x, 0)
-        ctx.lineTo(x, RULER_H)
+        ctx.moveTo(x + 0.5, 0)
+        ctx.lineTo(x + 0.5, RULER_H)
         ctx.stroke()
 
         if (tick.label) {
-          ctx.fillStyle = '#aaa'
-          ctx.font = '10px monospace'
-          ctx.fillText(tick.label, x + 3, RULER_H - 8)
+          ctx.fillStyle = c['canvas-ruler-ink']
+          ctx.font = canvasFont(11, c['font-mono'], '600')
+          ctx.fillText(tick.label, x + 4, RULER_H - 10)
         }
       } else {
-        ctx.strokeStyle = '#333'
+        ctx.strokeStyle = withAlpha(c['canvas-ruler-ink'], 0.45)
         ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(x, RULER_H * 0.5)
-        ctx.lineTo(x, RULER_H)
+        ctx.moveTo(x + 0.5, RULER_H * 0.6)
+        ctx.lineTo(x + 0.5, RULER_H)
         ctx.stroke()
       }
     }
 
     // Ruler bottom border
-    ctx.strokeStyle = '#2a2a2a'
+    ctx.strokeStyle = c['canvas-grid-bar']
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(0, RULER_H)
-    ctx.lineTo(w, RULER_H)
+    ctx.moveTo(0, RULER_H - 0.5)
+    ctx.lineTo(w, RULER_H - 0.5)
     ctx.stroke()
   }
 
   _drawTracks(ctx, state) {
+    const c = this._c
     const w = this._canvas.width
     const h = this._canvas.height
     const tracks = state.tracks || []
 
+    // Rows first, then bar/beat grid over them, then clips on top.
     for (let i = 0; i < tracks.length; i++) {
-      const track = tracks[i]
       const trackY = RULER_H + i * TRACK_H - this._scrollTop
-
       if (trackY + TRACK_H < RULER_H || trackY > h) continue
 
       // Alternating row backgrounds
-      ctx.fillStyle = i % 2 === 0 ? '#141414' : '#181818'
+      ctx.fillStyle = c['canvas-bg']
       ctx.fillRect(TRACK_HEADER_W, trackY, w - TRACK_HEADER_W, TRACK_H)
+      if (i % 2 === 1) {
+        ctx.fillStyle = withAlpha(c['canvas-grid-sub'], 0.5)
+        ctx.fillRect(TRACK_HEADER_W, trackY, w - TRACK_HEADER_W, TRACK_H)
+      }
+      if (tracks[i].id === this._selectedTrackId) {
+        ctx.fillStyle = c['canvas-selection']
+        ctx.fillRect(TRACK_HEADER_W, trackY, w - TRACK_HEADER_W, TRACK_H)
+      }
+    }
+
+    // Bar/beat grid across the occupied rows
+    const gridBottom = Math.min(h, RULER_H + tracks.length * TRACK_H - this._scrollTop)
+    if (tracks.length && gridBottom > RULER_H) {
+      const { startBeat, endBeat } = visibleBeatRange(this._scrollLeft, w - TRACK_HEADER_W, this._ppb)
+      const ticks = rulerTicks(startBeat, endBeat, this._ppb, state.timeSignature, this._scrollLeft)
+      ctx.lineWidth = 1
+      for (const tick of ticks) {
+        const x = tick.x + TRACK_HEADER_W
+        if (x < TRACK_HEADER_W || x > w) continue
+        ctx.strokeStyle = tick.isBar ? c['canvas-grid-bar'] : c['canvas-grid-beat']
+        ctx.beginPath()
+        ctx.moveTo(x + 0.5, RULER_H)
+        ctx.lineTo(x + 0.5, gridBottom)
+        ctx.stroke()
+      }
+    }
+
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i]
+      const trackY = RULER_H + i * TRACK_H - this._scrollTop
+      if (trackY + TRACK_H < RULER_H || trackY > h) continue
 
       // Row separator
-      ctx.strokeStyle = '#2a2a2a'
+      ctx.strokeStyle = c['canvas-grid-bar']
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(TRACK_HEADER_W, trackY + TRACK_H - 0.5)
@@ -351,15 +391,16 @@ export class ArrangementView {
       const clips = track.clips || []
       for (const clip of clips) {
         if (clip.type === 'audio') {
-          this._drawClip(ctx, clip, trackY, state)
+          this._drawClip(ctx, clip, trackY, state, i)
         } else if (clip.type === 'midi') {
-          this._drawMidiClip(ctx, clip, trackY)
+          this._drawMidiClip(ctx, clip, trackY, i)
         }
       }
     }
   }
 
-  _drawClip(ctx, clip, trackY, state) {
+  _drawClip(ctx, clip, trackY, state, trackIndex = 0) {
+    const c = this._c
     const w = this._canvas.width
     const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
     const clipW = beatsToPx(clip.duration, this._ppb)
@@ -394,33 +435,43 @@ export class ArrangementView {
     }
 
     // Clip body
-    ctx.fillStyle = '#1e2a30'
-    ctx.strokeStyle = '#00e5ff55'
-    ctx.lineWidth = 1
-    ctx.fillRect(drawX, clipDrawY, drawW, clipH)
-    ctx.strokeRect(drawX + 0.5, clipDrawY + 0.5, drawW - 1, clipH - 1)
+    const tint = c[trackToken(trackIndex)]
+    this._paintClipFrame(ctx, drawX, clipDrawY, drawW, clipH, tint, this._drag?.clipId === clip.id)
 
     // Clip label
     const label = clip.name || (clip.file ? clip.file.split('/').pop() : 'clip')
-    ctx.fillStyle = '#aaa'
-    ctx.font = '9px monospace'
+    ctx.fillStyle = c['canvas-clip-ink']
+    ctx.font = canvasFont(11, c['font-ui'], '600')
     ctx.save()
     ctx.rect(drawX, clipDrawY, drawW, clipH)
     ctx.clip()
-    ctx.fillText(label, drawX + 4, clipDrawY + 12)
+    ctx.fillText(label, drawX + 5, clipDrawY + 12)
 
     // Waveform or placeholder
     if (this._audioStore.isLodReady(clip.file)) {
       this._drawWaveform(ctx, clip, drawX, trackY, drawW, state)
     } else {
-      ctx.fillStyle = '#00e5ff22'
+      ctx.fillStyle = withAlpha(c['canvas-clip-ink'], 0.15)
       ctx.fillRect(drawX + 1, clipDrawY + 1, drawW - 2, clipH - 2)
-      ctx.fillStyle = '#555'
-      ctx.font = '9px monospace'
-      ctx.fillText('Loading...', drawX + 4, clipDrawY + clipH / 2 + 4)
+      ctx.fillStyle = c['canvas-clip-ink']
+      ctx.font = canvasFont(10, c['font-ui'])
+      ctx.fillText('Loading...', drawX + 5, clipDrawY + clipH / 2 + 4)
     }
 
     ctx.restore()
+  }
+
+  // Solid track-colour body with a darkened name band, so --canvas-clip-ink
+  // reads on every track colour in every theme. Outline is 2px ink when active.
+  _paintClipFrame(ctx, x, y, w, h, tint, active) {
+    const c = this._c
+    ctx.fillStyle = tint
+    ctx.fillRect(x, y, w, h)
+    ctx.fillStyle = shade(0.42)
+    ctx.fillRect(x, y, w, 16)
+    ctx.strokeStyle = active ? c['canvas-clip-ink'] : withAlpha(c['canvas-clip-ink'], 0.35)
+    ctx.lineWidth = active ? 2 : 1
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1)
   }
 
   _drawWaveform(ctx, clip, clipX, trackY, clipW, state) {
@@ -438,6 +489,8 @@ export class ArrangementView {
     const secPerBeat = 60 / state.bpm
     const startSample = (clip.offset || 0) * state.sampleRate * secPerBeat
     const maxPx = Math.min(clipW, this._canvas.width - clipX)
+    const rmsInk = withAlpha(this._c['canvas-clip-ink'], 0.5)
+    const peakInk = withAlpha(this._c['canvas-clip-ink'], 0.85)
 
     for (let px = 0; px < maxPx; px++) {
       const sampleIdx = startSample + px * spp
@@ -448,7 +501,7 @@ export class ArrangementView {
       const rms  = lod[bucket * 2 + 1]
 
       // RMS bar
-      ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)'
+      ctx.strokeStyle = rmsInk
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(clipX + px, midY - rms * halfH)
@@ -456,7 +509,7 @@ export class ArrangementView {
       ctx.stroke()
 
       // Peak markers
-      ctx.strokeStyle = 'rgba(0, 229, 255, 0.7)'
+      ctx.strokeStyle = peakInk
       ctx.beginPath()
       ctx.moveTo(clipX + px, midY - peak * halfH)
       ctx.lineTo(clipX + px, midY - peak * halfH + 1)
@@ -468,7 +521,8 @@ export class ArrangementView {
     }
   }
 
-  _drawMidiClip(ctx, clip, trackY) {
+  _drawMidiClip(ctx, clip, trackY, trackIndex = 0) {
+    const c = this._c
     const w = this._canvas.width
     const clipX = beatsToPx(clip.startBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
     const clipW = beatsToPx(clip.duration || 4, this._ppb)
@@ -479,19 +533,15 @@ export class ArrangementView {
     const clipDrawY = trackY + pad
 
     // Body
-    ctx.fillStyle = '#1a2620'
-    ctx.strokeStyle = '#39ff1455'
-    ctx.lineWidth = 1
-    ctx.fillRect(clipX, clipDrawY, clipW, clipH)
-    ctx.strokeRect(clipX + 0.5, clipDrawY + 0.5, clipW - 1, clipH - 1)
+    this._paintClipFrame(ctx, clipX, clipDrawY, clipW, clipH, c[trackToken(trackIndex)], false)
 
     // Label
-    ctx.fillStyle = '#aaa'
-    ctx.font = '9px monospace'
+    ctx.fillStyle = c['canvas-clip-ink']
+    ctx.font = canvasFont(11, c['font-ui'], '600')
     ctx.save()
     ctx.rect(clipX, clipDrawY, clipW, clipH)
     ctx.clip()
-    ctx.fillText(clip.name || 'MIDI', clipX + 4, clipDrawY + 12)
+    ctx.fillText(clip.name || 'MIDI', clipX + 5, clipDrawY + 12)
 
     // Mini note bars
     const notes = clip.notes || []
@@ -507,7 +557,7 @@ export class ArrangementView {
         const nw = Math.max(1, beatsToPx(note.duration, this._ppb) - 1)
         const ny = clipDrawY + 14 + (1 - (note.pitch - minP) / pitchRange) * (noteAreaH - 2)
         if (nx > clipX && nx < clipX + clipW) {
-          ctx.fillStyle = '#39ff14bb'
+          ctx.fillStyle = c['canvas-clip-ink']
           ctx.fillRect(nx, ny, nw, 2)
         }
       }
@@ -520,8 +570,8 @@ export class ArrangementView {
     const x = beatsToPx(this._playheadBeat, this._ppb) - this._scrollLeft + TRACK_HEADER_W
     if (x < TRACK_HEADER_W || x > this._canvas.width) return
 
-    ctx.strokeStyle = '#ff00aa'
-    ctx.lineWidth = 1.5
+    ctx.strokeStyle = this._c['canvas-playhead']
+    ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(x, RULER_H)
     ctx.lineTo(x, this._canvas.height)
@@ -543,12 +593,14 @@ export class ArrangementView {
       name.className = 'track-name'
 
       const muteBtn = document.createElement('button')
-      muteBtn.className = 'mute-btn'
+      muteBtn.className = 'mute-btn btn btn--toggle'
       muteBtn.textContent = 'M'
+      muteBtn.title = 'Mute'
 
       const soloBtn = document.createElement('button')
-      soloBtn.className = 'solo-btn'
+      soloBtn.className = 'solo-btn btn btn--toggle'
       soloBtn.textContent = 'S'
+      soloBtn.title = 'Solo'
 
       const midiChSel = document.createElement('select')
       midiChSel.className = 'track-midi-ch'
@@ -590,7 +642,8 @@ export class ArrangementView {
       item.style.top = top + 'px'
       item.style.height = TRACK_H + 'px'
       item.style.position = 'absolute'
-      item.style.width = '160px'
+      item.style.width = '100%'
+      item.style.setProperty('--track-color', `var(--${trackToken(i)})`)
 
       // Channel lookup for mute/solo state
       const channel = state.mixer.channels.find(ch => ch.id === track.mixerChannelId)
@@ -598,8 +651,10 @@ export class ArrangementView {
       const soloBtn = item.querySelector('.solo-btn')
 
       if (channel) {
-        muteBtn.className = 'mute-btn' + (channel.mute ? ' active' : '')
-        soloBtn.className = 'solo-btn' + (channel.solo ? ' active' : '')
+        muteBtn.className = 'mute-btn btn btn--toggle' + (channel.mute ? ' active' : '')
+        muteBtn.setAttribute('aria-pressed', String(!!channel.mute))
+        soloBtn.className = 'solo-btn btn btn--toggle' + (channel.solo ? ' active' : '')
+        soloBtn.setAttribute('aria-pressed', String(!!channel.solo))
         muteBtn.onclick = () => document.dispatchEvent(new CustomEvent('mixer-param', {
           detail: { channelId: channel.id, param: 'mute', value: !channel.mute }
         }))

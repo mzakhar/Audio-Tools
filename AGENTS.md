@@ -198,8 +198,21 @@ the worklet.
 the `zakharhome.org` host. Never let a secure-context-only API sit on the
 critical path of core audio.
 
-**CSP:** the renderer ships `connect-src 'none'` — the app makes no network
-requests at all. Anything that would need one is a deliberate, reviewed change.
+**CSP:** `src/renderer/index.html:6` — `connect-src 'self'` (same-origin only),
+`media-src` also allows `https://cdn.freesound.org`, `worker-src` allows
+`http://localhost:*`. No cross-origin fetches; anything that would need one is a
+deliberate, reviewed change.
+
+**Styling:** `style.css` is an `@import` manifest; CSS lives per surface in
+`src/renderer/styles/` (keep the import order — it is the cascade). Every colour
+is a token in `styles/tokens.css`, defined for all three themes (`light` is the
+base `:root` and the default; `dark`, `rainbow`). Canvases read tokens through
+`js/ui/theme-colors.js` and repaint on `themechange`. `tests/theme-tokens.test.js`
+checks contrast and fails on any colour literal outside `tokens.css`. Shared
+primitives (`.btn`, `.panel`, `.lcd`, `.micro-label`, `[data-group]`) end
+`styles/base.css`. Screenshots: `powershell -File scripts/ui-snap.ps1 -Out
+specs/ui-baseline/<name>` against a served `out/renderer`. Plan:
+`specs/retro-instrument-ui.md`.
 
 ## Deployment
 

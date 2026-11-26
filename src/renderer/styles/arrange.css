@@ -1,0 +1,286 @@
+/* ─── Phase 1: Arrangement View ──────────────────────────────────────────── */
+#arrange-view {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* View visibility is driven by #main[data-view]; switchMode() sets the attribute
+   and never writes inline display. #rack-view stays out of this on purpose —
+   RackView owns its own inline display and reads it back (rack-view.js:183). */
+#main[data-view="arrange"] #app { display: none; }
+#main[data-view="rack"] #app { display: none; }
+#main[data-view="tr909"] #app { display: none; }
+#main[data-view="arrange"] #arrange-view { display: flex; }
+#main[data-view="tr909"] #tr909-view { display: block; }
+#arrange-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+#arrangement-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  min-height: 0;
+}
+.instrument-field { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; margin: 9px 0; color: var(--text-dim); font-size: 10px; }
+.instrument-field select, .instrument-field input { min-width: 0; width: 100%; background: var(--bg4); color: var(--text); border: 1px solid var(--border); padding: 5px; font: inherit; }
+.instrument-check { display: flex; gap: 7px; align-items: center; margin: 14px 0; color: var(--text-dim); font-size: 10px; }
+.instrument-audition { width: 100%; margin-top: 8px; padding: 8px; color: var(--accent); border-color: var(--accent); }
+.instrument-empty { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+#arrangement-container canvas {
+  display: block;
+  /* Out of flow: a bitmap sized from the container must not size the container,
+     or opening the mixer drawer pushes it off-screen instead of shrinking the canvas. */
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.arrangement-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Track header overlay (left side of arrangement canvas) */
+.track-header-list {
+  position: absolute;
+  left: 0;
+  top: 32px; /* below ruler */
+  bottom: 0;  /* without this the absolutely-positioned list is 0px tall and clips every header */
+  width: 210px;   /* keep in sync with TRACK_HEADER_W in arrangement-view.js */
+  overflow: hidden;
+  background: var(--surface-panel);
+  border-right: 1px solid var(--border);
+  z-index: 2;
+  pointer-events: none;
+}
+.track-header-item {
+  height: 72px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  padding: 0 8px 0 10px;
+  gap: 3px 6px;
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border);
+  /* track identity stripe; --track-color is set per row by arrangement-view.js */
+  border-left: 4px solid var(--track-color, var(--track-1));
+  font: 12px var(--font-ui);
+  pointer-events: all;
+}
+.track-header-item .track-name {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12px/18px var(--font-ui);
+  color: var(--text);
+}
+/* M / S compose .btn .btn--toggle; letters carry the meaning, fill carries state. */
+.track-header-item .mute-btn,
+.track-header-item .solo-btn {
+  min-height: 22px;
+  min-width: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.track-header-item .track-midi-ch {
+  width: 56px;
+  min-height: 22px;
+  font: 11px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+}
+.track-header-item .track-instrument-gear {
+  /* Sits on the instrument line, not wrapped onto one of its own. */
+  order: 4;
+  flex: 0 0 auto;
+  min-height: 22px;
+  min-width: 24px;
+  font-size: 12px;
+  padding: 0 4px;
+  color: var(--text-dim);
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.track-header-item .track-instrument-gear:hover { color: var(--text); border-color: var(--border-strong); }
+.track-header-item .track-instrument-chip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11px var(--font-ui);
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+  padding: 2px 6px;
+  min-height: 22px;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Its own line: sharing a 210 px row with name, mute, solo and channel left
+     it about ten pixels wide, which read as a blank white square. */
+  flex: 1 1 calc(100% - 36px); /* wraps onto its own line with the gear beside it */
+  order: 3;
+}
+.track-header-item .track-instrument-chip.missing { color: var(--danger); border-color: var(--danger); }
+.track-header-item .track-instrument-chip:hover { border-color: var(--border-strong); }
+.track-header-item :is(button, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* ── Arrangement scrollbars ──────────────────────────────────────────────── */
+.arr-scrollbar {
+  position: absolute;
+  background: var(--bg2);
+  border-radius: 4px;
+  z-index: 3;
+}
+.arr-scrollbar-v {
+  right: 0;
+  top: 32px; /* RULER_H */
+  width: 8px;
+  bottom: 8px; /* leave corner for h-scrollbar */
+}
+.arr-scrollbar-h {
+  bottom: 0;
+  left: 160px; /* TRACK_HEADER_W */
+  height: 8px;
+  right: 8px; /* leave corner for v-scrollbar */
+}
+.arr-scroll-thumb {
+  position: absolute;
+  background: var(--border-strong);
+  border-radius: 4px;
+  cursor: grab;
+  transition: background 0.1s;
+  /* v thumb: left/right 0, top set by JS, height set by JS */
+  left: 0; right: 0;
+  /* h thumb: top/bottom 0, left set by JS, width set by JS */
+  top: 0; bottom: 0;
+  min-width: 24px;
+  min-height: 24px;
+}
+.arr-scroll-thumb:hover,
+.arr-scroll-thumb:active {
+  background: var(--text-dim);
+}
+
+/* ── Arrangement context menu ─────────────────────────────────────────────── */
+.arr-ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 28%, transparent);
+}
+.arr-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: 12px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.arr-ctx-item:hover { background: var(--bg3); }
+.arr-ctx-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.arr-ctx-item.danger { color: var(--danger); }
+.arr-ctx-item.danger:hover { background: var(--danger-subtle); }
+
+/* --- Mixer drawer: closed by default, session state only ---------------- */
+#mixer-bar {
+  height: 0;
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  transition: height 0.12s ease;
+}
+#mixer-bar.open {
+  height: 148px;
+  padding: 6px;
+  overflow-x: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  #mixer-bar { transition: none; }
+}
+/* One panel per strip: label on top, then fader/pan, M S side by side. */
+.mixer-strip {
+  width: 88px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  justify-items: center;
+  padding: 6px 4px;
+  gap: 4px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.mixer-strip > :is(.mixer-strip-label, .mixer-fader, .mixer-pan, .mixer-effect-slots, .mixer-sends) {
+  grid-column: 1 / -1;
+}
+.mixer-strip-label {
+  font: 600 11px var(--font-ui);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 78px;
+  text-align: center;
+}
+/* Attribute selector needed: plain `.mixer-fader` loses to `input[type=range] { width: 90px }`,
+   which is wider than the strip and spills over the neighbouring channel. */
+input[type=range].mixer-fader {
+  width: 72px;
+}
+input[type=range].mixer-pan {
+  width: 56px;
+}
+.mixer-strip .mute-btn,
+.mixer-strip .solo-btn {
+  min-height: 24px;
+  min-width: 30px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.mixer-effect-slots { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+.effect-slot-btn {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  font: 10px var(--font-mono);
+  color: var(--text-dim);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.effect-slot-btn.occupied { color: var(--text); border-color: var(--border-strong); }
+.effect-slot-btn:focus-visible,
+.mixer-strip :is(.mute-btn, .solo-btn):focus-visible,
+.mixer-strip input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.mixer-sends { display: flex; flex-direction: column; gap: 2px; }
+.mixer-send-label { font: 600 10px var(--font-ui); color: var(--text-dim); }

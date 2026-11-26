@@ -11,7 +11,25 @@
 // uiFrame(); panel() only paints. Same split as algo.js — the module stays
 // testable with no DOM, and the panel is throwaway.
 
+import { readThemeColors, themeStyle, onThemeChange } from '../../ui/theme-colors.js'
 import { findTrigger, levels, fftSizeFor } from '../viz.js'
+
+// Theme colours, read lazily at paint time (never in create()) and cached until
+// the theme changes. Named fallbacks only apply with no document (tests).
+let colors = null
+function palette() {
+  if (colors) return colors
+  const fallback = { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray' }
+  if (typeof document === 'undefined') return fallback
+  const read = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim'], themeStyle())
+  // A token can read empty (jsdom, or before styles load): use the fallback, don't cache.
+  if (Object.values(read).some(v => !v)) return fallback
+  colors = read
+  return colors
+}
+if (typeof window !== 'undefined') onThemeChange(() => { colors = null })
+const tint = (c, pct) => `color-mix(in srgb, ${c} ${pct}%, transparent)`
+
 
 const LIVE = 0.01 // peak below this and a jack counts as unpatched
 
@@ -166,7 +184,7 @@ function fit(canvas, g, fallbackW, fallbackH) {
 }
 
 function grid(g, w, h) {
-  g.strokeStyle = '#ffffff14'
+  g.strokeStyle = tint(palette()['lcd-dim'], 35)
   g.lineWidth = 1
   g.beginPath()
   for (let i = 1; i < 4; i++) {
@@ -203,10 +221,10 @@ function trace(g, buf, start, count, w, h, scale, color) {
 }
 
 function paintWave(g, w, h, frame, scale) {
-  trace(g, frame.a, frame.start, frame.count, w, h, scale, '#7ee0ff')
-  if (frame.bLive) trace(g, frame.b, frame.start, frame.count, w, h, scale, '#ffb36b')
+  trace(g, frame.a, frame.start, frame.count, w, h, scale, palette()['lcd-accent'])
+  if (frame.bLive) trace(g, frame.b, frame.start, frame.count, w, h, scale, palette()['lcd-ink'])
   if (!frame.triggered) {
-    g.fillStyle = '#ff9b6b'
+    g.fillStyle = palette()['lcd-dim']
     g.font = '8px monospace'
     g.fillText('UNTRIG', 3, 9)
   }
@@ -215,7 +233,7 @@ function paintWave(g, w, h, frame, scale) {
 function paintXY(g, w, h, frame, scale) {
   const step = Math.max(1, Math.floor(frame.count / 1024))
   const clamp = v => Math.max(-1, Math.min(1, v * scale))
-  g.strokeStyle = '#7ee0ff'
+  g.strokeStyle = palette()['lcd-accent']
   g.lineWidth = 1
   g.beginPath()
   for (let i = 0; i < frame.count; i += step) {
@@ -231,7 +249,7 @@ function paintSpectrum(g, w, h, frame) {
   if (!bins) return
   const columns = Math.max(1, Math.min(bins, Math.round(w)))
   const bw = w / columns
-  g.fillStyle = '#7ee0ff'
+  g.fillStyle = palette()['lcd-accent']
   for (let c = 0; c < columns; c++) {
     const from = Math.floor(c * bins / columns)
     const to = Math.max(from + 1, Math.floor((c + 1) * bins / columns))

@@ -1,0 +1,448 @@
+/* ─── 909 Rhythm Composer ─────────────────────────────────────────────────── */
+#tr909-view { display: none; width: 100%; flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 40px; }
+
+.tr909-shell {
+  --lane: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  padding: 14px;
+  min-width: 0;
+}
+
+.tr909-header,
+.tr909-global,
+.tr909-body {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tr909-header {
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tr909-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 116px;
+}
+.tr909-title strong {
+  font: 800 34px/0.95 var(--font-ui);
+  color: var(--tr909-accent);
+  letter-spacing: 0;
+}
+.tr909-kicker {
+  font: 600 10px/1 var(--font-ui);
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+
+.tr909-transport {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.tr909-transport .transport-btn {
+  min-width: 76px;
+  font-family: var(--font-ui);
+  min-height: 32px;
+  padding: 0 12px;
+}
+.tr909-transport .transport-btn[aria-pressed="true"] { color: var(--text-inverse); background: var(--state-on); border-color: var(--state-on); box-shadow: var(--shadow-pressed); }
+.tr909-transport .transport-btn.clear { color: var(--danger); border-color: var(--danger); }
+
+.tr909-barstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tr909-barstrip-label {
+  color: var(--text-dim);
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+}
+.tr909-bar-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.tr909-bar-btn-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tr909-bar-btn {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: 600 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-raised);
+}
+.tr909-bar-btn:hover { border-color: var(--border-strong); }
+/* Selected — persistent outline, the bar the editor is showing. */
+.tr909-bar-btn.selected {
+  border-color: var(--tr909-accent);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--tr909-accent);
+}
+/* Playing — bright animated fill, the bar currently sounding in chain mode.
+   Composes with .selected: a bar can be both at once. */
+.tr909-bar-btn.bar-playing {
+  background: var(--tr909-accent);
+  border-color: var(--tr909-accent);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-pressed);
+  text-decoration: underline;
+}
+.tr909-bar-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  line-height: 12px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-panel);
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+.tr909-bar-remove:hover { border-color: var(--danger); color: var(--danger); }
+.tr909-bar-remove { font-family: var(--font-ui); }
+
+.tr909-pattern,
+.tr909-control,
+.tr909-param {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tr909-pattern select,
+.tr909-control select,
+.tr909-control input[type=number] {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 12px/1 var(--font-ui);
+  height: 28px;
+  padding: 2px 6px;
+}
+/* The "last step" count reads as a display, like the other numeric readouts. */
+.tr909-control input[type=number] {
+  width: 56px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--lcd-ink);
+  background: var(--lcd-bg);
+  border-color: var(--lcd-bg);
+}
+
+.tr909-global {
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 0;
+}
+.tr909-control { min-width: 164px; }
+.tr909-control span,
+.tr909-param span {
+  width: 54px;
+  color: var(--text-dim);
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tr909-control b,
+.tr909-param b {
+  min-width: 34px;
+  color: var(--text);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.tr909-toggle,
+.tr909-audition { min-height: 28px; padding: 0 12px; }
+
+.tr909-body {
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 208px;
+  grid-template-areas:
+    "instruments params"
+    "editor params";
+}
+
+.tr909-instruments {
+  grid-area: instruments;
+  display: grid;
+  grid-template-columns: repeat(11, minmax(56px, 1fr));
+  gap: 5px;
+  overflow-x: visible;
+  padding-bottom: 4px;
+  min-width: 0;
+}
+
+/* Lane identity: 11 drum voices cycle through the 8 track colours. Colour is a
+   marker only; labels stay --text. */
+#tr909-view [data-lane="bd"] { --lane: var(--track-1); }
+#tr909-view [data-lane="sd"] { --lane: var(--track-2); }
+#tr909-view [data-lane="lt"] { --lane: var(--track-3); }
+#tr909-view [data-lane="mt"] { --lane: var(--track-4); }
+#tr909-view [data-lane="ht"] { --lane: var(--track-5); }
+#tr909-view [data-lane="rs"] { --lane: var(--track-6); }
+#tr909-view [data-lane="cp"] { --lane: var(--track-7); }
+#tr909-view [data-lane="ch"] { --lane: var(--track-8); }
+#tr909-view [data-lane="oh"] { --lane: var(--track-1); }
+#tr909-view [data-lane="cr"] { --lane: var(--track-2); }
+#tr909-view [data-lane="rd"] { --lane: var(--track-3); }
+
+.tr909-strip {
+  position: relative;
+  height: 76px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--lane);
+  background: var(--surface-control);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 5px;
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-raised);
+}
+.tr909-strip:hover { border-color: var(--border-strong); border-top-color: var(--lane); }
+.tr909-strip.selected {
+  background: var(--bg3);
+  border-color: var(--state-on);
+  border-top-color: var(--lane);
+  box-shadow: var(--shadow-pressed), inset 0 0 0 1px var(--state-on);
+}
+.tr909-strip.selected::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  width: 14px;
+  height: 3px;
+  background: var(--state-on);
+}
+.tr909-strip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tr909-strip-label {
+  color: var(--text);
+  font: 700 12px/1 var(--font-ui);
+}
+.tr909-strip-meter {
+  width: 10px;
+  min-height: 4px;
+  max-height: 42px;
+  background: var(--lane);
+  border-radius: 1px;
+}
+
+.tr909-editor {
+  grid-area: editor;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Every lane in the editor — selected instrument, drum grid, accent, flam —
+     shares this gutter and gap, so a given step lines up vertically across all
+     of them. Change them here, not per row. */
+  --lane-label: 54px;
+  --lane-gap: 4px;
+}
+
+.tr909-lane-row {
+  display: grid;
+  grid-template-columns: var(--lane-label) minmax(0, 1fr);
+  gap: var(--lane-gap);
+  align-items: center;
+}
+.tr909-lane-label {
+  color: var(--text);
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  overflow: hidden;
+  border-left: 4px solid var(--lane);
+  padding-left: 5px;
+}
+.tr909-lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+  font: 600 13px/1.2 var(--font-ui);
+}
+
+.tr909-steps,
+.tr909-mini-steps,
+.tr909-grid-steps {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: var(--lane-gap);
+}
+
+.tr909-step {
+  height: 52px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-control);
+  color: var(--text-dim);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-raised);
+}
+/* Quarter-note groups alternate tint, like the 909's coloured key blocks; each
+   group also starts with a stronger left edge so grouping survives without colour. */
+.tr909-steps > :nth-child(8n+5), .tr909-steps > :nth-child(8n+6),
+.tr909-steps > :nth-child(8n+7), .tr909-steps > :nth-child(8n+8),
+.tr909-mini-steps > :nth-child(8n+5), .tr909-mini-steps > :nth-child(8n+6),
+.tr909-mini-steps > :nth-child(8n+7), .tr909-mini-steps > :nth-child(8n+8),
+.tr909-grid-steps > :nth-child(8n+5), .tr909-grid-steps > :nth-child(8n+6),
+.tr909-grid-steps > :nth-child(8n+7), .tr909-grid-steps > :nth-child(8n+8) {
+  background: color-mix(in srgb, var(--group-1) 16%, var(--surface-control));
+}
+.tr909-steps > :nth-child(4n+1), .tr909-mini-steps > :nth-child(4n+1), .tr909-grid-steps > :nth-child(4n+1) {
+  border-left-color: var(--border-strong);
+  border-left-width: 2px;
+}
+.tr909-step:hover { border-color: var(--border-strong); }
+.tr909-step.on,
+.tr909-grid-cell.on {
+  background: var(--lane);
+  border-color: var(--text);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-pressed), inset 0 2px 3px color-mix(in srgb, var(--text) 35%, transparent);
+}
+/* Playhead: heavy outline plus a bottom bar, readable on lit and unlit keys. */
+.tr909-step.playing,
+.tr909-mini.playing,
+.tr909-grid-cell.playing {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+  box-shadow: inset 0 -5px 0 var(--text);
+}
+.tr909-step:focus-visible, .tr909-mini:focus-visible, .tr909-grid-cell:focus-visible,
+.tr909-bar-btn:focus-visible, .tr909-grid-label:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Accent / flam: secondary, smaller. */
+.tr909-sub-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.tr909-sub-lanes .tr909-lane-label { color: var(--text-dim); border-left-color: var(--border-strong); }
+.tr909-mini {
+  height: 18px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-control);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.tr909-mini.on { background: var(--state-on); border-color: var(--state-on); }
+
+/* No max-height: the whole composer scrolls with #app rather than trapping the
+   grid in a nested scroller. */
+.tr909-all-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+.tr909-grid-label {
+  height: 26px;
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--lane);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 600 10px/1 var(--font-ui);
+  cursor: pointer;
+}
+.tr909-grid-cell {
+  height: 26px;
+  min-width: 0;
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.tr909-params {
+  grid-area: params;
+  width: 208px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 1px solid var(--border-subtle);
+  padding: 0 0 0 12px;
+}
+.tr909-param { flex-wrap: wrap; }
+.tr909-param input[type=range] {
+  flex: 1;
+  min-width: 96px;
+}
+
+@media (max-width: 980px) {
+  .tr909-params { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 10px 0 0; }
+  .tr909-body {
+    display: flex;
+    flex-direction: column;
+  }
+  .tr909-instruments {
+    grid-template-columns: repeat(11, minmax(52px, 1fr));
+    overflow-x: auto;
+  }
+  .tr909-strip { width: 100%; height: 84px; }
+  .tr909-params {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .tr909-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .tr909-steps,
+  .tr909-mini-steps,
+  .tr909-grid-steps { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .tr909-step { height: 44px; }
+  .tr909-editor { min-width: 0; --lane-label: 36px; }
+}
+

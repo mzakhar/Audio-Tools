@@ -1,0 +1,247 @@
+/* --- Dialog buttons (compose .btn from base.css) ------------------------- */
+.midi-status {
+  font: 600 11px/1.2 var(--font-ui);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.midi-status.granted { color: var(--accent3); }
+
+.midi-btn, .midi-rec-btn, .dlg-close-btn { flex-shrink: 0; font-size: 12px; }
+.midi-btn { min-height: 28px; }
+/* Primary actions take the .btn--toggle "on" look. */
+#asst-apply-btn:not(:disabled),
+#ib-save-btn,
+#lib-import-btn,
+#midi-enable-btn {
+  color: var(--text-inverse);
+  background: var(--state-on);
+  border-color: var(--state-on);
+}
+.midi-btn:disabled { opacity: 0.45; }
+
+.midi-select {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 12px var(--font-ui);
+  padding: 4px 6px;
+  min-height: 28px;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.midi-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.midi-rec-btn.recording { color: var(--danger-on); background: var(--state-record); border-color: var(--state-record); }
+
+/* --- Dialogs (native <dialog>) ------------------------------------------ */
+/* A modal <dialog> is centred by the UA's `margin: auto`, which the reset at
+   the top of this file wipes out — without this every dialog pins itself to
+   the top-left corner. Keep it above the per-dialog rules. */
+dialog {
+  margin: auto;
+  max-width: 92vw;
+  max-height: 88vh;
+}
+dialog.app-dialog,
+dialog.pr-dialog {
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-raised);
+  color: var(--text);
+  font-family: var(--font-ui);
+  padding: 0;
+}
+dialog.app-dialog::backdrop,
+dialog.pr-dialog::backdrop { background: color-mix(in srgb, var(--text) 45%, transparent); }
+
+dialog.app-dialog[open] { width: min(420px, 92vw); }
+.dlg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+}
+.dlg-title {
+  font: 600 14px/1.2 var(--font-ui);
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-close-btn { min-width: 28px; padding: 0 8px; }
+.dlg-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.dlg-row { display: flex; align-items: center; gap: 8px; }
+.dlg-label { font: 600 10px/1.2 var(--font-ui); letter-spacing: 0.08em; color: var(--text-dim); min-width: 48px; }
+.dlg-note { font-size: 12px; line-height: 1.5; color: var(--text-dim); margin: 0; }
+.dlg-header .dlg-title { margin-right: auto; }
+
+/* --- Instrument browser ------------------------------------------------- */
+dialog.ib-dialog[open] { width: min(640px, 94vw); }
+.ib-search, .lib-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 13px var(--font-ui);
+  min-height: 28px;
+  padding: 4px 8px;
+}
+.ib-search:focus-visible, .lib-search:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ib-scopes { display: flex; flex-wrap: wrap; gap: 4px; }
+.ib-chip {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font: 600 11px/1 var(--font-ui);
+  padding: 5px 10px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.ib-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.ib-chip[aria-pressed="true"] { color: var(--text-inverse); background: var(--state-on); border-color: var(--state-on); }
+.ib-list {
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+  background: var(--surface-inset);
+}
+.ib-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) minmax(0, 100px) 34px 68px;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ib-row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ib-row.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.ib-label, .ib-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sub, .ib-program { color: var(--text-dim); font-size: 11px; }
+.ib-program { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ib-fav {
+  background: none;
+  border: none;
+  color: var(--border-strong);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.ib-fav.on { color: var(--accent2); }
+.ib-state { font-size: 11px; color: var(--text-dim); text-align: right; }
+.ib-state.missing, .ib-state.unavailable { color: var(--danger); }
+.ib-preset-remove { cursor: pointer; }
+.ib-preset-remove:hover { color: var(--danger); }
+.dlg-row .ib-search { flex: 1; width: auto; }
+
+/* --- Instrument settings ------------------------------------------------ */
+.is-tabs { display: flex; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--border-subtle); }
+.is-tab {
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+  color: var(--text-dim);
+  font: 600 12px/1 var(--font-ui);
+  padding: 6px 12px;
+  min-height: 28px;
+  cursor: pointer;
+}
+.is-tab:hover { color: var(--text); }
+.is-tab.active {
+  color: var(--text);
+  background: var(--surface-panel);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 2px 0 var(--state-on);
+}
+
+/* --- Library ------------------------------------------------------------ */
+.lib-list { display: flex; flex-direction: column; gap: 6px; max-height: min(46vh, 360px); overflow-y: auto; }
+.lib-row {
+  display: grid;
+  /* Name, counts and licence stack in column one; remove sits beside them
+     rather than under the licence line. */
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s);
+}
+.lib-row > .lib-name,
+.lib-row > .lib-counts,
+.lib-row > .lib-licence { grid-column: 1; }
+.lib-remove {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  font: 600 11px var(--font-ui);
+  padding: 4px 8px;
+  min-height: 24px;
+  background: var(--surface-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.lib-remove:hover { border-color: var(--danger); color: var(--danger); }
+.lib-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.discovery-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: end;
+}
+.discovery-actions .lib-remove { grid-column: auto; grid-row: auto; }
+.lib-name { font-size: 13px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-counts, .lib-licence { font-size: 11px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-browse { display: flex; flex-direction: column; gap: 6px; }
+#library-dialog .dlg-body { max-height: calc(88vh - 44px); overflow-y: auto; }
+#lib-discovery { min-width: 0; margin-top: 4px; }
+#lib-discovery .dlg-row { flex-wrap: wrap; }
+.discovery-config {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 8px;
+}
+.discovery-config label { min-width: 0; }
+.discovery-config input { box-sizing: border-box; min-width: 0; width: 100%; }
+#lib-discovery .lib-list { max-height: min(30vh, 240px); }
+@media (max-width: 360px) {
+  .discovery-config label { grid-column: 1 / -1; }
+  .discovery-config button { grid-column: 2; }
+}
+.lib-folders { display: flex; flex-direction: column; gap: 4px; }
+/* A preset row is a button so Enter activates it natively. */
+.lib-preset { text-align: left; cursor: pointer; font-family: inherit; color: var(--text); }
+.lib-preset:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.lib-preset:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.lib-state { grid-column: 2; font: 11px var(--font-mono); color: var(--accent); }
+
+.ib-chip:focus-visible, .is-tab:focus-visible, .ib-fav:focus-visible,
+.track-instrument-chip:focus-visible, .track-instrument-gear:focus-visible,
+.midi-btn:focus-visible, .midi-rec-btn:focus-visible, .dlg-close-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}

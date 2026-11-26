@@ -51,15 +51,19 @@ export class MixerStrip {
     })
 
     const muteBtn = document.createElement('button')
-    muteBtn.className = 'mute-btn' + (channel.mute ? ' active' : '')
+    muteBtn.className = 'mute-btn btn btn--toggle' + (channel.mute ? ' active' : '')
     muteBtn.textContent = 'M'
+    muteBtn.title = 'Mute'
+    muteBtn.setAttribute('aria-pressed', String(!!channel.mute))
     muteBtn.addEventListener('click', () => {
       this._onParam(this._channelId, 'mute', !channel.mute)
     })
 
     const soloBtn = document.createElement('button')
-    soloBtn.className = 'solo-btn' + (channel.solo ? ' active' : '')
+    soloBtn.className = 'solo-btn btn btn--toggle' + (channel.solo ? ' active' : '')
     soloBtn.textContent = 'S'
+    soloBtn.title = 'Solo'
+    soloBtn.setAttribute('aria-pressed', String(!!channel.solo))
     soloBtn.addEventListener('click', () => {
       this._onParam(this._channelId, 'solo', !channel.solo)
     })
@@ -132,8 +136,10 @@ export class MixerStrip {
     this._volFader.style.setProperty('--fill', channel.volume * 100 + '%')
     this._panKnob.value = channel.pan
     this._panKnob.style.setProperty('--fill', (channel.pan + 1) / 2 * 100 + '%')
-    this._muteBtn.className = 'mute-btn' + (channel.mute ? ' active' : '')
-    this._soloBtn.className = 'solo-btn' + (channel.solo ? ' active' : '')
+    this._muteBtn.className = 'mute-btn btn btn--toggle' + (channel.mute ? ' active' : '')
+    this._soloBtn.className = 'solo-btn btn btn--toggle' + (channel.solo ? ' active' : '')
+    this._muteBtn.setAttribute('aria-pressed', String(!!channel.mute))
+    this._soloBtn.setAttribute('aria-pressed', String(!!channel.solo))
 
     // Refresh effect slots
     const effects = track?.effects ?? []
