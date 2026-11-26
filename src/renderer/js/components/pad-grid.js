@@ -46,7 +46,7 @@ export class PadGrid {
     for (const bank of ['A', 'B']) {
       const btn = document.createElement('button')
       btn.type = 'button'
-      btn.className = 'pad-bank pad-bank-' + bank.toLowerCase()
+      btn.className = 'btn btn--toggle pad-bank pad-bank-' + bank.toLowerCase()
       btn.textContent = bank
       btn.setAttribute('aria-pressed', bank === this.bank ? 'true' : 'false')
       btn.setAttribute('aria-label', 'Pad bank ' + bank)

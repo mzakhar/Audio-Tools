@@ -711,7 +711,7 @@ function renderRackPanel(panel, instrument) {
   note.textContent = `Rack: ${rack?.name || instrument.rackId}`
   const open = document.createElement('button')
   open.type = 'button'
-  open.className = 'knob-open-btn'
+  open.className = 'btn knob-open-btn'
   open.textContent = 'OPEN RACK'
   open.addEventListener('click', () => switchMode('rack'))
   panel.append(note, open)
@@ -721,6 +721,7 @@ function renderRackPanel(panel, instrument) {
 function addKnob(panel, def, { id, value, onInput, event = 'input' }) {
   const group = document.createElement('div')
   group.className = 'knob-group'
+  group.dataset.group = String(panel.querySelectorAll('.knob-group').length % 4 + 1)
 
   const lbl = document.createElement('label')
   lbl.className = 'knob-label'
