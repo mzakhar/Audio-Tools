@@ -177,3 +177,9 @@ and F5 Pads view (they adopt the system when built); any layout/IA change from
   sits beside `js/ui/theme-colors.js` for canvas-specific helpers.
 - Parallel worktree agents started from `main`, not the feature branch; each
   fast-forwarded itself. Brief future agents with the base commit explicitly.
+- Review follow-ups not taken (low impact today): `RackCables` never removes its
+  ResizeObserver/theme listener (one instance per app); `withAlpha` only parses
+  hex (every token is hex); the synth's global `input[type=range]` rule is still
+  global and other surfaces override it — scope it into a primitive if a new
+  surface fights it; legacy button classes (`.transport-btn`, `.cmd-btn`,
+  `.mute-btn`) still carry their own backgrounds under `.btn`.

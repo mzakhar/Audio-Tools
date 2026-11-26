@@ -223,7 +223,7 @@ export class ArrangementView {
     this._lodUnsub = this._audioStore.onLodReady(() => this.render())
 
     // Theme switch repaints without a reload
-    this._themeUnsub = onThemeChange(() => this.render())
+    this._themeUnsub = onThemeChange(() => { this._c = null; this.render() })
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -253,7 +253,8 @@ export class ArrangementView {
     const w = this._canvas.width
     const h = this._canvas.height
 
-    this._c = readThemeColors(ARRANGE_TOKENS, themeStyle())
+    // Cached: one style recalc per theme change, not per drag/playhead frame.
+    this._c ??= readThemeColors(ARRANGE_TOKENS, themeStyle())
     ctx.clearRect(0, 0, w, h)
     this._drawRuler(ctx, state)
     this._drawTracks(ctx, state)

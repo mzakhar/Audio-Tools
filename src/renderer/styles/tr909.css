@@ -206,17 +206,17 @@
 
 /* Lane identity: 11 drum voices cycle through the 8 track colours. Colour is a
    marker only; labels stay --text. */
-[data-lane="bd"] { --lane: var(--track-1); }
-[data-lane="sd"] { --lane: var(--track-2); }
-[data-lane="lt"] { --lane: var(--track-3); }
-[data-lane="mt"] { --lane: var(--track-4); }
-[data-lane="ht"] { --lane: var(--track-5); }
-[data-lane="rs"] { --lane: var(--track-6); }
-[data-lane="cp"] { --lane: var(--track-7); }
-[data-lane="ch"] { --lane: var(--track-8); }
-[data-lane="oh"] { --lane: var(--track-1); }
-[data-lane="cr"] { --lane: var(--track-2); }
-[data-lane="rd"] { --lane: var(--track-3); }
+#tr909-view [data-lane="bd"] { --lane: var(--track-1); }
+#tr909-view [data-lane="sd"] { --lane: var(--track-2); }
+#tr909-view [data-lane="lt"] { --lane: var(--track-3); }
+#tr909-view [data-lane="mt"] { --lane: var(--track-4); }
+#tr909-view [data-lane="ht"] { --lane: var(--track-5); }
+#tr909-view [data-lane="rs"] { --lane: var(--track-6); }
+#tr909-view [data-lane="cp"] { --lane: var(--track-7); }
+#tr909-view [data-lane="ch"] { --lane: var(--track-8); }
+#tr909-view [data-lane="oh"] { --lane: var(--track-1); }
+#tr909-view [data-lane="cr"] { --lane: var(--track-2); }
+#tr909-view [data-lane="rd"] { --lane: var(--track-3); }
 
 .tr909-strip {
   position: relative;

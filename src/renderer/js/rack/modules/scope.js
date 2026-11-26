@@ -19,8 +19,12 @@ import { findTrigger, levels, fftSizeFor } from '../viz.js'
 let colors = null
 function palette() {
   if (colors) return colors
-  if (typeof document === 'undefined') return { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray' }
-  colors = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim'], themeStyle())
+  const fallback = { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray' }
+  if (typeof document === 'undefined') return fallback
+  const read = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim'], themeStyle())
+  // A token can read empty (jsdom, or before styles load): use the fallback, don't cache.
+  if (Object.values(read).some(v => !v)) return fallback
+  colors = read
   return colors
 }
 if (typeof window !== 'undefined') onThemeChange(() => { colors = null })

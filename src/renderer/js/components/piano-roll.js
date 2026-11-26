@@ -75,7 +75,7 @@ export class PianoRoll {
 
     // Store subscription
     this._unsub = this._store.subscribe(() => this.render())
-    this._themeUnsub = onThemeChange(() => this.render())
+    this._themeUnsub = onThemeChange(() => { this._c = null; this.render() })
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -106,7 +106,8 @@ export class PianoRoll {
     const ctx = this._ctx
     const w = this._canvas.width
     const h = this._canvas.height
-    this._c = readThemeColors(ARRANGE_TOKENS, themeStyle())
+    // Cached: one style recalc per theme change, not per drag/playhead frame.
+    this._c ??= readThemeColors(ARRANGE_TOKENS, themeStyle())
     ctx.clearRect(0, 0, w, h)
     this._drawGrid(ctx, clip, w, h)
     this._drawPianoKeys(ctx, h)

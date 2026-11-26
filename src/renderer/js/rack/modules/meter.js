@@ -25,8 +25,12 @@ import { levels, bipolar, dbfs, dbToFraction, approach, peakHold } from '../viz.
 let colors = null
 function palette() {
   if (colors) return colors
-  if (typeof document === 'undefined') return { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray', 'canvas-meter-ok': 'green', 'canvas-meter-hot': 'gold', 'canvas-meter-clip': 'red' }
-  colors = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim', 'canvas-meter-ok', 'canvas-meter-hot', 'canvas-meter-clip'], themeStyle())
+  const fallback = { 'lcd-accent': 'orange', 'lcd-ink': 'white', 'lcd-dim': 'gray', 'canvas-meter-ok': 'green', 'canvas-meter-hot': 'gold', 'canvas-meter-clip': 'red' }
+  if (typeof document === 'undefined') return fallback
+  const read = readThemeColors(['lcd-accent', 'lcd-ink', 'lcd-dim', 'canvas-meter-ok', 'canvas-meter-hot', 'canvas-meter-clip'], themeStyle())
+  // A token can read empty (jsdom, or before styles load): use the fallback, don't cache.
+  if (Object.values(read).some(v => !v)) return fallback
+  colors = read
   return colors
 }
 if (typeof window !== 'undefined') onThemeChange(() => { colors = null })
