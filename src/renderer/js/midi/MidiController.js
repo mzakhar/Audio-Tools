@@ -5,6 +5,7 @@
  * punch-in recording to produce MidiClip note arrays.
  */
 import { parseMidiMessage } from './midi-message.js'
+import { applyVelocityCurve, curveForDevice } from '../pads/velocity-curve.js'
 
 let _noteIdCounter = 0
 function genNoteId() { return `mn-${++_noteIdCounter}-${Date.now()}` }
@@ -12,6 +13,7 @@ function genNoteId() { return `mn-${++_noteIdCounter}-${Date.now()}` }
 const MidiController = {
   _access: null,
   _input: null,       // currently subscribed MIDIInput
+  _curve: curveForDevice(''), // velocity shaping for that device, resolved at selection
   _recording: false,
   _recordStartPerf: 0, // performance.now() when recording started
   _bpm: 120,
@@ -55,9 +57,11 @@ const MidiController = {
       this._input.onmidimessage = null
       this._input = null
     }
+    this._curve = curveForDevice('')
     if (!this._access || !id) return
     this._input = this._access.inputs.get(id) ?? null
     if (this._input) {
+      this._curve = curveForDevice(this._input.name)
       this._input.onmidimessage = e => this._onMidiMessage(e)
     }
   },
@@ -104,8 +108,14 @@ const MidiController = {
   },
 
   _onMidiMessage(e) {
-    const parsed = parseMidiMessage(e.data)
+    let parsed = parseMidiMessage(e.data)
     if (!parsed) return
+    // A device property, so recordings keep what was heard. 0 = hit dropped.
+    if (parsed.kind === 'note-on') {
+      const velocity = applyVelocityCurve(parsed.velocity, this._curve)
+      if (!velocity) return
+      parsed = { ...parsed, velocity }
+    }
 
     document.dispatchEvent(new CustomEvent('midi-event', { detail: { ...parsed, time: e.timeStamp } }))
 

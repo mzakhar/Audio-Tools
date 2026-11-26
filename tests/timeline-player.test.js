@@ -54,7 +54,7 @@ if (typeof globalThis.OfflineAudioContext === 'undefined') {
   }
 }
 
-import TimelinePlayer from '../src/renderer/js/playback/timeline-player.js'
+import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from '../src/renderer/js/playback/timeline-player.js'
 
 function makeAudioStore(buffers = {}) {
   return {
@@ -157,5 +157,38 @@ describe('TimelinePlayer.bounce', () => {
       sampleRate: 44100
     })
     expect(result).toBeInstanceOf(ArrayBuffer)
+  })
+})
+
+describe('instrumentFor kit', () => {
+  const kitCtx = () => {
+    const param = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} })
+    const node = extra => ({ connect: d => d, disconnect() {}, ...extra })
+    const sources = []
+    return {
+      sources,
+      ctx: {
+        currentTime: 0,
+        sampleRate: 44100,
+        createGain: () => node({ gain: param() }),
+        createBiquadFilter: () => node({ frequency: param(), Q: param(), gain: param(), detune: param() }),
+        createWaveShaper: () => node({}),
+        createOscillator: () => { const s = node({ frequency: param(), detune: param(), start() {}, stop() {} }); sources.push(s); return s },
+        createBufferSource: () => { const s = node({ playbackRate: param(), start() {}, stop() {} }); sources.push(s); return s },
+        createBuffer: (ch, len) => ({ getChannelData: () => new Float32Array(len) })
+      }
+    }
+  }
+
+  it('plays a scheduled note through the kit, so a kit track is not silent on the timeline', () => {
+    const { ctx, sources } = kitCtx()
+    const play = scheduledInstrumentFor({ instrument: { type: 'kit', kitId: 'default-909' } }, { ctx, output: ctx.createGain() })
+    play({ pitch: 36, velocity: 0.8 }, 1, 1.5)
+    expect(sources.length).toBeGreaterThan(0)
+  })
+
+  it('is silent for an unknown kit', () => {
+    const { ctx } = kitCtx()
+    expect(scheduledInstrumentFor({ instrument: { type: 'kit', kitId: 'nope' } }, { ctx, output: {} })).toBeNull()
   })
 })

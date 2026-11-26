@@ -12,7 +12,7 @@ import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, Se
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
-import { liveInstrumentFor, paletteAcceptsNote } from './midi/live-instrument.js'
+import { liveInstrumentFor, paletteAcceptsNote, kitAcceptsNote } from './midi/live-instrument.js'
 import FileAdapter from './io/FileAdapter.js'
 import { pickAudioFile } from './io/audio-picker.js'
 import AudioStore from './audio-store.js'
@@ -21,6 +21,7 @@ import { MixerStrip } from './components/mixer-strip.js'
 import MixerEngine from './audio/mixer-engine.js'
 import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
+import { groupInputs } from './midi/device-group.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
@@ -211,6 +212,7 @@ function addMidiTrack(name = 'MIDI', instrument) {
   const track = ProjectStore.getState().tracks.at(-1)
   if (track && instrument) ProjectStore.dispatch(SetTrackInstrument(track.id, instrument))
   if (track) _midiTargetTrackId = track.id
+  refreshHot()
   syncMixerStrips(ProjectStore.getState())
   syncInstrumentUi()
   return track
@@ -225,8 +227,63 @@ function ensureMidiTrack(instrument) {
   const plan = armPlan(ProjectStore.getState().tracks, _midiTargetTrackId)
   if (plan.provision) return addMidiTrack('MIDI', instrument)
   _midiTargetTrackId = plan.trackId
+  refreshHot()
   syncInstrumentUi()
   return ProjectStore.getState().tracks.find(track => track.id === plan.trackId)
+}
+
+// ─── Live hot path ─────────────────────────────────────────────────────────
+// ProjectStore.getState() deep-clones, so the MIDI handler must not call it per
+// hit. This snapshot is rebuilt when the store or the armed track changes and
+// holds the store's own (read-only) track objects.
+const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null }
+let _prewarmSig = null
+
+function refreshHot(state = ProjectStore.getState()) {
+  _hot.midiTracks = state.tracks.filter(track => track.type === 'midi')
+  _hot.byId = new Map(_hot.midiTracks.map(track => [track.id, track]))
+  // The output node is baked into the instrument at build time, so a move to
+  // another mixer channel has to invalidate it too.
+  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null])]))
+  _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
+  if (_hot.armedId) _midiTargetTrackId = _hot.armedId   // a removed armed track falls back to the first
+}
+
+/** The built instrument for a snapshot track, rebuilt when its signature moved. */
+function liveEntryFor(track) {
+  const sig = _hot.sigs.get(track.id)
+  let entry = _liveInstruments.get(track.id)
+  if (entry && entry.sig !== sig) {
+    entry.inst.dispose()
+    _liveInstruments.delete(track.id)   // the rebuild below may return null
+    entry = null
+  }
+  if (!entry) {
+    const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
+    const inst = liveInstrumentFor(track, instrumentDeps({ output, trackId: track.id }))
+    if (!inst) return null
+    entry = { sig, inst }
+    _liveInstruments.set(track.id, entry)
+  }
+  return entry
+}
+
+/** Build the armed instrument and its heavy state before the first hit, so the
+ *  first strike is not the one that pays for it. A no-op until the graph exists. */
+function prewarmArmed() {
+  if (!AudioEngine.getContext()) return
+  const track = _hot.byId.get(_hot.armedId)
+  const sig = track && _hot.sigs.get(track.id)
+  if (!track || sig === _prewarmSig) return
+  const entry = liveEntryFor(track)
+  _prewarmSig = entry ? sig : null   // an unavailable pack may come back; try again
+  entry?.inst.prewarm?.()
+  const instrument = track.instrument
+  if (instrument?.type === 'pack') {
+    const pack = packFor(instrument.packId, instrument.packVersion)
+    const patch = pack?.byId?.get(instrument.patchId)
+    if (pack && patch) warmPack(pack, patch).catch(() => {})
+  }
 }
 
 // ─── Step sequencer voice ──────────────────────────────────────────────────
@@ -576,6 +633,7 @@ function padNote(note, on) {
  *  rather than pretending. Every other source is pitch-mapped already. */
 function padPlayable(note) {
   const instrument = armedInstrument()
+  if (instrument.type === 'kit') return kitAcceptsNote(instrument, note)
   if (instrument.type !== 'palette') return true
   return paletteAcceptsNote(Palettes[instrument.paletteKey || 'classic'], note)
 }
@@ -607,6 +665,7 @@ function renderKnobPanel() {
   const instrument = armedInstrument()
   if (instrument.type === 'rack') return renderRackPanel(panel, instrument)
   if (instrument.type === 'pack') return renderPackKnobs(panel, instrument)
+  if (instrument.type === 'kit') return
   renderPaletteKnobs(panel, instrument, armedTrack()?.id)
 }
 
@@ -1235,14 +1294,17 @@ function updateMidiDeviceSelect(inputs) {
   const current = sel.value
   const saved = localStorage.getItem(MIDI_DEVICE_KEY)
   while (sel.options.length > 1) sel.remove(1)
-  inputs.forEach(({ id, name }) => {
+  // One entry per physical device: a mirrored port would double every hit.
+  const groups = groupInputs(inputs)
+  groups.forEach(({ primaryId, name }) => {
     const opt = document.createElement('option')
-    opt.value = id; opt.textContent = name
+    opt.value = primaryId; opt.textContent = name
     sel.appendChild(opt)
   })
-  const preferred = [current, saved].find(id => inputs.some(input => input.id === id))
-    || inputs.find(input => !/clock|thru/i.test(input.name || ''))?.id
-    || inputs[0]?.id
+  const primaryOf = id => groups.find(group => group.ids.includes(id))?.primaryId
+  const preferred = [current, saved].map(primaryOf).find(Boolean)
+    || groups.find(group => !/clock|thru/i.test(group.name || ''))?.primaryId
+    || groups[0]?.primaryId
   sel.value = preferred || ''
   MidiController.selectInput(sel.value)
   syncMidiToken(sel)
@@ -1283,7 +1345,7 @@ function initMidi() {
   // here is what lets the note path stay synchronous: by the time a pad sends
   // anything, the graph exists and is running. The boot call below is not a
   // gesture, so it deliberately does not do this.
-  enableBtn.addEventListener('click', () => { ensureAudio(); enableMidi() })
+  enableBtn.addEventListener('click', () => { ensureAudio().then(prewarmArmed); enableMidi() })
   // Electron resets Web MIDI access with every renderer restart. Reconnect a
   // previously-approved device so restarting the app cannot silently disable it.
   enableMidi()
@@ -1310,6 +1372,7 @@ function initMidi() {
         state = ProjectStore.getState()
       }
       _midiTargetTrackId = midiTrack.id
+      refreshHot()
 
       // Create a new empty MIDI clip
       const clipId = `midi-clip-${Date.now()}`
@@ -1410,24 +1473,15 @@ function initMidi() {
     // Auto-provision: a note into an empty project makes the track it belongs
     // on, once. Note-offs never provision — they can only follow a note-on.
     if (detail.kind === 'note-on') {
-      ensureMidiTrack()
+      if (!_hot.midiTracks.length) ensureMidiTrack()
       // A hardware octave button has to be visible: scroll the key window to
       // the note instead of letting it disappear. Pads send percussion notes
       // that have nothing to do with the keys, so they are exempt.
       // Channel 10 is percussion: its note numbers are drum slots, not pitches.
       if (detail.source !== 'pad' && detail.channel !== 9) Keyboard.ensureVisible(detail.pitch)
     }
-    const state = ProjectStore.getState()
-    const midiTracks = state.tracks.filter(t => t.type === 'midi')
-
-    // Prune instruments for tracks that no longer exist.
-    for (const [trackId, entry] of [..._liveInstruments]) {
-      if (!state.tracks.some(t => t.id === trackId)) {
-        entry.inst.dispose()
-        _liveInstruments.delete(trackId)
-      }
-    }
-
+    // Hot path: no store reads. Removed tracks are pruned by the store subscriber.
+    const midiTracks = _hot.midiTracks
     const routeKey = `${detail.channel}:${detail.pitch}`
     const ids = detail.kind === 'note-off'
       ? (_soundingRoutes.get(routeKey) || routeChannel(midiTracks, detail.channel, _midiTargetTrackId))
@@ -1436,25 +1490,10 @@ function initMidi() {
     else if (detail.kind === 'note-off') _soundingRoutes.delete(routeKey)
 
     for (const trackId of ids) {
-      const track = state.tracks.find(t => t.id === trackId)
+      const track = _hot.byId.get(trackId)
       if (!track) continue
-
-      // The output node is baked into the instrument at build time, so a move
-      // to another mixer channel has to invalidate it too.
-      const sig = JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null])
-      let entry = _liveInstruments.get(trackId)
-      if (entry && entry.sig !== sig) {
-        entry.inst.dispose()
-        _liveInstruments.delete(trackId)   // the rebuild below may return null
-        entry = null
-      }
-      if (!entry) {
-        const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
-        const inst = liveInstrumentFor(track, instrumentDeps({ output, trackId: track.id }))
-        if (!inst) continue
-        entry = { sig, inst }
-        _liveInstruments.set(trackId, entry)
-      }
+      const entry = liveEntryFor(track)
+      if (!entry) continue
 
       try {
         if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity, time)
@@ -1506,7 +1545,9 @@ function initMidi() {
     const track = state.tracks.find(t => t.id === e.detail.trackId)
     if (track && track.type === 'midi') {
       _midiTargetTrackId = track.id
+      refreshHot()
       syncInstrumentUi()
+      prewarmArmed()
       if (recBtn && MidiController.isGranted() && deviceSel?.value) {
         recBtn.disabled = false
       }
@@ -1750,8 +1791,10 @@ function boot() {
 
   // Subscribe store to keep mixer in sync
   ProjectStore.subscribe(state => {
+    refreshHot(state)
     syncMixerStrips(state)
     syncInstrumentUi()
+    prewarmArmed()
     // A removed track must go quiet immediately. Pruning only inside the MIDI
     // handler left a deleted track sounding until the next incoming event —
     // with no controller attached, forever.
@@ -1761,6 +1804,7 @@ function boot() {
       _liveInstruments.delete(trackId)
     }
   })
+  refreshHot()
   refreshPackCatalog().catch(error => console.warn('Could not load instrument packs:', error))
 }
 

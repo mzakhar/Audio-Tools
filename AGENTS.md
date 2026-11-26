@@ -43,8 +43,8 @@ load order to respect — import what you need.
 - **`app.js`** — wires everything together. Entry point is `boot()`, called on
   `DOMContentLoaded`.
 
-`ProjectStore` schema is at **version 5**, with `migrate()` in
-`src/renderer/js/store/ProjectStore.js` (`CURRENT_VERSION` at line 15). Bump both
+`ProjectStore` schema is at **version 6**, with `migrate()` in
+`src/renderer/js/store/ProjectStore.js` (`CURRENT_VERSION` at line 16). Bump both
 together and add a migration step; never renumber an existing one.
 
 ### Layout structure
@@ -106,10 +106,20 @@ one `midi-event` on `document`; `app.js` routes it. Clock in (phase 4) and MIDI
 out (phase 5) are not started — build them only when something on the other end
 needs them.
 
-Phase 3b (sustain CC64 hold, bend/mod for pack and palette voices, aftertouch
-parsing) is the next MIDI work. Knob learn, transport buttons, MIDI monitor and
+Phase 3b (sustain CC64 hold, bend/mod, aftertouch parsing) is in; aftertouch is
+parsed but not yet consumed. Knob learn, transport buttons, MIDI monitor and
 clock are **deferred** in `specs/midi-control-surface.md` — that file is a stash,
-not a plan; do not build from it without a fresh decision.
+not a plan; do not build from it without a fresh decision. The exception is the
+pad controller: `specs/pads-view.md` decides learn, transport buttons and LED
+output for the Pads view, scoped to that view.
+
+### Pads view
+
+`specs/pads-view.md` is the plan for the MPC-style pad view (F5), the `kit`
+instrument, loop record/overdub, groove math and the lessons mode. Phase 0 is
+a hardware capture with `specs/hardware/midi-capture.html` (open in Chrome,
+press every control, copy the log). The M-Vave SMC-PAD has no published MIDI
+map; do not guess one into code.
 
 Web MIDI is secure-context only, so none of it works on the LAN http route.
 

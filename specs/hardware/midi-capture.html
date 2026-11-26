@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SMC-Pad Capture</title>
+<style>
+  body{font:13px ui-monospace,monospace;background:#111;color:#ddd;margin:16px}
+  button{font:inherit;margin:2px}
+  #log{white-space:pre;height:70vh;overflow:auto;border:1px solid #333;padding:8px}
+</style>
+<h3>SMC-Pad MIDI capture</h3>
+<p>Press every pad (soft + hard), hold one pad and press harder (aftertouch?), turn every knob both ways, press every button alone and with each other button, switch banks and repeat. Then Copy.</p>
+<div>
+  LED probe (out port / ch / note=pad / vel=color):
+  <select id="out"></select> ch <input id="ch" type="number" value="1" min="1" max="16" style="width:3em">
+  <button id="sweep">sweep notes 0-127 vel 1..127</button>
+  <button id="copy">Copy log</button>
+  <button id="clear">Clear</button>
+</div>
+<div id="log"></div>
+<script>
+const log = document.getElementById('log'), lines = [];
+const hex = d => [...d].map(b => b.toString(16).padStart(2, '0')).join(' ');
+const NAMES = {8:'noteOff',9:'noteOn',10:'polyAT',11:'cc',12:'prog',13:'chanAT',14:'bend'};
+function add(s){ lines.push(s); log.textContent += s + '\n'; log.scrollTop = log.scrollHeight; }
+navigator.requestMIDIAccess({ sysex: true }).then(acc => {
+  for (const inp of acc.inputs.values()) {
+    add(`IN  ${inp.name} [${inp.id}]`);
+    inp.onmidimessage = e => {
+      const d = e.data, st = d[0] >> 4, ch = (d[0] & 15) + 1;
+      add(`${e.timeStamp.toFixed(1).padStart(10)} ${inp.name.padEnd(20)} ${hex(d).padEnd(12)} ${NAMES[st] || 'sys'} ch${ch} ${d[1] ?? ''} ${d[2] ?? ''}`);
+    };
+  }
+  const sel = document.getElementById('out');
+  for (const o of acc.outputs.values()) { add(`OUT ${o.name} [${o.id}]`); sel.add(new Option(o.name, o.id)); }
+  document.getElementById('sweep').onclick = async () => {
+    const out = acc.outputs.get(sel.value), ch = (+document.getElementById('ch').value - 1) & 15;
+    for (const vel of [1, 5, 9, 13, 21, 37, 45, 53, 127]) {
+      add(`-- sweep vel ${vel} on ${out.name} ch${ch + 1}`);
+      for (let n = 0; n < 128; n++) out.send([0x90 | ch, n, vel]);
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    for (let n = 0; n < 128; n++) out.send([0x80 | ch, n, 0]);
+  };
+}, err => add('MIDI access failed: ' + err));
+document.getElementById('copy').onclick = () => navigator.clipboard.writeText(lines.join('\n'));
+document.getElementById('clear').onclick = () => { lines.length = 0; log.textContent = ''; };
+</script>
