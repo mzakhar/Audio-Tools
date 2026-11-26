@@ -14,12 +14,14 @@ const VIEWPORTS = [['desktop', 1440, 900, 1], ['narrow', 390, 844, 1], ['zoom200
 const SHOTS = [
   ['synth', `document.querySelector('[data-tool="synth"]').click()`],
   ['arrange', `document.querySelector('[data-tool="arrange"]').click()`],
-  ['arrange-mixer', `document.querySelector('[data-tool="arrange"]').click(); document.querySelector('#mixer-bar')?.classList.add('open'); document.querySelector('[aria-controls="mixer-bar"], #mix-btn')?.click()`],
+  ['arrange-mixer', `document.querySelector('[data-tool="arrange"]').click(); document.getElementById('mixer-toggle-btn').click()`],
   ['rack', `document.querySelector('[data-tool="rack"]').click()`],
   ['tr909', `document.querySelector('[data-tool="tr909"]').click()`],
   ['browser-dialog', `document.querySelector('[data-tool="synth"]').click(); document.getElementById('instrument-browser-dialog').showModal()`],
   ['library-dialog', `document.getElementById('library-dialog').showModal()`],
 ]
+// Own profile per run: parallel runs must not share localStorage (the theme lives there).
+app.setPath('userData', path.join(require('os').tmpdir(), 'ui-snap-' + process.pid))
 const log = msg => fs.appendFileSync(path.join(require('os').tmpdir(), 'ui-snap.log'), msg + '\n')
 process.on('uncaughtException', e => { log(e.stack); app.exit(1) })
 process.on('unhandledRejection', e => { log(e && e.stack); app.exit(1) })
