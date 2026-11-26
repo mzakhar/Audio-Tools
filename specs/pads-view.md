@@ -15,7 +15,7 @@ why, in order of how much each one hurts:
 | # | Cause | Where |
 |---|---|---|
 | 1 | 16 pads collapse onto 4 synth voices. Six tom notes all play the kick, crashes play the clap. Notes outside GM 35–59 are silent, and nothing tells you. | `instruments/pad-map.js:46`, `midi/live-instrument.js:135` |
-| 2 | Velocity scales gain only, so soft and hard hits are the same sound at two volumes. | `palettes.js` drum voices |
+| 2 | Velocity scales gain only, so soft and hard hits are the same sound at two volumes. Worse: the SMC-PAD only sends 69–109, which `velocityGain` maps to gain 0.78–0.94, so the whole dynamic range is about 1.6 dB. | `palettes.js` drum voices, `utils/velocity.js` |
 | 3 | No choke: open-hat tails stack under closed hats. Drum `stop()` is a no-op. | `palettes.js:256` |
 | 4 | The good drums (909 kit, 11 voices, hat choke) are not MIDI-playable at all. | `components/tr909-view.js:420` |
 | 5 | Hot path does a `ProjectStore.getState()` deep clone plus `JSON.stringify` per hit, against 6 ms of scheduling slack. First hits also pay lazy builds (rack mount, pack decode). | `app.js:1419`, `utils/midi-clock.js:4` |
@@ -102,7 +102,26 @@ no separate select step.
 
 ## Hardware mapping
 
-Phase 0 replaces the guesses with captured facts. Target layout:
+### Captured facts (2026-11-26, factory defaults, USB)
+
+Probe: python-rtmidi on all ports, ~3 min of play. USB: vendor string `SINCO`,
+VID 4353 / PID 4B4D, bcdDevice 1.00, class-compliant (Microsoft `usbaudio`).
+
+| Control | Message | Notes |
+|---|---|---|
+| 16 pads | note-on/off **ch 10**, notes **36–51** chromatic | note-off velocity always 64; gate median 20 ms (pad releases fast) |
+| Pad velocity | observed **69–109** only, median 85 | very compressed range: soft hits never go low. A software curve that expands ~65–115 to 1–127 is mandatory, not optional |
+| Pad pressure | **channel aftertouch** `D9`, ch 10, seen 5–45 | mono, not poly. Enough for pressure-driven Repeat velocity |
+| 8 encoders | **CC 30–37, ch 1**, absolute 0–127, ±1 per detent | device holds the value; convert to deltas. Behaviour at the 0/127 ends unknown |
+| Buttons (5 pressed) | **CC 25–29, ch 1**, 127 press / 0 release | momentary. Remaining buttons and their labels not yet captured |
+| Ports | `SMC-PAD` and `MIDIIN2` carry identical streams; `MIDIIN3` silent | open one input only |
+| SysEx | universal identity request (`F0 7E 7F 06 01 F7`) gets no reply on any out port | |
+| Double triggers | none seen (one 40 ms retrigger was a real roll) | |
+
+Still unknown: pad order on the grid, bank/scene behaviour, the rest of the
+buttons, LED control from the host.
+
+Target layout:
 
 | Control | Default role | Shift / hold role |
 |---|---|---|
@@ -127,8 +146,8 @@ Fallbacks, decided now so missing buttons cannot block the plan:
 - No aftertouch: Repeat velocity = velocity of the hit that started it.
 - Relative vs absolute encoders: profile flag; absolute values are converted
   to deltas so knob twins never jump.
-- Several USB ports: subscribe to every input of the chosen device, not just
-  the first (`MidiController.js:56` holds one).
+- Several USB ports: the SMC-PAD **mirrors** every message on `SMC-PAD` and
+  `MIDIIN2`. Open exactly one input per device, or every hit plays twice.
 
 **Help overlay:** hold Shift + touch any control → its on-screen twin shows
 what it does right now. Every control explains itself.
@@ -210,8 +229,8 @@ Phase 1 is shippable alone and should fix most of today's complaint.
 
 ## Open questions
 
-- SMC-PAD MIDI map, aftertouch, LED protocol, and port roles: unknown until
-  phase 0. No published map exists.
+- SMC-PAD: pad grid order, banks, remaining buttons and LED protocol (see
+  captured facts above for what is known).
 - Does Cube Suite (the vendor editor) expose a velocity curve good enough to
   skip ours? Ours ships regardless; it is per-device in software.
 - Measured input-to-sound latency on Electron vs Chrome; record in phase 0.
