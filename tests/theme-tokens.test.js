@@ -88,10 +88,8 @@ describe('theme tokens', () => {
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g
 const ALLOW = {
   'styles/base.css': 0, 'styles/rack.css': 0, 'styles/synth.css': 0, 'styles/tr909.css': 0,
-  'styles/sequencer.css': 0, 'styles/util.css': 0, 'styles/shell.css': 0, 'styles/arrange.css': 8,
+  'styles/sequencer.css': 0, 'styles/util.css': 0, 'styles/shell.css': 0, 'styles/arrange.css': 0,
   'styles/dialogs.css': 0, 'styles/piano-roll.css': 0, 'styles/assistant.css': 0,
-  'js/components/arrangement-view.js': 20, 'js/components/piano-roll.js': 25,
-  'js/components/rack-cables.js': 0, 'js/rack/modules/meter.js': 0, 'js/rack/modules/scope.js': 0,
 }
 
 describe('no colour literals outside tokens', () => {
