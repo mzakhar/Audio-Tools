@@ -28,6 +28,9 @@ export function resolve(event, profile, overrides = {}) {
   const key = learnKey(event)
   const action = key && overrides[key]
   if (action) {
+    // Learned encoders are stored as 'knob:<index>' and keep encoder semantics.
+    const knob = /^knob:(\d)$/.exec(action)
+    if (knob && event.kind === 'cc') return { kind: 'knob', index: +knob[1], value: event.value }
     if (event.kind === 'cc') return { kind: 'button', action, pressed: event.value > 0 }
     if (event.kind === 'note-on') return { kind: 'button', action, pressed: event.velocity > 0 }
     return { kind: 'button', action, pressed: false }
