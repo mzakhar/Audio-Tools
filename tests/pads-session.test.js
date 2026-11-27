@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import ProjectStore, { AddTrack } from '../src/renderer/js/store/ProjectStore.js'
-import { createPadsSession, loopClipOf } from '../src/renderer/js/pads/pads-session.js'
+import { createPadsSession, loopClipOf, canRecordHit, PADS_PASS_LABEL } from '../src/renderer/js/pads/pads-session.js'
 
 let seq
 let trackId
@@ -10,6 +10,7 @@ const make = () => createPadsSession({
   dispatch: c => ProjectStore.dispatch(c),
   dispatchBatch: (c, l) => ProjectStore.dispatchBatch(c, l),
   undo: () => ProjectStore.undo(),
+  getUndoLabel: () => ProjectStore.getUndoLabel(),
   newId: () => `n${++seq}`,
 })
 const opts = { loopBeats: 8, grid: 0.25, strength: 1, swing: 0.5 }
@@ -57,8 +58,44 @@ describe('pads session', () => {
     expect(s.undo()).toBe('discarded')
     expect(s.hasPass()).toBe(false)
     expect(s.commit(2, 4)).toBe(false)
+    expect(s.undo()).toBe('none')   // last store step (AddTrack) is not ours
+    expect(ProjectStore.getState().tracks).toHaveLength(1)
+    expect(s.canUndo()).toBe(false)
+    hit(s, 36, 1); s.commit(2, 4)
+    expect(ProjectStore.getUndoLabel()).toBe(PADS_PASS_LABEL)
+    expect(s.canUndo()).toBe(true)
     expect(s.undo()).toBe('undone')
-    expect(ProjectStore.getState().tracks).toHaveLength(0)
+    expect(track().clips).toHaveLength(0)
+  })
+
+  it('committed notes are clean and the clip duration follows Bars', () => {
+    const s = make()
+    hit(s, 36, 1); s.commit(2, 4)
+    expect(Object.keys(loopClipOf(track()).notes[0]).sort()).toEqual(['duration', 'id', 'pitch', 'startBeat', 'velocity'])
+    s.hit(trackId, { pitch: 38, velocity: 100, beat: 2 }, { ...opts, loopBeats: 4 }, { loopBars: 1, beatsPerBar: 4 })
+    s.commit(1, 4)
+    expect(loopClipOf(track()).duration).toBe(4)
+    expect(ProjectStore.getUndoLabel()).toBe(PADS_PASS_LABEL)
+  })
+
+  it('notes() keeps lap for playback; discard drops the pass', () => {
+    const s = make()
+    hit(s, 36, 7.95)
+    expect(s.notes(trackId)[0]).toMatchObject({ startBeat: 0, lap: 1 })
+    s.discard()
+    expect(s.hasPass()).toBe(false)
+  })
+
+  it('canRecordHit needs pads mode, layer, playing, armed kit track, note-on', () => {
+    const ok = { mode: 'pads', layerOn: true, playing: true, armedId: 't', armedType: 'kit' }
+    const on = { kind: 'note-on' }
+    expect(canRecordHit(ok, on, 't')).toBe(true)
+    expect(canRecordHit({ ...ok, mode: 'synth' }, on, 't')).toBe(false)
+    expect(canRecordHit({ ...ok, layerOn: false }, on, 't')).toBe(false)
+    expect(canRecordHit({ ...ok, playing: false }, on, 't')).toBe(false)
+    expect(canRecordHit({ ...ok, armedType: 'palette' }, on, 't')).toBe(false)
+    expect(canRecordHit(ok, on, 'other')).toBe(false)
+    expect(canRecordHit(ok, { kind: 'note-off' }, 't')).toBe(false)
   })
 
   it('notes() merges the open pass with the clip', () => {

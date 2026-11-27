@@ -22,7 +22,7 @@ const gridKey = value => Object.entries(SNAP_GRIDS)
 
 /**
  * opts: triggerPad(note, velocity127), getKit() -> kit|null, getNotes() -> notes[],
- * getBeat() -> transport beat (<0 count-in, null when stopped), onUndo(), onLayerChange(on),
+ * canUndo() -> bool (Undo enabled), getBeat() -> transport beat (<0 count-in, null when stopped), onUndo(), onLayerChange(on),
  * onWipeChange(held).
  */
 export class PadsView {
@@ -158,6 +158,13 @@ export class PadsView {
         e.preventDefault()
         this.opts.triggerPad?.(note, VELOCITY_DEFAULT)
       })
+      // Focused pad: Enter/Space plays it. stopPropagation keeps the global Space (transport) out.
+      pad.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) this.opts.triggerPad?.(note, 100)
+      })
     })
 
     el.layer.addEventListener('click', () => {
@@ -185,9 +192,12 @@ export class PadsView {
     const shift = e => { this._shift = e.shiftKey }
     el.groove.addEventListener('keydown', shift)
     el.groove.addEventListener('pointerdown', shift)
-    el.groove.addEventListener('input', () => set({ groove: snapGroove(Number(el.groove.value) / 100, this._shift) }))
+    // Sliders: readout follows `input`; the store is written once, on `change`.
+    el.groove.addEventListener('input', () => { el.grooveOut.textContent = `${Math.round(snapGroove(Number(el.groove.value) / 100, this._shift) * 100)}%` })
+    el.groove.addEventListener('change', () => set({ groove: snapGroove(Number(el.groove.value) / 100, this._shift) }))
     el.snap.addEventListener('change', () => set({ snapGrid: SNAP_GRIDS[el.snap.value] }))
-    el.strength.addEventListener('input', () => set({ snapStrength: Number(el.strength.value) / 100 }))
+    el.strength.addEventListener('input', () => { el.strengthOut.textContent = `${el.strength.value}%` })
+    el.strength.addEventListener('change', () => set({ snapStrength: Number(el.strength.value) / 100 }))
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(() => this.drawStrip())
       this._ro.observe(el.strip)
@@ -230,6 +240,7 @@ export class PadsView {
   drawStrip() {
     const canvas = this.el?.strip
     if (!canvas) return
+    this.el.undo.disabled = !(this.opts.canUndo?.() ?? true)
     const { loopBars } = this._pads
     const bpb = this._beatsPerBar
     const loopBeats = loopBars * bpb

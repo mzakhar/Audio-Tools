@@ -20,12 +20,16 @@ export function passIsEmpty(pass) {
 
 /** Add a hit (velocity 0..127 in) snapped/swung and wrapped into the loop; returns a new pass. */
 export function passAddHit(pass, { pitch, velocity, beat }, { loopBeats, grid, strength, swing, id }) {
+  const snapped = snap(beat, { grid, strength, swing })
   const note = {
     id,
     pitch,
     velocity: Math.min(1, Math.max(0, velocity / 127)),
-    startBeat: loopPosition(snap(beat, { grid, strength, swing }), loopBeats),
+    startBeat: loopPosition(snapped, loopBeats),
     duration: grid,
+    // Lap the snapped hit lands in: the live hit already sounded, so the player
+    // skips that repetition. Stripped by applyPass before commit.
+    lap: Math.floor(r9(snapped) / loopBeats),
   }
   return { ...pass, added: [...pass.added, note] }
 }
@@ -47,22 +51,26 @@ export function passWipe(pass, clipNotes, { pitch, fromBeat, toBeat, loopBeats }
   }
 }
 
-/** clipNotes minus wiped plus added, sorted by startBeat then pitch. */
-export function applyPass(clipNotes, pass) {
+/** clipNotes minus wiped plus added, sorted by startBeat then pitch. Added notes lose `lap` unless keepLap (playback). */
+export function applyPass(clipNotes, pass, keepLap = false) {
   const wiped = new Set(pass.wiped)
-  return [...clipNotes.filter((n) => !wiped.has(n.id)), ...pass.added]
+  const added = keepLap ? pass.added : pass.added.map(({ lap, ...n }) => n)
+  return [...clipNotes.filter((n) => !wiped.has(n.id)), ...added]
     .sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
 }
 
-/** Every loop repetition (k>=0) of each note landing in [fromBeat, toBeat), as { note, beat }, sorted by beat. */
+/** Every loop repetition (k>=0) of each note landing in [fromBeat, toBeat), as { note, beat, k }, sorted by beat.
+ *  Notes beyond loopBeats wrap (loopPosition), so a shrunk loop still plays them. */
 export function notesInWindow(notes, loopBeats, fromBeat, toBeat) {
   const out = []
+  if (!(loopBeats > 0)) return out
   for (const note of notes) {
-    let k = Math.max(0, Math.ceil((fromBeat - note.startBeat) / loopBeats - 1e-9))
+    const base = loopPosition(note.startBeat, loopBeats)
+    let k = Math.max(0, Math.ceil((fromBeat - base) / loopBeats - 1e-9))
     for (; ; k++) {
-      const beat = r9(k * loopBeats + note.startBeat)
+      const beat = r9(k * loopBeats + base)
       if (beat >= toBeat) break
-      if (beat >= fromBeat) out.push({ note, beat })
+      if (beat >= fromBeat) out.push({ note, beat, k })
     }
   }
   return out.sort((a, b) => a.beat - b.beat)

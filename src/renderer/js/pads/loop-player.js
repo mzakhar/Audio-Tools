@@ -25,10 +25,21 @@ export function createLoopPlayer({
   const timeOf = beat => startTime + beatsToSeconds(beat - startBeat, anchorBpm)
   const now = () => getContext().currentTime
 
+  /** BPM moved: keep the current position, change only the slope. */
+  function syncBpm() {
+    if (!playing || bpm() === anchorBpm) return
+    const t = now()
+    startBeat = beatAt(t)
+    startTime = t
+    anchorBpm = bpm()
+  }
+
   function scheduleSegment(from, to) {
     const L = loopBeats()
     if (L > 0) {
-      for (const { note, beat } of notesInWindow(notes(), L, from, to)) {
+      for (const { note, beat, k } of notesInWindow(notes(), L, from, to)) {
+        // A pass-added hit already sounded live in its own lap; its snapped copy plays from the next lap.
+        if (note.lap === k) continue
         playHit(note.pitch, note.velocity ?? 0.8, timeOf(beat))
       }
     }
@@ -40,26 +51,27 @@ export function createLoopPlayer({
 
   function tick() {
     if (!playing) return
+    syncBpm()
     const t = now()
-    // BPM moved: keep the current position, change only the slope.
-    if (bpm() !== anchorBpm) {
-      startBeat = beatAt(t)
-      startTime = t
-      anchorBpm = bpm()
-    }
     const playhead = beatAt(t)
-    if (playhead > lastPlayhead) onTick(lastPlayhead, playhead)
+    const L = loopBeats()
+    if (playhead > lastPlayhead) {
+      onTick(lastPlayhead, playhead)
+      // Wrap = the AUDIBLE position crossing a positive boundary, not the scheduler.
+      if (L > 0) {
+        for (let k = Math.floor(lastPlayhead / L) + 1; k * L <= playhead; k++) if (k * L > 0) onWrap(k)
+      }
+    }
     lastPlayhead = Math.max(lastPlayhead, playhead)
 
     const to = beatAt(t + LOOKAHEAD_SEC)
-    const L = loopBeats()
     while (scheduledTo < to) {
-      // Split the window at each loop boundary so the pass commits between segments.
+      // Split the window at each loop boundary.
       const boundary = L > 0 ? (Math.floor(scheduledTo / L) + 1) * L : Infinity
       const end = Math.min(to, boundary)
+      if (end <= scheduledTo) break
       scheduleSegment(scheduledTo, end)
       scheduledTo = end
-      if (end === boundary && boundary > 0) onWrap(boundary / L)
     }
     timer = setTimer(tick, INTERVAL_MS)
   }
@@ -81,6 +93,7 @@ export function createLoopPlayer({
       timer = null
     },
     isPlaying: () => playing,
+    syncBpm,
     beatAt,
     currentBeat: () => (playing ? beatAt(now()) : 0),
   }

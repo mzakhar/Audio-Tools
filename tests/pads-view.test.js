@@ -35,7 +35,8 @@ describe('pads view', () => {
     mount()
     const change = (el, v) => {
       el.value = String(v)
-      el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }))
+      if (el.type === 'range') el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
     }
     change(root.querySelector('.pads-bars'), 4)
     change(root.querySelector('.pads-countin'), 2)
@@ -92,5 +93,41 @@ describe('pads view', () => {
     expect(root.innerHTML).toBe('')
     // would throw on the emptied DOM if the subscription were still live
     expect(() => ProjectStore.dispatch({ label: 'x', execute: s => s, undo: s => s })).not.toThrow()
+  })
+
+  it('sliders update the readout on input but write the store only on change', () => {
+    mount()
+    const g = root.querySelector('.pads-groove')
+    g.value = '66'
+    g.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(root.querySelector('.pads-groove-out').textContent).toBe('66%')
+    expect(settings().groove).toBe(0.5)
+    g.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(settings().groove).toBe(0.66)
+  })
+
+  it('Enter/Space on a focused pad triggers it and does not reach the global handler', () => {
+    mount()
+    const seen = vi.fn()
+    document.addEventListener('keydown', seen)
+    for (const key of ['Enter', ' ']) {
+      const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      pad(1).dispatchEvent(e)
+      expect(e.defaultPrevented).toBe(true)
+    }
+    document.removeEventListener('keydown', seen)
+    expect(seen).not.toHaveBeenCalled()
+    expect(triggerPad).toHaveBeenCalledTimes(2)
+    expect(triggerPad).toHaveBeenCalledWith(37, 100)
+  })
+
+  it('Undo button disabled state follows canUndo', () => {
+    let can = false
+    mount({ canUndo: () => can })
+    const undo = root.querySelector('.pads-undo')
+    expect(undo.disabled).toBe(true)
+    can = true
+    ProjectStore.reset()
+    expect(undo.disabled).toBe(false)
   })
 })

@@ -25,7 +25,7 @@ import { groupInputs } from './midi/device-group.js'
 import { createSmcPadLink } from './pads/smc-pad-link.js'
 import { kitFor, padColours, DEFAULT_KIT_ID } from './pads/kit.js'
 import { createLoopPlayer } from './pads/loop-player.js'
-import { createPadsSession } from './pads/pads-session.js'
+import { createPadsSession, canRecordHit } from './pads/pads-session.js'
 import { playClick } from './pads/click.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
@@ -187,8 +187,8 @@ function instrumentDeps({ output, trackId } = {}) {
     palettes: Palettes,
     ctx,
     output: out,
-    racks: ProjectStore.getState().racks,
-    kits: ProjectStore.getState().kits,
+    racks: _hot.racks,
+    kits: _hot.kits,
     packFor,
     sampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
@@ -243,7 +243,7 @@ function ensureMidiTrack(instrument) {
 // ProjectStore.getState() deep-clones, so the MIDI handler must not call it per
 // hit. This snapshot is rebuilt when the store or the armed track changes and
 // holds the store's own (read-only) track objects.
-const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null, kits: undefined, pads: DEFAULT_PADS, bpm: 120, beatsPerBar: 4 }
+const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null, racks: undefined, kits: undefined, pads: DEFAULT_PADS, bpm: 120, beatsPerBar: 4 }
 let _prewarmSig = null
 
 function refreshHot(state = ProjectStore.getState()) {
@@ -253,6 +253,7 @@ function refreshHot(state = ProjectStore.getState()) {
   // another mixer channel has to invalidate it too.
   _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? state.kits?.[track.instrument.kitId] ?? null : null])]))
   _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
+  _hot.racks = state.racks
   _hot.kits = state.kits
   _hot.pads = state.pads ?? DEFAULT_PADS
   _hot.bpm = state.bpm
@@ -696,11 +697,20 @@ function padsTrigger(note, velocity) {
   }))
 }
 
+const canRecordPadsHit = (detail, trackId) => canRecordHit({
+  mode: _currentMode,
+  layerOn: _padsView?.layerOn(),
+  playing: _loopPlayer?.isPlaying(),
+  armedId: _hot.armedId,
+  armedType: _hot.byId.get(_hot.armedId)?.instrument?.type
+}, detail, trackId)
+
 /** Tee from handleMidiEvent: flash the pad, and record it when Layer is armed over a running loop. */
 function padsNoteOn(trackId, detail, time) {
   if (trackId !== _hot.armedId || !_padsView) return
   _padsView.flashPad(detail.pitch, detail.velocity)
-  if (!_padsView.layerOn() || _padsView.isWiping() || !_loopPlayer.isPlaying()) return
+  if (!canRecordPadsHit(detail, trackId) || _padsView.isWiping()) return
+  _loopPlayer.syncBpm()
   const beat = _loopPlayer.beatAt(time)
   if (beat < 0) return   // count-in
   const { snapGrid, snapStrength, groove } = _hot.pads
@@ -720,6 +730,13 @@ function stopPadsLoop() {
   _padsView?.setPlaying(false)
 }
 
+/** A project was replaced (new/open): the pass and the running loop belong to the old one. */
+function resetPadsForNewProject() {
+  _loopPlayer?.stop()
+  _padsSession?.discard()
+  _padsView?.setPlaying(false)
+}
+
 function initPadsView() {
   const container = document.getElementById('pads-view')
   if (!container) return
@@ -728,6 +745,7 @@ function initPadsView() {
     dispatch: command => ProjectStore.dispatch(command),
     dispatchBatch: (commands, label) => ProjectStore.dispatchBatch(commands, label),
     undo: () => ProjectStore.undo(),
+    getUndoLabel: () => ProjectStore.getUndoLabel(),
     newId: () => `pads-${Date.now().toString(36)}-${++_padsIdSeq}`
   })
   _loopPlayer = createLoopPlayer({
@@ -758,6 +776,7 @@ function initPadsView() {
     },
     getNotes: () => _padsSession.notes(_hot.armedId),
     getBeat: () => (_loopPlayer.isPlaying() ? _loopPlayer.currentBeat() : null),
+    canUndo: () => _padsSession.canUndo(),
     onUndo: () => { _padsSession.undo(); _padsView.drawStrip() },
     onLayerChange: on => { if (!on) commitPadsPass() }
   })
@@ -1127,7 +1146,7 @@ function switchMode(mode) {
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   })
   if (mode !== 'tr909') _tr909View?.stop()
-  if (mode !== 'pads') stopPadsLoop()
+  if (mode !== 'pads' && (_loopPlayer?.isPlaying() || _padsSession?.hasPass())) stopPadsLoop()
   else Sequencer.stop()   // one transport at a time
   _padsView?.setActive(mode === 'pads')
   syncTransportPressed()
@@ -1215,6 +1234,7 @@ function initProjectCommands() {
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
     disposeLiveInstruments()
+    resetPadsForNewProject()
     ProjectStore.reset()
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -1241,6 +1261,7 @@ function initProjectCommands() {
       return
     }
     disposeLiveInstruments()
+    resetPadsForNewProject()
     ProjectStore.load(state)
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -1832,6 +1853,7 @@ function initShortcuts() {
   // Pads view: letter/number keys in the hardware's 4x4 shape (pad 1 bottom-left).
   PAD_KEY_ROWS.forEach((row, r) => row.forEach((key, c) => {
     ShortcutManager.register({ key, context: 'pads' }, (e) => {
+      if (['SELECT', 'INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
       if (!e.repeat) _padsView?.trigger((3 - r) * 4 + c)
     })
   }))

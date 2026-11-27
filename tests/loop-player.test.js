@@ -54,12 +54,14 @@ describe('loop player', () => {
     expect(r.hits[0].time).toBeCloseTo(10.05 + 2, 6)       // note at beat 0
   })
 
-  it('fires onWrap when scheduling crosses a loop boundary, not for the count-in', () => {
+  it('fires onWrap when the audible position crosses a loop boundary, not for the count-in', () => {
     const r = rig()
     r.player.start({ countInBars: 1 })
     r.run(2.5)
     expect(r.wraps).toEqual([])    // beat 0 is the loop start, not a wrap
-    r.run(1.6)                     // beat 4 is 8 beats = 4.0 s after start
+    r.run(1.45)                    // t=13.95: scheduler already reached beat 4 (14.05), audio has not
+    expect(r.wraps).toEqual([])
+    r.run(0.2)
     expect(r.wraps).toEqual([1])
   })
 
@@ -82,5 +84,26 @@ describe('loop player', () => {
     expect(r.player.currentBeat()).toBeCloseTo(before, 6)
     r.advance(1)
     expect(r.player.currentBeat()).toBeCloseTo(before + 1, 6)   // 1 beat/s now
+  })
+
+  it('skips the repetition of a pass-added note in its own lap only', () => {
+    // loop = 4 beats; pitch 36 lap 1 (hit at 3.95 snapped to 4.0), pitch 38 lap 0 (hit at 1.02 snapped to 1.0)
+    const r = rig({ notes: [{ pitch: 36, velocity: 1, startBeat: 0, lap: 1 }, { pitch: 38, velocity: 1, startBeat: 1, lap: 0 }] })
+    r.player.start()
+    r.run(6)
+    const beatOf = h => Math.round((h.time - 10.05) / 0.5)
+    expect(r.hits.filter(h => h.pitch === 36).map(beatOf)).toEqual([0, 8, 12])
+    expect(r.hits.filter(h => h.pitch === 38).map(beatOf)).toEqual([5, 9])
+  })
+
+  it('syncBpm re-anchors immediately', () => {
+    const r = rig()
+    r.player.start()
+    r.run(1)
+    const before = r.player.currentBeat()
+    r.setBpm(60)
+    r.player.syncBpm()
+    r.advance(1)
+    expect(r.player.currentBeat()).toBeCloseTo(before + 1, 6)
   })
 })

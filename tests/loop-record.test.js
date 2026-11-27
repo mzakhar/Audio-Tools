@@ -16,10 +16,16 @@ describe('loopPosition', () => {
 })
 
 describe('passAddHit', () => {
+  it('lap is the snapped lap: 7.95 snapping to the next lap is lap 1', () => {
+    expect(passAddHit(newPass(), { pitch: 36, velocity: 100, beat: 7.95 }, opts).added[0]).toMatchObject({ startBeat: 0, lap: 1 })
+    expect(passAddHit(newPass(), { pitch: 36, velocity: 100, beat: 1.02 }, opts).added[0]).toMatchObject({ startBeat: 1, lap: 0 })
+  })
   it('snaps, scales velocity, uses id and grid duration', () => {
     const p = passAddHit(newPass(), { pitch: 36, velocity: 127, beat: 1.3 }, opts)
-    expect(p.added).toEqual([{ id: 'n1', pitch: 36, velocity: 1, startBeat: 1.25, duration: 0.25 }])
+    expect(p.added).toEqual([{ id: 'n1', pitch: 36, velocity: 1, startBeat: 1.25, duration: 0.25, lap: 0 }])
     expect(passIsEmpty(p)).toBe(false)
+    expect(applyPass([], p)).toEqual([{ id: 'n1', pitch: 36, velocity: 1, startBeat: 1.25, duration: 0.25 }])   // lap stripped for commit
+    expect(applyPass([], p, true)[0].lap).toBe(0)
   })
   it('snap at loop end wraps to 0', () => {
     const p = passAddHit(newPass(), { pitch: 36, velocity: 64, beat: 7.95 }, opts)
@@ -95,6 +101,12 @@ describe('notesInWindow', () => {
   })
   it('negative fromBeat ignores count-in region', () => {
     expect(notesInWindow(notes, L, -4, 2).map((x) => x.beat)).toEqual([1])
+  })
+  it('reports the lap index k', () => {
+    expect(notesInWindow(notes, L, 6, 18).map((x) => x.k)).toEqual([0, 1, 1, 2])
+  })
+  it('notes beyond a shrunk loop wrap', () => {
+    expect(notesInWindow([n('z', 36, 9)], 4, 0, 10).map((x) => x.beat)).toEqual([1, 5, 9])
   })
   it('from inclusive, to exclusive', () => {
     expect(notesInWindow(notes, L, 1, 9).map((x) => x.beat)).toEqual([1, 7.5])
