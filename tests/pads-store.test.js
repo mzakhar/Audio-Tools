@@ -9,7 +9,7 @@ describe('schema v7 migration', () => {
     const next = migrate({ version: 6, tracks: [] })
     expect(next.version).toBe(CURRENT_VERSION)
     expect(next.kits[DEFAULT_KIT_ID].slots[36].voice).toBe('bd')
-    expect(next.pads).toEqual({ loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1 })
+    expect(next.pads).toEqual({ loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1, full: false, ladder: null, repeatRate: '1/16', muted: [] })
   })
 
   it('keeps an existing custom kit and pads values', () => {
@@ -54,5 +54,14 @@ describe('kitFor with a store map', () => {
     expect(kitFor(DEFAULT_KIT_ID, { [DEFAULT_KIT_ID]: edited })).toBe(edited)
     expect(kitFor(DEFAULT_KIT_ID, {})).toBe(KITS[DEFAULT_KIT_ID])
     expect(kitFor('nope', {})).toBeNull()
+  })
+})
+
+describe('SetPadsSettings phase 3 keys', () => {
+  it('sanitises ladder, repeatRate, muted, full', () => {
+    ProjectStore.dispatch(SetPadsSettings({ ladder: 'tune', repeatRate: '1/32', muted: [38, 36, 38, 'x'], full: 1 }))
+    expect(ProjectStore.getState().pads).toMatchObject({ ladder: 'tune', repeatRate: '1/32', muted: [36, 38], full: true })
+    ProjectStore.dispatch(SetPadsSettings({ ladder: 'bogus', repeatRate: '9/9', muted: 'no' }))
+    expect(ProjectStore.getState().pads).toMatchObject({ ladder: null, repeatRate: '1/16', muted: [] })
   })
 })

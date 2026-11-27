@@ -16,7 +16,9 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 export const CURRENT_VERSION = 7
 
-export const DEFAULT_PADS = { loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1 }
+export const DEFAULT_PADS = { loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1, full: false, ladder: null, repeatRate: '1/16', muted: [] }
+const LADDER_PARAMS = ['velocity', 'tune', 'decay', 'filter']
+const REPEAT_RATE_KEYS = ['1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32', '1/32T']
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -736,6 +738,10 @@ export function SetPadsSettings(patch) {
       if ('groove' in p) p.groove = clampNum(p.groove, 0.5, 0.75)
       if ('snapStrength' in p) p.snapStrength = clampNum(p.snapStrength, 0, 1)
       if ('countInBars' in p) p.countInBars = clampNum(Math.round(p.countInBars), 0, 2)
+      if ('full' in p) p.full = !!p.full
+      if ('ladder' in p && !LADDER_PARAMS.includes(p.ladder)) p.ladder = null
+      if ('repeatRate' in p && !REPEAT_RATE_KEYS.includes(p.repeatRate)) p.repeatRate = DEFAULT_PADS.repeatRate
+      if ('muted' in p) p.muted = [...new Set((Array.isArray(p.muted) ? p.muted : []).map(Number).filter(Number.isInteger))].sort((a, b) => a - b)
       next.pads = { ...DEFAULT_PADS, ...(next.pads || {}), ...p }
       return next
     },
