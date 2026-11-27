@@ -1,0 +1,60 @@
+/* ─── Pads view ───────────────────────────────────────────────────────────── */
+#pads-view { display: none; width: 100%; flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 40px; }
+
+.pads-shell { display: flex; flex-direction: column; gap: 10px; padding: 14px; min-width: 0; }
+
+.pads-header, .pads-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.pads-header { border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px; }
+.pads-field { display: inline-flex; align-items: center; gap: 6px; }
+.pads-field select { min-height: 28px; }
+.pads-pos { min-width: 7ch; text-align: center; }
+
+.pads-strip {
+  width: 100%; height: 150px; display: block;
+  background: var(--canvas-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-s);
+}
+
+.pads-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.pads-controls { flex-direction: column; align-items: flex-start; flex: 1 1 200px; }
+
+.pads-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
+  width: min(100%, 420px); flex: 0 1 420px;
+}
+
+.pads-pad {
+  --pad: var(--accent);
+  position: relative; aspect-ratio: 1; min-width: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font: 600 12px/1 var(--font-ui); color: var(--text);
+  background: color-mix(in srgb, var(--pad) 28%, var(--surface-control));
+  border: 1px solid color-mix(in srgb, var(--pad) 60%, var(--border-subtle));
+  border-radius: var(--radius-m); box-shadow: var(--shadow-raised);
+  cursor: pointer; touch-action: none; user-select: none;
+}
+.pads-pad::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: var(--pad); opacity: var(--flash, 0); transition: opacity 0.14s ease-out;
+}
+.pads-pad:active { box-shadow: var(--shadow-pressed); }
+.pads-pad:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pads-pad[aria-disabled="true"] { --pad: var(--border-subtle); opacity: 0.55; }
+.pads-pad-num { font: 10px var(--font-mono); color: var(--text-dim); }
+.pads-pad-name { position: relative; z-index: 1; }
+.pads-pad-key { position: absolute; right: 5px; bottom: 3px; font: 9px var(--font-mono); color: var(--text-dim); }
+
+.pads-pad[data-voice="bd"] { --pad: var(--track-1); }
+.pads-pad[data-voice="sd"] { --pad: var(--track-2); }
+.pads-pad[data-voice="rs"], .pads-pad[data-voice="cp"] { --pad: var(--track-3); }
+.pads-pad[data-voice="ch"], .pads-pad[data-voice="oh"] { --pad: var(--track-4); }
+.pads-pad[data-voice="lt"] { --pad: var(--track-5); }
+.pads-pad[data-voice="mt"] { --pad: var(--track-6); }
+.pads-pad[data-voice="ht"] { --pad: var(--track-7); }
+.pads-pad[data-voice="cr"], .pads-pad[data-voice="rd"] { --pad: var(--track-8); }
+
+@media (max-width: 480px) {
+  #pads-view { padding: 0 6px 40px; }
+  .pads-shell { padding: 8px; }
+  .pads-strip { height: 110px; }
+  .pads-grid { gap: 5px; }
+}

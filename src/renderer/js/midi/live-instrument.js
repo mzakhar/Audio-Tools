@@ -24,8 +24,8 @@ export function paletteAcceptsNote(palette, note) {
 }
 
 /** Does the kit have a sound for this note? Drives the unlit pad. */
-export function kitAcceptsNote(instrument, note) {
-  return !!kitFor(instrument?.kitId)?.slots[note]
+export function kitAcceptsNote(instrument, note, kits) {
+  return !!kitFor(instrument?.kitId, kits)?.slots[note]
 }
 
 export function liveInstrumentFor(track, deps) {

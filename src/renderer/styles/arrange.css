@@ -13,8 +13,10 @@
 #main[data-view="arrange"] #app { display: none; }
 #main[data-view="rack"] #app { display: none; }
 #main[data-view="tr909"] #app { display: none; }
+#main[data-view="pads"] #app { display: none; }
 #main[data-view="arrange"] #arrange-view { display: flex; }
 #main[data-view="tr909"] #tr909-view { display: block; }
+#main[data-view="pads"] #pads-view { display: block; }
 #arrange-workspace {
   display: flex;
   flex: 1;
