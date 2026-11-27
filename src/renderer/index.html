@@ -206,6 +206,19 @@
     </div>
   </dialog>
 
+  <dialog id="controller-learn-dialog" class="app-dialog" aria-labelledby="controller-learn-title">
+    <div class="dlg-header">
+      <span id="controller-learn-title" class="dlg-title">CONTROLLER MAP</span>
+      <button class="btn dlg-close-btn" data-close-dialog="controller-learn-dialog" aria-label="Close controller map">✕</button>
+    </div>
+    <div class="dlg-body">
+      <div class="dlg-row"><span class="dlg-label">DEVICE</span><output id="controller-learn-device" class="lcd">no device</output></div>
+      <p id="controller-learn-note" class="dlg-note" role="status" aria-live="polite"></p>
+      <div id="controller-learn-list" class="dlg-row"></div>
+      <div class="dlg-row"><button id="controller-learn-reset" type="button" class="btn">RESET TO DEFAULTS</button></div>
+    </div>
+  </dialog>
+
   <dialog id="assistant-dialog" class="app-dialog" aria-labelledby="asst-title">
     <div class="dlg-header">
       <span id="asst-title" class="dlg-title">ASSISTANT</span>

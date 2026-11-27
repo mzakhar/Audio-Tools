@@ -17,6 +17,7 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
   let cached = null             // { profile, records } for the last profile read
   let running = null            // the refresh in progress, shared by overlapping callers
   let latest = null             // colours most recently asked for
+  let painting = null           // the paint() in progress; refresh waits for it
 
   function request(bytes, cmd) {
     return new Promise(resolve => {
@@ -91,6 +92,7 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
   function refresh(colours) {
     latest = colours
     running ??= (async () => {
+      await painting
       let used, result
       do {                          // a kit change mid-run paints again with the new colours
         used = latest
@@ -101,5 +103,26 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
     return running
   }
 
-  return { refresh, onSysex }
+  /**
+   * LED mirror: write colours[pad] (null = leave) to every bank's record for that pad,
+   * using the records the last refresh cached. Resolves true when every write was
+   * acknowledged; false when idle, not in a user preset, or the device went quiet.
+   */
+  function paint(colours) {
+    if (running || painting || !cached) return Promise.resolve(false)
+    painting = (async () => {
+      for (const write of paintPlan(cached.profile, cached.records, colours)) {
+        const ack = await request(rgbWrite(write.addr, write.rgb), CMD.ACK)
+        if (!ack) return false
+        cached.records[write.rec].rgb = write.rgb
+      }
+      return true
+    })().finally(() => { painting = null })
+    return painting
+  }
+
+  /** True while the last mode read found a user preset (cached is dropped otherwise). */
+  const isUserMode = () => cached !== null
+
+  return { refresh, onSysex, paint, isUserMode }
 }
