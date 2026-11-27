@@ -388,10 +388,10 @@ describe('pads view', () => {
       expect(pad(3).dataset.drop).toBe('on')
       drop(pad(3))
       expect(pad(3).dataset.drop).toBeUndefined()
-      expect(onDropFile).toHaveBeenCalledWith(file, { pad: 3, note: 39 })
+      expect(onDropFile).toHaveBeenCalledWith(file, { pad: 3, note: 39, count: 1 })
       view.setBank(1)
       drop(pad(3))
-      expect(onDropFile).toHaveBeenLastCalledWith(file, { pad: 3, note: 55 })
+      expect(onDropFile).toHaveBeenLastCalledWith(file, { pad: 3, note: 55, count: 1 })
     })
 
     it('strip and grid drops pass pad null; the pad does not also fire', () => {
@@ -399,7 +399,32 @@ describe('pads view', () => {
       mount({ onDropFile })
       drop(root.querySelector('.pads-strip'))
       drop(root.querySelector('.pads-grid'))
-      expect(onDropFile.mock.calls).toEqual([[file, { pad: null, note: null }], [file, { pad: null, note: null }]])
+      expect(onDropFile.mock.calls).toEqual([[file, { pad: null, note: null, count: 1 }], [file, { pad: null, note: null, count: 1 }]])
+    })
+
+    it('multiple files: first is used and the count is reported', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      drop(pad(0), [file, { name: 'b.wav' }])
+      expect(onDropFile).toHaveBeenCalledWith(file, { pad: 0, note: 36, count: 2 })
+    })
+
+    it('dragleave into a child keeps the outline; document-level file drag is cancelled until destroy', () => {
+      mount({})
+      const grid = root.querySelector('.pads-grid')
+      dragover(grid)
+      const leave = new Event('dragleave', { bubbles: true })
+      leave.relatedTarget = pad(0)
+      grid.dispatchEvent(leave)
+      expect(grid.dataset.drop).toBe('on')
+      const ev = dragover(document.body)
+      expect(ev.defaultPrevented).toBe(true)
+      const plain = new Event('dragover', { bubbles: true, cancelable: true })
+      plain.dataTransfer = { types: ['text/plain'] }
+      document.body.dispatchEvent(plain)
+      expect(plain.defaultPrevented).toBe(false)
+      view.destroy()
+      expect(dragover(document.body).defaultPrevented).toBe(false)
     })
 
     it('a drop with no file does nothing', () => {

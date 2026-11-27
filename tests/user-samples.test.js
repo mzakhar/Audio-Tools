@@ -26,7 +26,7 @@ describe('sampleIdOf', () => {
     expect(sampleIdOf(bytes(1, 2, 3))).toBe(sampleIdOf(bytes(1, 2, 3)))
     expect(sampleIdOf(bytes(1, 2, 3))).not.toBe(sampleIdOf(bytes(1, 2, 4)))
     expect(sampleIdOf(bytes(0))).not.toBe(sampleIdOf(bytes(0, 0)))
-    expect(sampleIdOf(bytes(1, 2, 3))).toMatch(/^smp-[0-9a-f]{8}-3$/)
+    expect(sampleIdOf(bytes(1, 2, 3))).toMatch(/^smp-[0-9a-f]{16}-3$/)
   })
 })
 
@@ -165,3 +165,15 @@ describe('userSampleStoreFor', () => {
   })
 })
 
+
+describe('put dedupe', () => {
+  it('put skips the write when the id exists', async () => {
+    const idb = fakeIdb()
+    const us = createUserSamples({ idb })
+    await us.put({ name: 'a', type: 'audio/wav', bytes: bytes(5, 6) })
+    const key = sampleIdOf(bytes(5, 6))
+    const before = idb.data.get(key)
+    await us.put({ name: 'other', type: 'audio/wav', bytes: bytes(5, 6) })
+    expect(idb.data.get(key)).toBe(before)
+  })
+})

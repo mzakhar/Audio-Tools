@@ -53,6 +53,13 @@ function playSample(ctx, target, def, vel01, t, perf, buffer) {
   src.stop(t + len + 0.01)
 }
 
+const misses = new WeakMap()
+/** Per-sample-store set of ids whose load failed: a missing sample is not re-read on every hit. */
+export function missesOf(store) {
+  if (!misses.has(store)) misses.set(store, new Set())
+  return misses.get(store)
+}
+
 export function kitInstrument(kit, { ctx, output, perfFor, sampleStore }) {
   const open = new Map() // group → gain node carrying the sounding open voice
 
@@ -83,7 +90,9 @@ export function kitInstrument(kit, { ctx, output, perfFor, sampleStore }) {
     if (def.voice === 'sample') {
       const buffer = sampleStore?.peek(def.sampleId)
       if (buffer) playSample(ctx, target, def, vel01, t, combine(perfFor ? perfFor(pitch) : def.perf, override), buffer)
-      else sampleStore?.get(def.sampleId).catch(() => {}) // silent this hit; the next one plays
+      else if (sampleStore && !missesOf(sampleStore).has(def.sampleId)) {
+        sampleStore.get(def.sampleId).catch(() => missesOf(sampleStore).add(def.sampleId)) // silent this hit; the next one plays
+      }
       return
     }
     createTr909Voice(ctx, target, def.voice, { [def.voice]: params }, { velocity: vel01, accent }, t)
@@ -99,7 +108,12 @@ export function kitInstrument(kit, { ctx, output, perfFor, sampleStore }) {
     prewarm() {
       for (const kind of ['hat', 'crash', 'ride']) metalBuffer(ctx, kind)
       const ids = Object.values(kit.slots).filter(d => d.voice === 'sample').map(d => d.sampleId)
-      return sampleStore && ids.length ? Promise.allSettled([...new Set(ids)].map(id => sampleStore.get(id))).then(() => {}) : Promise.resolve()
+      if (!sampleStore || !ids.length) return Promise.resolve()
+      const miss = missesOf(sampleStore)
+      return Promise.allSettled([...new Set(ids)].map(id => {
+        miss.delete(id) // prewarm retries
+        return sampleStore.get(id).catch(error => { miss.add(id); throw error })
+      })).then(() => {})
     },
     dispose() { for (const group of [...open.keys()]) duck(group, ctx.currentTime) }
   }

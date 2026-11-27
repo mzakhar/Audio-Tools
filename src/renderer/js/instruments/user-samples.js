@@ -9,12 +9,16 @@ import { request, done } from './pack-store-idb.js'
 const DB_NAME = 'synth-user-samples'
 const STORE = 'samples'
 
-/** `smp-<fnv1a32 hex>-<byteLength>` — PURE, no crypto.subtle (absent on plain http). */
+/** `smp-<64-bit hex>-<byteLength>` (two independent FNV-1a passes) — PURE, no crypto.subtle (absent on plain http). */
 export function sampleIdOf(bytes) {
   const view = new Uint8Array(bytes)
-  let h = 0x811c9dc5
-  for (let i = 0; i < view.length; i++) h = Math.imul(h ^ view[i], 0x01000193)
-  return `smp-${(h >>> 0).toString(16).padStart(8, '0')}-${view.length}`
+  let a = 0x811c9dc5, b = 0x9747b28c
+  for (let i = 0; i < view.length; i++) {
+    a = Math.imul(a ^ view[i], 0x01000193)
+    b = Math.imul(b ^ view[i] ^ (i & 0xff), 0x85ebca6b) ^ (b >>> 15)
+  }
+  const hex = n => (n >>> 0).toString(16).padStart(8, '0')
+  return `smp-${hex(a)}${hex(b)}-${view.length}`
 }
 
 export function createUserSamples({ idb = globalThis.indexedDB } = {}) {
@@ -31,6 +35,7 @@ export function createUserSamples({ idb = globalThis.indexedDB } = {}) {
     async put({ name, type, bytes }) {
       if (!idb) throw new Error('no-storage')
       const id = sampleIdOf(bytes)
+      if (await this.has(id)) return { id, name }
       const tx = (await db()).transaction(STORE, 'readwrite')
       tx.objectStore(STORE).put({ bytes, name, type }, id)
       await done(tx)

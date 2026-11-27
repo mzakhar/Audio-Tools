@@ -113,6 +113,8 @@ export class PadsView {
     this._ro?.disconnect()
     document.removeEventListener('keydown', this._onKey)
     document.removeEventListener('keyup', this._onKey)
+    document.removeEventListener('dragover', this._onDocDrag)
+    document.removeEventListener('drop', this._onDocDrag)
     for (const id of [...this._flashTimers.values(), ...this._pulseTimers.values()]) clearTimeout(id)
     this._flashTimers.clear()
     this._pulseTimers.clear()
@@ -483,15 +485,19 @@ export class PadsView {
         e.stopPropagation()
         target.dataset.drop = 'on'
       })
-      target.addEventListener('dragleave', () => { delete target.dataset.drop })
+      target.addEventListener('dragleave', e => { if (!target.contains(e.relatedTarget)) delete target.dataset.drop })
       target.addEventListener('drop', e => {
         e.preventDefault()
         e.stopPropagation()
         delete target.dataset.drop
-        const file = e.dataTransfer?.files?.[0]
-        if (file) this.opts.onDropFile?.(file, { pad, note: pad == null ? null : this._noteOf(pad) })
+        const files = e.dataTransfer?.files
+        if (files?.[0]) this.opts.onDropFile?.(files[0], { pad, note: pad == null ? null : this._noteOf(pad), count: files.length })
       })
     }
+    // A file dropped anywhere else would navigate the window to it.
+    this._onDocDrag = e => { if (e.dataTransfer?.types?.includes?.('Files')) e.preventDefault() }
+    document.addEventListener('dragover', this._onDocDrag)
+    document.addEventListener('drop', this._onDocDrag)
     this.padEls.forEach((pad, i) => dropTo(pad, i))
     dropTo(el.strip, null)
     dropTo(this.container.querySelector('.pads-grid'), null)

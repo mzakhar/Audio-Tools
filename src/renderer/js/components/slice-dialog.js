@@ -29,7 +29,7 @@ export function peaks(samples, columns) {
 /** Index of the region containing sample `at`, or -1. Pure. */
 export const regionAt = (regions, at) => regions.findIndex(r => at >= r.start && at < r.end)
 
-export function createSliceDialog({ root = document, onApply = () => {}, onSetBpm = () => {}, audition = () => {} } = {}) {
+export function createSliceDialog({ root = document, onApply = () => {}, onSetBpm = () => {}, audition = () => {}, onClose = () => {} } = {}) {
   const $ = sel => root.querySelector(`#${SLICE_DIALOG_ID} ${sel}`)
   const canvas = $('.slice-canvas'), sens = $('.slice-sens'), info = $('.slice-info')
   const bpmBtn = $('.slice-setbpm'), applyBtn = $('.slice-apply'), msg = $('.slice-msg')
@@ -94,7 +94,7 @@ export function createSliceDialog({ root = document, onApply = () => {}, onSetBp
     onApply({ regions: st.regions, sampleRate: st.sampleRate, name: st.name, bytes: st.bytes })
     closeDialog(SLICE_DIALOG_ID)
   })
-  root.querySelector(`#${SLICE_DIALOG_ID}`).addEventListener('close', () => { clearTimeout(timer); st = null })
+  root.querySelector(`#${SLICE_DIALOG_ID}`).addEventListener('close', () => { clearTimeout(timer); st = null; onClose() })
 
   return {
     open({ name, buffer, bytes }) {

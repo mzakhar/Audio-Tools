@@ -19,14 +19,15 @@ import AudioStore from './audio-store.js'
 import { ArrangementView } from './components/arrangement-view.js'
 import { MixerStrip } from './components/mixer-strip.js'
 import MixerEngine from './audio/mixer-engine.js'
-import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playback/timeline-player.js'
+import TimelinePlayer, { instrumentFor as scheduledInstrumentFor, preloadKitSamples } from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { groupInputs } from './midi/device-group.js'
 import { createSmcPadLink } from './pads/smc-pad-link.js'
 import { kitFor, padColours, DEFAULT_KIT_ID, sampleSlot, sliceSlots } from './pads/kit.js'
+import { missesOf } from './pads/kit-voices.js'
 import { createUserSamples, userSampleStoreFor } from './instruments/user-samples.js'
 import { createSliceDialog } from './components/slice-dialog.js'
-import { checkSampleFile, padEndSec, slotCommands, samplePadsOf, MAX_SLICE_SEC } from './pads/sample-drop.js'
+import { checkSampleFile, padEndSec, slotCommands, samplePadsOf, tooShort, MAX_SLICE_SEC, MAX_PAD_BYTES } from './pads/sample-drop.js'
 import { mono, trimEnd } from './pads/slicer.js'
 import { createLoopPlayer } from './pads/loop-player.js'
 import { createPadsSession, canRecordHit } from './pads/pads-session.js'
@@ -792,11 +793,18 @@ const padsHold = (selector, down) => _padsView?.container.querySelector(selector
 // ─── Sample drops (Pads view) ───────────────────────────────────────────────
 let _userSamples = null
 const userSampleStorage = () => (_userSamples ??= createUserSamples())
+/** put + forget a cached "missing" verdict for that id, so a re-dropped sample plays at once. */
+async function putUserSample(sample) {
+  const stored = await userSampleStorage().put(sample)
+  const store = userSampleStoreFor(AudioEngine.getContext())
+  if (store) missesOf(store).delete(stored.id)
+  return stored
+}
 let _sliceDialog = null
 
 /** File -> { bytes, buffer, name } or { error } (a short message for the toast). Never throws. */
-async function decodeDropped(file) {
-  const check = checkSampleFile(file)
+async function decodeDropped(file, opts) {
+  const check = checkSampleFile(file, opts)
   if (!check.ok) return { error: check.reason }
   let bytes
   try { bytes = await file.arrayBuffer() } catch { return { error: 'Could not read file' } }
@@ -809,35 +817,59 @@ async function decodeDropped(file) {
 
 function putSlots(kitId, slots, label) {
   const kit = kitFor(kitId, _hot.kits)
+  if (!kit) return showToast('Kit not found')
   ProjectStore.dispatchBatch(slotCommands(kitId, kit, !!_hot.kits?.[kitId], slots), label)
   refreshPadLeds()
 }
 
-async function onPadsDropFile(file, { pad = null, note = null } = {}) {
+/** One audition source at a time, 10 ms fade-out at the region end. */
+let _auditionSrc = null
+function stopAudition() {
+  try { _auditionSrc?.stop() } catch { /* already ended */ }
+  _auditionSrc = null
+}
+function auditionRegion(buffer, start, end) {
+  const ctx = AudioEngine.getContext()
+  if (!ctx) return
+  stopAudition()
+  const dur = Math.max(end - start, 0.001), fade = Math.min(0.01, dur / 2), t = ctx.currentTime
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(1, t + dur - fade)
+  gain.gain.linearRampToValueAtTime(0, t + dur)
+  gain.connect(AudioEngine.getMasterInput())
+  const src = ctx.createBufferSource()
+  src.buffer = buffer
+  src.connect(gain)
+  src.start(t, start, dur)
+  src.stop(t + dur + 0.01)
+  src.onended = () => { if (_auditionSrc === src) _auditionSrc = null }
+  _auditionSrc = src
+}
+
+const trimmedOf = buffer => trimEnd(mono(Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i))))
+
+async function onPadsDropFile(file, { pad = null, note = null, count = 1 } = {}) {
   const kitId = armedKitId()
   if (!kitId) return showToast('Arm a kit track first')
-  const got = await decodeDropped(file)
+  if (count > 1) showToast(`One file at a time — used ${file.name}`)
+  const got = await decodeDropped(file, pad == null ? undefined : { maxBytes: MAX_PAD_BYTES })
   if (got.error) return showToast(got.error)
+  const trimmed = trimmedOf(got.buffer)
+  const short = tooShort(trimmed, got.buffer.sampleRate, pad == null ? 'slice' : 'pad')
+  if (short) return showToast(short)
   if (pad == null) {
     if (got.buffer.duration > MAX_SLICE_SEC) return showToast(`Too long to slice (max ${MAX_SLICE_SEC} s)`)
     _sliceDialog ??= createSliceDialog({
       onApply: applySlice,
       onSetBpm: bpm => ProjectStore.dispatch(SetBpm(bpm)),
-      audition: (buffer, start, end) => {
-        const ctx = AudioEngine.getContext()
-        if (!ctx) return
-        const src = ctx.createBufferSource()
-        src.buffer = buffer
-        src.connect(AudioEngine.getMasterInput())
-        src.start(0, start, end - start)
-      }
+      audition: auditionRegion,
+      onClose: stopAudition
     })
     return _sliceDialog.open(got)
   }
   let stored
-  try { stored = await userSampleStorage().put({ name: file.name, type: file.type, bytes: got.bytes }) } catch { return showToast('Could not store sample') }
+  try { stored = await putUserSample({ name: file.name, type: file.type, bytes: got.bytes }) } catch { return showToast('Could not store sample') }
   const { buffer } = got
-  const trimmed = trimEnd(mono(Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i))))
   const slot = sampleSlot({ sampleId: stored.id, name: got.name, start: 0, end: padEndSec(trimmed, buffer.sampleRate) })
   putSlots(kitId, { [note ?? 36 + pad]: slot }, 'Load sample')
 }
@@ -846,7 +878,7 @@ async function applySlice({ regions, sampleRate, name, bytes }) {
   const kitId = armedKitId()
   if (!kitId) return
   let stored
-  try { stored = await userSampleStorage().put({ name, type: 'audio/*', bytes }) } catch { return showToast('Could not store sample') }
+  try { stored = await putUserSample({ name, type: 'audio/*', bytes }) } catch { return showToast('Could not store sample') }
   putSlots(kitId, sliceSlots(regions, sampleRate, { sampleId: stored.id, name }), 'Slice sample')
 }
 
@@ -1273,10 +1305,12 @@ function initCommandBar() {
   })
 
   // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
-  document.getElementById('global-play-btn')?.addEventListener('click', () => {
-    ensureAudio()
+  document.getElementById('global-play-btn')?.addEventListener('click', async () => {
+    await ensureAudio()
     if (_currentMode === 'arrange') {
       const state = ProjectStore.getState()
+      // Decode every kit track's samples first: otherwise each one's first hit is silent.
+      await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
       TimelinePlayer.play({
         beat: 0,
         bpm: state.bpm,

@@ -88,10 +88,12 @@ export function sliceRegions(samples, sampleRate, onsets, { count = 16, minSlice
     cuts.splice(i - 1 < cuts.length ? i - 1 : i - 2, 1)
   }
   // split the longest region at its (snapped) midpoint until count
+  // (stops early when the longest region is 1 sample: never emits a zero-length region)
   while (cuts.length < count - 1) {
     const b = [0, ...cuts, end]
     let li = 0
     for (let k = 1; k < b.length - 1; k++) if (b[k + 1] - b[k] > b[li + 1] - b[li]) li = k
+    if (b[li + 1] - b[li] < 2) break
     const mid = Math.floor((b[li] + b[li + 1]) / 2)
     const z = snapToZero(samples, mid)
     cuts.splice(li, 0, z > b[li] && z < b[li + 1] ? z : mid)

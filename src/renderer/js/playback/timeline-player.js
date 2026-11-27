@@ -65,6 +65,18 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
   return palette ? paletteInstrument(palette, ctx, output, params) : null
 }
 
+/** Sample ids used by the kit tracks' sample slots (deduped). */
+export function kitSampleIds(tracks, kits) {
+  const ids = tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'kit')
+    .flatMap(track => Object.values(kitFor(track.instrument.kitId, kits)?.slots ?? {}))
+    .filter(def => def.voice === 'sample').map(def => def.sampleId)
+  return [...new Set(ids)]
+}
+
+/** Decode every kit sample into `store`; a missing one stays silent. */
+export const preloadKitSamples = (store, tracks, kits) =>
+  store ? Promise.allSettled(kitSampleIds(tracks, kits).map(id => store.get(id))).then(() => {}) : Promise.resolve()
+
 const TimelinePlayer = {
   _sources: [],           // active AudioBufferSourceNode[]
   _midiTimeouts: [],      // setTimeout handles for MIDI note scheduling
@@ -242,12 +254,7 @@ const TimelinePlayer = {
     }
     // Kit sample slots: decode into the offline store before render. A missing sample bounces silent, like a missing sample live.
     const kitStore = userSampleStoreFor?.(offline)
-    if (kitStore) {
-      const ids = tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'kit')
-        .flatMap(track => Object.values(kitFor(track.instrument.kitId, kits)?.slots ?? {}))
-        .filter(def => def.voice === 'sample').map(def => def.sampleId)
-      await Promise.allSettled([...new Set(ids)].map(id => kitStore.get(id)))
-    }
+    await preloadKitSamples(kitStore, tracks, kits)
     if (missing.length) throw new Error(`Missing pack samples: ${missing.join(', ')}`)
     tracks.forEach(track => {
       if (track.type === 'midi') {

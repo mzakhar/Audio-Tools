@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { checkSampleFile, padEndSec, slotCommands, samplePadsOf, MAX_FILE_BYTES } from '../src/renderer/js/pads/sample-drop.js'
+import { checkSampleFile, padEndSec, slotCommands, samplePadsOf, MAX_FILE_BYTES, MAX_PAD_BYTES, tooShort } from '../src/renderer/js/pads/sample-drop.js'
 
 describe('checkSampleFile', () => {
   it('accepts audio by mime or extension', () => {
@@ -30,5 +30,18 @@ describe('slot helpers', () => {
     const kit = { slots: { 36: { voice: 'bd' }, 37: { voice: 'sample' }, 51: { voice: 'sample' }, 52: { voice: 'sample' } } }
     expect([...samplePadsOf(kit)].sort((a, b) => a - b)).toEqual([1, 15])
     expect(samplePadsOf(null).size).toBe(0)
+  })
+})
+
+describe('size and length gates', () => {
+  it('per-call byte cap', () => {
+    expect(checkSampleFile({ name: 'a.wav', size: MAX_PAD_BYTES + 1, type: 'audio/wav' }, { maxBytes: MAX_PAD_BYTES })).toMatchObject({ ok: false, reason: expect.stringContaining('10 MB') })
+    expect(checkSampleFile({ name: 'a.wav', size: MAX_PAD_BYTES + 1, type: 'audio/wav' }).ok).toBe(true)
+  })
+  it('tooShort: slice needs 16 x 30 ms, pad needs 10 ms', () => {
+    expect(tooShort(16 * 0.03 * 1000 - 1, 1000, 'slice')).toBe('Too short to slice')
+    expect(tooShort(16 * 0.03 * 1000, 1000, 'slice')).toBe(null)
+    expect(tooShort(9, 1000, 'pad')).toBe('Too short to use')
+    expect(tooShort(10, 1000, 'pad')).toBe(null)
   })
 })

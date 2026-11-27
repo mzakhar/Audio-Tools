@@ -55,7 +55,7 @@ describe('slicer', () => {
   })
 
   it('always exactly 16 contiguous regions', () => {
-    const x = burstBuffer(4, [])
+    const x = burstBuffer(4, [Math.round(3.5 * SR)]) // a loud tail: pure noise trims to 1 sample
     const mk = (n) => Array.from({ length: n }, (_, i) => ({ at: Math.round((i + 1) * SR * 3.9 / (n + 1)), strength: 1 + (i % 7) }))
     for (const n of [0, 1, 2, 15, 16, 40]) {
       const r = sliceRegions(x, SR, mk(n))
@@ -65,7 +65,7 @@ describe('slicer', () => {
   })
 
   it('merges too-short slices and still yields 16', () => {
-    const x = burstBuffer(2, [])
+    const x = burstBuffer(2, [Math.round(1.8 * SR)])
     const r = sliceRegions(x, SR, [{ at: 24000, strength: 1 }, { at: 24100, strength: 2 }])
     expect(r).toHaveLength(16)
     expect(contiguous(r, trimEnd(x))).toBe(true)
@@ -108,5 +108,15 @@ describe('slicer', () => {
     const t = performance.now()
     sliceRegions(x, SR, detect(x))
     expect(performance.now() - t).toBeLessThan(500)
+  })
+})
+
+describe('sliceRegions degenerate input', () => {
+  it('never returns a zero-length region (silent / 1-sample file)', () => {
+    for (const x of [new Float32Array(SR), new Float32Array(1), Float32Array.from([0.5, 0.5, 0.5])]) {
+      const r = sliceRegions(x, SR, [])
+      expect(r.length).toBeGreaterThan(0)
+      expect(r.every((g) => g.end > g.start)).toBe(true)
+    }
   })
 })

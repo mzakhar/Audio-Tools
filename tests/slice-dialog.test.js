@@ -84,3 +84,12 @@ describe('helpers', () => {
     expect([regionAt(r, 0), regionAt(r, 10), regionAt(r, 25)]).toEqual([0, 1, -1])
   })
 })
+
+describe('slice dialog close', () => {
+  it('calls onClose when the dialog closes', () => {
+    const onClose = vi.fn()
+    createSliceDialog({ onClose })
+    document.querySelector('#slice-dialog').dispatchEvent(new Event('close'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
