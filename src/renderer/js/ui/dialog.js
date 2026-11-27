@@ -2,7 +2,8 @@
  * dialog.js
  * Thin imperative shell over the native <dialog> element.
  *
- * openDialog(id, opts) → showModal(), push a shortcut context.
+ * openDialog(id, opts) → showModal(), push a shortcut context
+ *                        (opts.modal === false → show(), no context, no stack).
  * closeDialog(id)      → .close(); the 'close' listener does the restoring,
  *                        so Esc, a close button and a programmatic close all
  *                        restore state identically.
@@ -32,9 +33,15 @@ function restore(id) {
   if (focus?.isConnected && !focus.hidden && typeof focus.focus === 'function') focus.focus()
 }
 
-export function openDialog(id, { context = 'dialog', onClose } = {}) {
+export function openDialog(id, { context = 'dialog', onClose, modal = true } = {}) {
   const el = document.getElementById(id)
   if (!el || typeof el.showModal !== 'function') return false
+  if (!modal) {
+    // Non-modal: the page keeps the keyboard, so no context push and no restore entry.
+    if (el.open) return false
+    el.show()
+    return true
+  }
   // An entry whose element left the DOM (a re-rendered view, a torn-down test)
   // is stale: its close event can never arrive, so it must not block reopening.
   for (const entry of [..._stack]) if (!entry.el.isConnected) restore(entry.id)
