@@ -29,7 +29,7 @@ export function pressureVelocity(pressure, { sinceStrikeMs, strikeVelocity, gate
 export function ladderHit(source, step, param) {
   const hit = { note: source.note, velocity: source.velocity, params: {} }
   if (param === 'velocity') hit.velocity = Math.round(8 + step * (119 / 15))
-  else if (param === 'tune') hit.params.tune = step - 8
+  else if (param === 'tune') hit.params.tuneSt = step - 8
   else if (param === 'decay') hit.params.decayMul = 0.25 + step * (1.75 / 15)
   else if (param === 'filter') hit.params.filterMul = 0.2 + step * (0.8 / 15)
   return hit

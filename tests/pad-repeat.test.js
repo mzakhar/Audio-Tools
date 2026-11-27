@@ -45,7 +45,7 @@ describe('ladderHit', () => {
     expect(ladderHit(src, 8, 'velocity').velocity).toBe(Math.round(8 + 8 * (119 / 15)))
   })
   it('tune', () => {
-    expect([0, 8, 15].map((s) => ladderHit(src, s, 'tune').params.tune)).toEqual([-8, 0, 7])
+    expect([0, 8, 15].map((s) => ladderHit(src, s, 'tune').params.tuneSt)).toEqual([-8, 0, 7])
     expect(ladderHit(src, 0, 'tune').velocity).toBe(100)
   })
   it('decay', () => {
