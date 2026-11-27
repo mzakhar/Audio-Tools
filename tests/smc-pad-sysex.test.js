@@ -152,3 +152,17 @@ describe('createSmcPadLink', () => {
     expect(await link.refresh(colours)).toBeNull()
   })
 })
+
+describe('createSmcPadLink under change', () => {
+  it('repaints with the newer colours when they change mid-refresh', async () => {
+    const device = fakeDevice()
+    const link = createSmcPadLink({ send: b => device.send(b) })
+    device.attach(link)
+    const red = new Array(16).fill([255, 0, 0])
+    const blue = new Array(16).fill([0, 0, 255])
+    const first = link.refresh(red)
+    link.refresh(blue)
+    await first
+    expect(device.region5.slice(recordAddr(2, 16) + 5, recordAddr(2, 16) + 8)).toEqual([0, 0, 255])
+  })
+})

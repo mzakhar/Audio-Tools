@@ -16,6 +16,7 @@ const MidiController = {
   _curve: curveForDevice(''), // velocity shaping for that device, resolved at selection
   _sysex: false,      // granted SysEx; the SMC-PAD LED link needs it
   _noteMap: null,     // device note → played note (SMC-PAD user preset → kit pads)
+  _mappedHeld: new Map(), // device note → pitch its note-on played, so a map swap cannot strand the note-off
   onSysex: null,      // (bytes) => void, for the selected input's SysEx replies
   _recording: false,
   _recordStartPerf: 0, // performance.now() when recording started
@@ -133,9 +134,14 @@ const MidiController = {
     if (e.data[0] === 0xf0) { this.onSysex?.(e.data); return }
     let parsed = parseMidiMessage(e.data)
     if (!parsed) return
-    if (this._noteMap && (parsed.kind === 'note-on' || parsed.kind === 'note-off')) {
-      const pitch = this._noteMap.get(parsed.pitch)
-      if (pitch != null) parsed = { ...parsed, pitch }
+    if (parsed.kind === 'note-on') {
+      const pitch = this._noteMap?.get(parsed.pitch) ?? parsed.pitch
+      this._mappedHeld.set(parsed.pitch, pitch)
+      parsed = { ...parsed, pitch }
+    } else if (parsed.kind === 'note-off') {
+      const pitch = this._mappedHeld.get(parsed.pitch) ?? parsed.pitch
+      this._mappedHeld.delete(parsed.pitch)
+      parsed = { ...parsed, pitch }
     }
     // A device property, so recordings keep what was heard. 0 = hit dropped.
     if (parsed.kind === 'note-on') {

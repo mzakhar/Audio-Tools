@@ -16,6 +16,7 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
   let identified = false
   let cached = null             // { profile, records } for the last profile read
   let running = null            // the refresh in progress, shared by overlapping callers
+  let latest = null             // colours most recently asked for
 
   function request(bytes, cmd) {
     return new Promise(resolve => {
@@ -34,17 +35,25 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
     resolve(reply)
   }
 
+  // A reply of the wrong size answers some other read (a late one after a
+  // timeout), so it counts as no reply.
+  async function read(region, addr, len) {
+    const reply = await request(readRequest(region, addr, len), CMD.READ)
+    const payload = reply && readPayload(reply)
+    return payload?.length === len ? payload : null
+  }
+
   async function readMode() {
-    const reply = await request(readRequest(MODE_REGION, 0, 12), CMD.READ)
-    return reply && parseMode(readPayload(reply))
+    const payload = await read(MODE_REGION, 0, 12)
+    return payload && parseMode(payload)
   }
 
   async function readRecords(profile) {
     const bytes = []
     for (const { addr, len } of recordReads(profile)) {
-      const reply = await request(readRequest(CONFIG_REGION, addr, len), CMD.READ)
-      if (!reply) return null
-      bytes.push(...readPayload(reply))
+      const payload = await read(CONFIG_REGION, addr, len)
+      if (!payload) return null
+      bytes.push(...payload)
     }
     return parseRecords(bytes)
   }
@@ -56,7 +65,10 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
       identified = true
     }
     const mode = await readMode()
-    if (!mode?.user) return null    // Performance/DAW presets: fixed colours, notes already 36–51
+    if (!mode?.user) {              // Performance/DAW presets: fixed colours, notes already 36–51
+      cached = null                 // records may be edited while away; re-read on return
+      return null
+    }
     if (cached?.profile !== mode.profile) {
       const records = await readRecords(mode.profile)
       if (!records) return null
@@ -64,7 +76,8 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
     }
     for (const write of paintPlan(cached.profile, cached.records, colours)) {
       const ack = await request(rgbWrite(write.addr, write.rgb), CMD.ACK)
-      if (ack) cached.records[write.rec].rgb = write.rgb
+      if (!ack) return null         // a silent device must not hold the link for 128 timeouts
+      cached.records[write.rec].rgb = write.rgb
     }
     return padNoteMap(cached.records)
   }
@@ -76,7 +89,15 @@ export function createSmcPadLink({ send, timeoutMs = 1000, setTimer = setTimeout
    * records whose colour differs are written.
    */
   function refresh(colours) {
-    running ??= refreshOnce(colours).finally(() => { running = null })
+    latest = colours
+    running ??= (async () => {
+      let used, result
+      do {                          // a kit change mid-run paints again with the new colours
+        used = latest
+        result = await refreshOnce(used)
+      } while (JSON.stringify(used) !== JSON.stringify(latest))
+      return result
+    })().finally(() => { running = null })
     return running
   }
 

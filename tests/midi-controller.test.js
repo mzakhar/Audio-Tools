@@ -177,3 +177,20 @@ describe('SMC-PAD LED link hooks', () => {
     expect(pitches).toEqual([36, 36, 60])
   })
 })
+
+describe('note map swap', () => {
+  it('a note-off follows the pitch its note-on played, even after the map changes', async () => {
+    setupMockMidi([{ id: 'p', name: 'SMC-PAD' }])
+    await MidiController.requestAccess()
+    MidiController.selectInput('p')
+    const seen = []
+    const listener = e => seen.push(`${e.detail.kind}:${e.detail.pitch}`)
+    document.addEventListener('midi-event', listener)
+    MidiController.setNoteMap(new Map([[20, 36]]))
+    MidiController._input.onmidimessage({ data: new Uint8Array([0x99, 20, 100]), timeStamp: 1 })
+    MidiController.setNoteMap(null)
+    MidiController._input.onmidimessage({ data: new Uint8Array([0x89, 20, 64]), timeStamp: 1 })
+    document.removeEventListener('midi-event', listener)
+    expect(seen).toEqual(['note-on:36', 'note-off:36'])
+  })
+})

@@ -1322,14 +1322,20 @@ const PAD_POLL_MS = 2000       // the preset changes on the device with no MIDI,
 let _padLink = null
 let _padPoll = null
 let _padKitId = null
+let _padOutputId = null
+let _padSeq = 0                // only the latest refresh may set the note map
 
 function linkPads() {
+  const output = MidiController.selectedOutput()
+  // statechange fires for every hot-plug; keep a live link to the same port.
+  if (_padLink && output?.id === _padOutputId) return
   clearInterval(_padPoll)
   _padLink = null
   _padKitId = null
   MidiController.onSysex = null
-  const output = MidiController.selectedOutput()
+  _padOutputId = null
   if (!output || !/SMC-PAD/i.test(output.name || '')) return
+  _padOutputId = output.id
   const link = createSmcPadLink({ send: bytes => output.send(bytes) })
   _padLink = link
   MidiController.onSysex = bytes => link.onSysex(bytes)
@@ -1341,11 +1347,12 @@ async function refreshPadLeds() {
   const link = _padLink
   if (!link) return
   const instrument = _hot.byId.get(_hot.armedId)?.instrument
-  const kit = instrument?.type === 'kit' ? kitFor(instrument.kitId) : null
-  _padKitId = kit?.id ?? null
+  _padKitId = instrument?.type === 'kit' ? instrument.kitId : null
+  const kit = _padKitId ? kitFor(_padKitId) : null
+  const seq = ++_padSeq
   // Only a kit is laid out as 16 pads; anything else hears the device's own notes.
   const map = kit ? await link.refresh(padColours(kit)) : null
-  if (link === _padLink) MidiController.setNoteMap(map)
+  if (link === _padLink && seq === _padSeq) MidiController.setNoteMap(map)
 }
 
 /** The command bar shows one live MIDI token: a dot plus the device name. */
