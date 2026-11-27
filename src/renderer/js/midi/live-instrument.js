@@ -32,7 +32,7 @@ export function liveInstrumentFor(track, deps) {
   return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
 }
 
-export function instrumentFor(instrument, { palettes, ctx, output, racks, mountRack, packFor, sampleStoreFor, onStatus } = {}) {
+export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, mountRack, packFor, sampleStoreFor, onStatus } = {}) {
   if (!instrument) return null
   const bendRange = instrument.bendRange ?? DEFAULT_BEND_RANGE
   const modOff = instrument.modDest === 'off'
@@ -116,7 +116,7 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, mountR
   }
 
   if (instrument.type === 'kit') {
-    const kit = kitFor(instrument.kitId)
+    const kit = kitFor(instrument.kitId, kits)
     return kit ? kitInstrument(kit, { ctx, output }) : null
   }
 

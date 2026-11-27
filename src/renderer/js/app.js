@@ -184,6 +184,7 @@ function instrumentDeps({ output, trackId } = {}) {
     ctx,
     output: out,
     racks: ProjectStore.getState().racks,
+    kits: ProjectStore.getState().kits,
     packFor,
     sampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
@@ -246,7 +247,7 @@ function refreshHot(state = ProjectStore.getState()) {
   _hot.byId = new Map(_hot.midiTracks.map(track => [track.id, track]))
   // The output node is baked into the instrument at build time, so a move to
   // another mixer channel has to invalidate it too.
-  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null])]))
+  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? state.kits?.[track.instrument.kitId] ?? null : null])]))
   _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
   if (_hot.armedId) _midiTargetTrackId = _hot.armedId   // a removed armed track falls back to the first
 }
@@ -876,6 +877,7 @@ function initCommandBar() {
         mixerEngine: MixerEngine,
         palettes: Palettes,
         racks: ProjectStore.getState().racks,
+        kits: ProjectStore.getState().kits,
         packFor,
         sampleStoreFor,
         rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
@@ -1230,6 +1232,7 @@ function initProjectCommands() {
       audioStore: AudioStore,
       durationBeats,
       racks: state.racks,
+      kits: state.kits,
       packFor,
       sampleStoreFor,
       sampleRate: state.sampleRate,

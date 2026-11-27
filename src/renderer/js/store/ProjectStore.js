@@ -2,6 +2,7 @@
 // Implements a command pattern for undo/redo.
 
 import { INSTRUMENTS } from '../drums/tr909-kit.js'
+import { KITS } from '../pads/kit.js'
 import Palettes, { paletteDefaults, paletteParamKeys, clampPaletteParam } from '../palettes.js'
 
 // ---------------------------------------------------------------------------
@@ -13,7 +14,9 @@ function genId(prefix = 'id') { return `${prefix}-${++_idCounter}-${Date.now()}`
 // ---------------------------------------------------------------------------
 // Default state schema
 // ---------------------------------------------------------------------------
-export const CURRENT_VERSION = 6
+export const CURRENT_VERSION = 7
+
+export const DEFAULT_PADS = { loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1 }
 
 export const DEFAULT_STATE = {
   version: CURRENT_VERSION,
@@ -32,6 +35,8 @@ export const DEFAULT_STATE = {
   ],
   racks: {},        // rackId → Rack
   presets: [],      // { id, name, paletteKey, params }[] — project-level, not a user library
+  kits: { 'default-909': JSON.parse(JSON.stringify(KITS['default-909'])) },  // kitId → Kit; editable per project
+  pads: { ...DEFAULT_PADS },
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +95,11 @@ export function migrate(projectJson) {
       instrument.params = filtered
     }
     next.version = 6
+  }
+  if ((next.version ?? 1) < 7) {
+    next.kits = { 'default-909': JSON.parse(JSON.stringify(KITS['default-909'])), ...(next.kits || {}) }
+    next.pads = { ...DEFAULT_PADS, ...(next.pads || {}) }
+    next.version = 7
   }
   return next
 }
@@ -683,6 +693,50 @@ function rackCommand(label, rackId, mutate) {
       const rack = next.racks[rackId]
       if (!rack) return next
       mutate(rack, next)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+// Every kit command is "clone state, mutate one kit, return it".
+function kitCommand(label, kitId, mutate) {
+  return {
+    label,
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const kit = next.kits?.[kitId]
+      if (!kit) return next
+      mutate(kit, next)
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
+/** Replace one slot of a kit ({ voice, params, group?, open? }); null removes it. */
+export function SetKitSlot(kitId, note, slot) {
+  return kitCommand(`Edit kit slot ${note}`, kitId, kit => {
+    if (!kit.slots) kit.slots = {}
+    if (slot == null) delete kit.slots[note]
+    else kit.slots[note] = slot
+  })
+}
+
+const clampNum = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(+v) ? +v : lo))
+
+/** Shallow-merge pads view settings, clamping the ones with a range. */
+export function SetPadsSettings(patch) {
+  return {
+    label: 'Pads settings',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const p = { ...patch }
+      if ('loopBars' in p) p.loopBars = clampNum(Math.round(p.loopBars), 1, 8)
+      if ('groove' in p) p.groove = clampNum(p.groove, 0.5, 0.75)
+      if ('snapStrength' in p) p.snapStrength = clampNum(p.snapStrength, 0, 1)
+      if ('countInBars' in p) p.countInBars = clampNum(Math.round(p.countInBars), 0, 2)
+      next.pads = { ...DEFAULT_PADS, ...(next.pads || {}), ...p }
       return next
     },
     undo(state) { return state }

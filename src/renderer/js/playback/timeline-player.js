@@ -30,7 +30,7 @@ export function rackInstrument(handle, moduleId) {
 }
 
 /** Shared by the timeline and the step sequencer: one scheduled note contract. */
-export function instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments }) {
+export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, packInstruments }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)
@@ -52,7 +52,7 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, packF
     return moduleId ? rackInstrument(handle, moduleId) : null
   }
   if (instrument.type === 'kit') {
-    const kit = kitFor(instrument.kitId)
+    const kit = kitFor(instrument.kitId, kits)
     if (!kit) return null
     const inst = kitInstrument(kit, { ctx, output })
     return (note, time) => inst.hit(note.pitch, note.velocity ?? 0.8, time)
@@ -75,7 +75,7 @@ const TimelinePlayer = {
   _instrumentRackHandles: [],
   _packInstruments: [],
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, packFor, sampleStoreFor }) {
+  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -120,7 +120,7 @@ const TimelinePlayer = {
       if (track.type === 'midi') {
         const channelId = track.mixerChannelId
         const output = mixerEngine ? mixerEngine.getOutput(channelId) : AudioEngine.getMasterInput()
-        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles, packFor, sampleStoreFor, packInstruments: this._packInstruments })
+        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, packInstruments: this._packInstruments })
         if (!playNote) return
 
         track.clips.forEach(clip => {
@@ -219,7 +219,7 @@ const TimelinePlayer = {
     return this._startBeat + (elapsed / (60 / bpm))
   },
 
-  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, packFor, sampleStoreFor, palettes = null }) {
+  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, kits, packFor, sampleStoreFor, palettes = null }) {
     const totalSeconds = beatsToSeconds(durationBeats, bpm)
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05
@@ -242,7 +242,7 @@ const TimelinePlayer = {
     if (missing.length) throw new Error(`Missing pack samples: ${missing.join(', ')}`)
     tracks.forEach(track => {
       if (track.type === 'midi') {
-        const playNote = instrumentFor(track, { palettes, ctx: offline, output: offline.destination, rackHandles, packFor, sampleStoreFor, packInstruments })
+        const playNote = instrumentFor(track, { palettes, ctx: offline, output: offline.destination, rackHandles, kits, packFor, sampleStoreFor, packInstruments })
         for (const clip of track.clips) for (const note of clip.notes || []) {
           if (clip.type !== 'midi') continue
           const at = startTime + beatsToSeconds(clip.startBeat + note.startBeat, bpm)

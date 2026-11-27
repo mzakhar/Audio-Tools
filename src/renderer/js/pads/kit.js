@@ -31,7 +31,7 @@ const MAIN = {
 // GM notes without a voice of their own play the nearest slot.
 const ALIASES = { 35: 36, 52: 49, 53: 51, 54: 37, 55: 49, 57: 49, 58: 39, 59: 51 }
 
-const KITS = {
+export const KITS = {
   'default-909': {
     id: 'default-909',
     name: 'Drum Kit',
@@ -46,8 +46,8 @@ const KITS = {
 export const DEFAULT_KIT_ID = 'default-909'
 
 /** Kit for an id, or null — an unknown kit is silent, like a missing pack. */
-export function kitFor(kitId) {
-  return KITS[kitId] ?? null
+export function kitFor(kitId, kits) {
+  return kits?.[kitId] ?? KITS[kitId] ?? null
 }
 
 /** Full param set for a slot: the 909 defaults under the slot's overrides. */
