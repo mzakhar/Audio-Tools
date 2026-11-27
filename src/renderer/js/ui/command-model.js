@@ -121,6 +121,14 @@ export function commandItems(opts = {}) {
       visible: true,
     },
     {
+      id: 'controller-map',
+      label: 'Controller map…',
+      shortcut: null,
+      group: 'setup',
+      enabled: true,
+      visible: true,
+    },
+    {
       id: 'library',
       label: 'Library',
       shortcut: 'Ctrl+Shift+L',

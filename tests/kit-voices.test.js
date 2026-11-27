@@ -102,3 +102,25 @@ describe('kitInstrument', () => {
     expect(openGain.gain.setTargetAtTime).toHaveBeenCalled()
   })
 })
+
+describe('kitInstrument override', () => {
+  const stops = ctx => ctx.sources.flatMap(s => s.stop.mock.calls.map(c => c[0]))
+  const longest = (override, slotPerf) => {
+    const ctx = makeCtx()
+    const k = slotPerf ? { ...kit, slots: { ...kit.slots, 36: { ...kit.slots[36], perf: slotPerf } } } : kit
+    kitInstrument(k, { ctx, output: ctx.createGain() }).noteOn(36, 100, 0, override)
+    return Math.max(...stops(ctx))
+  }
+
+  it('decayMul shortens the voice; slot perf combines with the per-hit layer', () => {
+    expect(longest({ decayMul: 0.5 })).toBeLessThan(longest())
+    expect(longest({ decayMul: 0.5 }, { decayMul: 0.5 })).toBeLessThan(longest({ decayMul: 0.5 }))
+  })
+
+  it('tuneSt and unknown keys are harmless and never touch the stored tune', () => {
+    const ctx = makeCtx()
+    const inst = kitInstrument(kit, { ctx, output: ctx.createGain() })
+    expect(() => inst.noteOn(36, 100, 0, { tuneSt: 5, bogus: 1, filterMul: 0.5, level: 0.5 })).not.toThrow()
+    expect(kit.slots[36].params.tune).toBeUndefined()
+  })
+})
