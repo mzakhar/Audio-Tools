@@ -58,6 +58,7 @@ import { trackInstrumentLabel } from './instruments/instrument-label.js'
 import { PadGrid } from './components/pad-grid.js'
 import { padBank } from './instruments/pad-map.js'
 import { audioTimeFor } from './utils/midi-clock.js'
+import { applyKnob } from './pads/knob-roles.js'
 
 // ─── Per-type directory memory ────────────────────────────────────────────────
 const DIR_KEY_PROJECT = 'synth_lastProjectDir'
@@ -432,10 +433,6 @@ let _repeatHeld = false
 const _heldPads = new Map()     // hardware pads currently down: note -> velocity
 let _lastDevice = null          // last controller name seen, for the learn dialog
 const _overrideCache = new Map()
-// knob-roles.js is the pure knob table (pads phase 3a). A glob rather than an
-// import so the app still boots in a tree where that file is not there yet.
-const _knobRoles = import.meta.glob('./pads/knob-roles.js', { eager: true })
-const applyKnob = _knobRoles['./pads/knob-roles.js']?.applyKnob
 let _rackView = null
 let _instrumentBrowser = null
 let _instrumentSettings = null
