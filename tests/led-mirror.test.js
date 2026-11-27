@@ -3,10 +3,11 @@ import { createLedMirror } from '../src/renderer/js/pads/led-mirror.js'
 
 const RED = [255, 0, 0]
 const pad = (extra = {}) => ({ hasSound: true, muted: false, wipeArmed: false, target: false, ...extra })
+const ackAll = c => c.flatMap((rgb, i) => (rgb ? [i] : []))
 
-function setup({ user = true, ok = true } = {}) {
+function setup({ user = true, ack = ackAll } = {}) {
   const writes = []
-  const link = { isUserMode: () => user, paint: vi.fn(async c => { writes.push(c); return ok }) }
+  const link = { isUserMode: () => user, paint: vi.fn(async (c, max) => { writes.push([c, max]); return ack(c) }) }
   const mirror = createLedMirror({
     link, colours: () => Array(16).fill(RED), patterns: () => Array.from({ length: 16 }, () => pad()), now: () => 0
   })
@@ -14,10 +15,11 @@ function setup({ user = true, ok = true } = {}) {
 }
 
 describe('led mirror', () => {
-  it('sends at most 4 pads per tick, then nothing once all are lit', async () => {
-    const { mirror, writes } = setup()
-    for (let i = 0; i < 5; i++) await mirror.tick()
-    expect(writes.map(w => w.filter(Boolean).length)).toEqual([4, 4, 4, 4])
+  it('asks the link for at most 8 SysEx writes per tick, and nothing once all pads are lit', async () => {
+    const { mirror, link, writes } = setup()
+    await mirror.tick(); await mirror.tick()
+    expect(writes.map(([, max]) => max)).toEqual([8])
+    expect(link.paint).toHaveBeenCalledTimes(1)
   })
 
   it('idle outside a user preset or with no kit', async () => {
@@ -29,8 +31,19 @@ describe('led mirror', () => {
     expect(link.paint).not.toHaveBeenCalled()
   })
 
-  it('a failed write is retried', async () => {
-    const { mirror, link } = setup({ ok: false })
+  it('prev advances only for acknowledged pads; the rest retry next tick', async () => {
+    const { mirror, link } = setup({ ack: c => (c[0] ? [0, 1] : []) })
+    await mirror.tick()
+    expect(link.paint.mock.calls[0][0].filter(Boolean)).toHaveLength(16)
+    await mirror.tick()
+    const second = link.paint.mock.calls[1][0]
+    expect(second[0]).toBeNull()
+    expect(second[1]).toBeNull()
+    expect(second.filter(Boolean)).toHaveLength(14)
+  })
+
+  it('a link that is idle (false) is retried', async () => {
+    const { mirror, link } = setup({ ack: () => false })
     await mirror.tick(); await mirror.tick()
     expect(link.paint).toHaveBeenCalledTimes(2)
   })
@@ -44,17 +57,34 @@ describe('led mirror', () => {
 
   it('a muted pad blinks: changes after the on-phase', async () => {
     let t = 0
-    const link = { isUserMode: () => true, paint: vi.fn(async () => true) }
+    const link = { isUserMode: () => true, paint: vi.fn(async c => ackAll(c)) }
     const m = createLedMirror({
       link, colours: () => Array(16).fill(RED), now: () => t,
       patterns: () => Array.from({ length: 16 }, (_, i) => pad({ muted: i === 0 }))
     })
-    for (let i = 0; i < 5; i++) await m.tick()
+    await m.tick()
     link.paint.mockClear()
     await m.tick()
     expect(link.paint).not.toHaveBeenCalled()
     t = 130 // fast blink, off phase
     await m.tick()
     expect(link.paint.mock.calls[0][0][0]).toEqual([0, 0, 0])
+  })
+
+  it('more than 4 fast-blinking pads blink at the slow rate instead', async () => {
+    let t = 0
+    const link = { isUserMode: () => true, paint: vi.fn(async c => ackAll(c)) }
+    const m = createLedMirror({
+      link, colours: () => Array(16).fill(RED), now: () => t,
+      patterns: () => Array.from({ length: 16 }, (_, i) => pad({ muted: i < 5 }))
+    })
+    await m.tick()
+    link.paint.mockClear()
+    t = 130 // fast would be off here; slow (1 Hz) is still on
+    await m.tick()
+    expect(link.paint).not.toHaveBeenCalled()
+    t = 510
+    await m.tick()
+    expect(link.paint).toHaveBeenCalled()
   })
 })

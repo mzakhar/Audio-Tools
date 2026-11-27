@@ -1,42 +1,44 @@
 // led-mirror.js — shell: every 125 ms, diff the pad LED pattern frame against
-// what the device last acknowledged and send at most 4 pad colour writes.
+// what the device last acknowledged and let the link send at most 8 SysEx writes
+// (a pad is up to 8 writes, one per bank record). Fast blink is capped at 4 pads.
 // Pure parts: led-patterns.js. Writes go to working memory only; the save
 // command is never built (see smc-pad-link.js). User-preset mode only.
 
-import { ledFrame, ledDiff, budget } from './led-patterns.js'
+import { ledFrame, ledDiff } from './led-patterns.js'
 
 const TICK_MS = 125
-const MAX_WRITES = 4 // pads per tick: 32 pad writes/s
+const MAX_WRITES = 8 // SysEx writes per tick: 64/s
+const MAX_FAST = 4   // pads at the 4 Hz blink; more blink at 1 Hz
 
 /**
- * link: { paint(colours16) -> Promise<bool>, isUserMode() }
+ * link: { paint(colours16, maxWrites) -> Promise<pad[] acknowledged | false>, isUserMode() }
  * colours() -> 16 rgb|null (null array = no kit, mirror idle); patterns() -> 16 padPattern inputs.
  */
 export function createLedMirror({ link, colours, patterns, now = () => Date.now(), setTimer = setInterval, clearTimer = clearInterval }) {
   let prev = null
-  let offset = 0
   let busy = false
   let timer = null
 
   const frameNow = () => {
     const c = colours()
-    return c ? ledFrame(patterns(), c, now()) : null
+    return c ? ledFrame(patterns(), c, now(), MAX_FAST) : null
   }
 
   async function tick() {
     if (busy || !link.isUserMode()) return
     const frame = frameNow()
     if (!frame) return
-    const sent = budget(ledDiff(prev, frame), MAX_WRITES, offset)
-    if (!sent.length) return
+    const diff = ledDiff(prev, frame)
+    if (!diff.length) return
     busy = true
     try {
       const write = Array(16).fill(null)
-      for (const { pad, rgb } of sent) write[pad] = rgb
-      if (await link.paint(write)) {
+      for (const { pad, rgb } of diff) write[pad] = rgb
+      // prev advances only for pads the device acknowledged; the rest are found again next tick.
+      const acked = await link.paint(write, MAX_WRITES)
+      if (Array.isArray(acked) && acked.length) {
         prev = prev ? [...prev] : Array(16).fill(null)
-        for (const { pad, rgb } of sent) prev[pad] = rgb
-        offset += sent.length
+        for (const pad of acked) prev[pad] = write[pad]
       }
     } finally { busy = false }
   }

@@ -30,7 +30,8 @@ function perform(params, o) {
   return out
 }
 
-export function kitInstrument(kit, { ctx, output }) {
+/** perfFor(note) -> the slot's current perf layer; lets a live instrument follow knob moves without being rebuilt (default: the layer the kit carried at build time). */
+export function kitInstrument(kit, { ctx, output, perfFor }) {
   const open = new Map() // group → gain node carrying the sounding open voice
 
   const duck = (group, t) => {
@@ -46,7 +47,7 @@ export function kitInstrument(kit, { ctx, output }) {
     const def = kit.slots[pitch]
     if (!def || !(vel01 > 0)) return
     const t = Math.max(time, ctx.currentTime)
-    const { params, accent } = velocityTimbre(vel01, perform(slotParams(def), combine(def.perf, override)))
+    const { params, accent } = velocityTimbre(vel01, perform(slotParams(def), combine(perfFor ? perfFor(pitch) : def.perf, override)))
     let target = output
     if (def.group) {
       if (def.open) {

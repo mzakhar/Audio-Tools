@@ -85,3 +85,13 @@ describe('budget', () => {
     expect(budget(diffs, 2, 13).map((d) => d.pad)).toEqual([1, 2]);
   });
 });
+
+describe('ledFrame fast-blink cap', () => {
+  const pads = n => Array.from({ length: 16 }, (_, i) => ({ hasSound: true, muted: i < n, wipeArmed: false, target: false }));
+  const colours = Array(16).fill([9, 9, 9]);
+  it('up to the cap keeps 4 Hz; beyond it every fast pad drops to 1 Hz', () => {
+    expect(ledFrame(pads(4), colours, 130, 4)[0]).toEqual([0, 0, 0]);
+    expect(ledFrame(pads(5), colours, 130, 4)[0]).toEqual([9, 9, 9]);
+    expect(ledFrame(pads(5), colours, 510, 4)[0]).toEqual([0, 0, 0]);
+  });
+});

@@ -32,7 +32,7 @@ export function liveInstrumentFor(track, deps) {
   return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
 }
 
-export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, mountRack, packFor, sampleStoreFor, onStatus } = {}) {
+export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, getKits, mountRack, packFor, sampleStoreFor, onStatus } = {}) {
   if (!instrument) return null
   const bendRange = instrument.bendRange ?? DEFAULT_BEND_RANGE
   const modOff = instrument.modDest === 'off'
@@ -117,7 +117,9 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, 
 
   if (instrument.type === 'kit') {
     const kit = kitFor(instrument.kitId, kits)
-    return kit ? kitInstrument(kit, { ctx, output }) : null
+    // Perf (knob layer) is read live, so a knob detent never rebuilds the instrument.
+    const perfFor = getKits ? note => kitFor(instrument.kitId, getKits())?.slots?.[note]?.perf : undefined
+    return kit ? kitInstrument(kit, { ctx, output, perfFor }) : null
   }
 
   // Pack playback is added with the pack sample store. Never substitute a

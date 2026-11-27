@@ -1,5 +1,5 @@
 import ProjectStore, { SetPadsSettings, DEFAULT_PADS } from '../store/ProjectStore.js'
-import { snapGroove, SNAP_GRIDS } from '../pads/groove.js'
+import { SNAP_GRIDS } from '../pads/groove.js'
 import { readThemeColors, themeStyle, onThemeChange } from '../ui/theme-colors.js'
 import { withAlpha } from './canvas-colors.js'
 import { REPEAT_RATES } from '../pads/repeat.js'
@@ -74,13 +74,13 @@ export class PadsView {
     this.active = false
     this.playing = false
     this.raf = null
-    this._shift = false
     this._shiftHeld = false
     this.bank = 0
     this.repeat = false
     this.overlay = false
     this.overlayMenu = 'MUTE'
     this._selected = null
+    this._down = new Map()          // press id -> note, so a release matches its press across bank changes
     this._flashTimers = new Map()
     this._pulseTimers = new Map()
     const state = ProjectStore.getState()
@@ -121,8 +121,17 @@ export class PadsView {
   /** Last-hit note (the knobs' target); first pad of the shown bank until something is hit. */
   selectedNote() { return this._selected ?? this._noteOf(0) }
 
-  /** On-screen/PC-key pad press. Under Overlay it picks a menu item instead of sounding. */
-  trigger(padIndex) { this._press(padIndex, VELOCITY_DEFAULT) }
+  /** On-screen/PC-key pad press. Under Overlay it picks a menu item instead of sounding. `id` pairs it with its release. */
+  trigger(padIndex, id = `pad${padIndex}`) { this._press(padIndex, VELOCITY_DEFAULT, id) }
+  /** Release of a trigger(); idempotent. */
+  release(id) {
+    const note = this._down.get(id)
+    if (note === undefined) return
+    this._down.delete(id)
+    this.opts.releasePad?.(note)
+  }
+  /** Overlay menu pick from a hardware pad (same as tapping the pad on screen). */
+  pickPad(padIndex) { if (padIndex !== null && padIndex !== undefined) this._pick(padIndex) }
 
   setBank(bank) {
     const b = Math.min(3, Math.max(0, Math.round(bank) || 0))
@@ -174,7 +183,7 @@ export class PadsView {
     this.active = active
     this._loop()
     if (active) this.refreshKit()
-    else { this._setRepeat(false); this._setOverlay(false); this._showHelp(null) }
+    else { this._setRepeat(false); this._setOverlay(false); this._showHelp(null); for (const id of [...this._down.keys()]) this.release(id) }
   }
   setPlaying(playing) { this.playing = playing; this._loop(); this.drawStrip() }
 
@@ -182,9 +191,11 @@ export class PadsView {
   _slotOf(note) { return this.opts.getKit?.()?.slots?.[note] ?? null }
   _set(patch) { ProjectStore.dispatch(SetPadsSettings(patch)) }
 
-  _press(i, velocity) {
+  _press(i, velocity, id = `pad${i}`) {
     if (this.overlay) return this._pick(i)
-    this.opts.triggerPad?.(this._noteOf(i), velocity)
+    const note = this._noteOf(i)
+    this._down.set(id, note)
+    this.opts.triggerPad?.(note, velocity)
   }
 
   /** Overlay menu pick. */
@@ -239,6 +250,7 @@ export class PadsView {
       el.querySelector('.pads-pad-name').textContent = name
       el.setAttribute('aria-label', `Pad ${i + 1}${voice ? ` ${voice.toUpperCase()}` : ' empty'}${p.muted.includes(note) ? ' muted' : ''}`)
     })
+    this._sig = this._viewSig()
     this.drawStrip()
   }
 
@@ -265,9 +277,12 @@ export class PadsView {
       if (!this._shiftHeld) this._showHelp(null)
       return
     }
+    const down = e.type === 'keydown'
+    // PC pad keys: the press is registered by app.js (shortcut); only the release lives here.
+    if (!down) this.release(`key${e.key.toLowerCase()}`)
     if (!this.active || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
-    const down = e.type === 'keydown'
+    if (down && document.querySelector('dialog[open]')) return   // keyups still pass: a hold must be able to end
     switch (e.key.toLowerCase()) {
       case 'g': this._setRepeat(down); break
       case 'o': this._setOverlay(down); break
@@ -332,17 +347,11 @@ export class PadsView {
                 <select class="pads-ladder" data-help="ladder" aria-label="Ladder parameter (key L)">${opt('', 'off')}${LADDER_PARAMS.map(m => opt(m)).join('')}</select></label>
               <label class="pads-field"><span class="micro-label">RATE</span>
                 <select class="pads-rate" data-help="rate" aria-label="Repeat rate">${RATE_KEYS.map(m => opt(m)).join('')}</select></label>
+              <label class="pads-field"><span class="micro-label">SNAP</span>
+                <select class="pads-snap" aria-label="Snap grid">${grids}</select></label>
               <button type="button" class="btn pads-learn" data-help="learn" aria-label="Controller learn">LEARN</button>
             </div>
             <div class="pads-knobs" role="group" aria-label="Knobs">${knobs}</div>
-            <label class="pads-field"><span class="micro-label">GROOVE</span>
-              <input type="range" class="pads-groove" min="50" max="75" step="1" aria-label="Groove (swing), Shift for fine">
-              <output class="lcd pads-groove-out">50%</output></label>
-            <label class="pads-field"><span class="micro-label">SNAP</span>
-              <select class="pads-snap" aria-label="Snap grid">${grids}</select></label>
-            <label class="pads-field"><span class="micro-label">STRENGTH</span>
-              <input type="range" class="pads-strength" min="0" max="100" step="1" aria-label="Snap strength">
-              <output class="lcd pads-strength-out">100%</output></label>
           </div>
         </div>
         <div class="pads-help" role="tooltip" hidden></div>
@@ -351,8 +360,7 @@ export class PadsView {
     this.el = {
       pos: $('.pads-pos'), layer: $('.pads-layer'), undo: $('.pads-undo'), wipe: $('.pads-wipe'),
       metro: $('.pads-metro'), countin: $('.pads-countin'), bars: $('.pads-bars'),
-      groove: $('.pads-groove'), grooveOut: $('.pads-groove-out'), snap: $('.pads-snap'),
-      strength: $('.pads-strength'), strengthOut: $('.pads-strength-out'), strip: $('.pads-strip'),
+      snap: $('.pads-snap'), strip: $('.pads-strip'),
       repeat: $('.pads-repeat'), full: $('.pads-full'), overlay: $('.pads-overlay'), overlayMenu: $('.pads-overlay-menu'),
       ladder: $('.pads-ladder'), rate: $('.pads-rate'), learn: $('.pads-learn'), help: $('.pads-help'),
       banks: [...this.container.querySelectorAll('.pads-bank')], knobs: [...this.container.querySelectorAll('.pads-knob')],
@@ -370,15 +378,17 @@ export class PadsView {
     this.padEls.forEach((pad, i) => {
       pad.addEventListener('pointerdown', e => {
         e.preventDefault()
-        this._press(i, VELOCITY_DEFAULT)
+        this._press(i, VELOCITY_DEFAULT, `ptr${i}`)
       })
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) pad.addEventListener(type, () => this.release(`ptr${i}`))
       // Focused pad: Enter/Space plays it. stopPropagation keeps the global Space (transport) out.
       pad.addEventListener('keydown', e => {
         if (e.key !== 'Enter' && e.key !== ' ') return
         e.preventDefault()
         e.stopPropagation()
-        if (!e.repeat) this._press(i, 100)
+        if (!e.repeat) this._press(i, 100, `ent${i}`)
       })
+      pad.addEventListener('keyup', e => { if (e.key === 'Enter' || e.key === ' ') this.release(`ent${i}`) })
     })
 
     el.layer.addEventListener('click', () => {
@@ -403,15 +413,7 @@ export class PadsView {
     el.metro.addEventListener('click', () => set({ metronome: !this._pads.metronome }))
     el.countin.addEventListener('change', () => set({ countInBars: Number(el.countin.value) }))
     el.bars.addEventListener('change', () => set({ loopBars: Number(el.bars.value) }))
-    const shift = e => { this._shift = e.shiftKey }
-    el.groove.addEventListener('keydown', shift)
-    el.groove.addEventListener('pointerdown', shift)
-    // Sliders: readout follows `input`; the store is written once, on `change`.
-    el.groove.addEventListener('input', () => { el.grooveOut.textContent = `${Math.round(snapGroove(Number(el.groove.value) / 100, this._shift) * 100)}%` })
-    el.groove.addEventListener('change', () => set({ groove: snapGroove(Number(el.groove.value) / 100, this._shift) }))
     el.snap.addEventListener('change', () => set({ snapGrid: SNAP_GRIDS[el.snap.value] }))
-    el.strength.addEventListener('input', () => { el.strengthOut.textContent = `${el.strength.value}%` })
-    el.strength.addEventListener('change', () => set({ snapStrength: Number(el.strength.value) / 100 }))
 
     // Hold buttons: pointer + Enter/Space, like Wipe.
     const hold = (btn, fn) => {
@@ -472,18 +474,21 @@ export class PadsView {
     el.metro.setAttribute('aria-pressed', String(!!p.metronome))
     el.countin.value = String(p.countInBars)
     el.bars.value = String(p.loopBars)
-    const groove = Math.round(p.groove * 100)
-    el.groove.value = String(groove)
-    el.grooveOut.textContent = `${groove}%`
     el.snap.value = gridKey(p.snapGrid)
-    const strength = Math.round(p.snapStrength * 100)
-    el.strength.value = String(strength)
-    el.strengthOut.textContent = `${strength}%`
     el.full.setAttribute('aria-pressed', String(!!p.full))
     el.ladder.value = p.ladder ?? ''
     el.rate.value = p.repeatRate
     this._syncKnobs()
-    this.refreshKit()
+    el.undo.disabled = !(this.opts.canUndo?.() ?? true)   // cheap, and the session can change without a store signature moving
+    if (this._viewSig() !== this._sig) this.refreshKit()
+  }
+
+  /** What refreshKit/drawStrip draw from; sync() repaints only when it moves. */
+  _viewSig() {
+    const p = this._pads
+    const slots = this.opts.getKit?.()?.slots ?? {}
+    const notes = (this.opts.getNotes?.() ?? []).map(n => [n.pitch, n.startBeat, n.duration, n.velocity])
+    return JSON.stringify([Object.entries(slots).map(([n, s]) => [n, s.voice]), p.muted, p.ladder, this.bank, this.overlay, this.overlayMenu, p.loopBars, this._beatsPerBar, notes])
   }
 
   // ─── Loop strip ─────────────────────────────────────────────────────────

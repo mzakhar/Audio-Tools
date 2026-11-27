@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createControllerLearn, learnInto, loadOverrides, storageKey } from '../src/renderer/js/components/controller-learn-dialog.js'
+import { createControllerLearn, learnInto, loadOverrides, saveOverrides, safeStorage, storageKey } from '../src/renderer/js/components/controller-learn-dialog.js'
+
+import { SMC_PAD } from '../src/renderer/js/pads/profiles/smc-pad.js'
 
 const memory = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k) } }
 
@@ -15,6 +17,18 @@ describe('learnInto / loadOverrides', () => {
   it('one control per action', () => {
     expect(learnInto({ 'cc:0:1': 'full', 'cc:0:2': 'layer' }, 'cc:0:9', 'full')).toEqual({ 'cc:0:2': 'layer', 'cc:0:9': 'full' })
   })
+  it('learning onto a new control unbinds the profile default for that action', () => {
+    expect(learnInto({}, 'cc:0:90', 'layer', 'cc:0:26')).toEqual({ 'cc:0:26': null, 'cc:0:90': 'layer' })
+    expect(learnInto({ 'cc:0:90': 'layer', 'cc:0:26': null }, 'cc:0:91', 'layer', 'cc:0:26')).toEqual({ 'cc:0:26': null, 'cc:0:91': 'layer' })
+    // an existing claim on that control survives, and re-learning the default itself needs no null
+    expect(learnInto({ 'cc:0:26': 'full' }, 'cc:0:90', 'layer', 'cc:0:26')).toEqual({ 'cc:0:26': 'full', 'cc:0:90': 'layer' })
+    expect(learnInto({}, 'cc:0:26', 'layer', 'cc:0:26')).toEqual({ 'cc:0:26': 'layer' })
+  })
+  it('null storage never throws', () => {
+    expect(loadOverrides(null, 'X')).toEqual({})
+    expect(() => saveOverrides(null, 'X', { a: 'b' })).not.toThrow()
+    expect(() => safeStorage()).not.toThrow()
+  })
   it('bad storage is an empty map', () => {
     const s = memory(); s.setItem(storageKey('X'), '{nope')
     expect(loadOverrides(s, 'X')).toEqual({})
@@ -25,7 +39,7 @@ describe('learnInto / loadOverrides', () => {
 describe('learn dialog', () => {
   const make = (extra = {}) => {
     const storage = memory(), router = { capture: null }, onChange = vi.fn()
-    const learn = createControllerLearn({ storage, getDevice: () => 'SMC-PAD', isConnected: () => true, router, onChange, ...extra })
+    const learn = createControllerLearn({ storage, getDevice: () => 'SMC-PAD', isConnected: () => true, router, onChange, profileFor: () => SMC_PAD, ...extra })
     return { storage, router, onChange, learn }
   }
 
@@ -37,7 +51,7 @@ describe('learn dialog', () => {
     document.querySelector('[data-action="full"]').click()
     expect(router.capture).toBeTypeOf('function')
     router.capture({ kind: 'cc', channel: 0, controller: 90, value: 127 }, 'SMC-PAD')
-    expect(JSON.parse(storage.getItem(storageKey('SMC-PAD')))).toEqual({ 'cc:0:90': 'full' })
+    expect(JSON.parse(storage.getItem(storageKey('SMC-PAD')))).toEqual({ 'cc:0:29': null, 'cc:0:90': 'full' })
     expect(router.capture).toBeNull()
     expect(onChange).toHaveBeenCalledWith('SMC-PAD')
     expect(document.querySelector('[data-action="full"]').textContent).toContain('cc:0:90')

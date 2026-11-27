@@ -23,9 +23,22 @@ export function knobDelta(prev, value) {
   return prev === undefined || prev === null ? 0 : value - prev
 }
 
+/** The control key an action is bound to by the profile itself (before any learning), or null. */
+export function defaultKey(profile, action) {
+  const knob = /^knob:(\d)$/.exec(action)
+  if (knob) {
+    const cc = profile?.encoders?.ccs?.[+knob[1]]
+    return cc === undefined ? null : `cc:${profile.encoders.channel}:${cc}`
+  }
+  const cc = Object.keys(profile?.buttons?.map ?? {}).find(c => profile.buttons.map[c] === action)
+  return cc === undefined ? null : `cc:${profile.buttons.channel}:${cc}`
+}
+
+/** An override key present with null means "unbound": the profile default for that control is switched off. */
 export function resolve(event, profile, overrides = {}) {
   if (!event || !profile) return null
   const key = learnKey(event)
+  if (key && Object.hasOwn(overrides, key) && !overrides[key]) return null
   const action = key && overrides[key]
   if (action) {
     // Learned encoders are stored as 'knob:<index>' and keep encoder semantics.

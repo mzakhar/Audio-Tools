@@ -23,10 +23,14 @@ export function ledOn(pattern, tMs) {
 
 // pads: 16 pad-state objects (padPattern input); colours: 16 rgb arrays or null.
 // A null colour is always off. Returns 16 rgb arrays.
-export function ledFrame(pads, colours, tMs) {
-  return pads.map((p, i) => {
+// More than `maxFast` pads wanting the 4 Hz blink get the 1 Hz one instead: every blink
+// edge is a burst of SysEx writes, and a fast chorus outruns the device.
+export function ledFrame(pads, colours, tMs, maxFast = Infinity) {
+  const patterns = pads.map(padPattern);
+  const slowFast = patterns.filter(p => p === 'blink-fast').length > maxFast;
+  return patterns.map((pattern, i) => {
     const rgb = colours[i];
-    return rgb && ledOn(padPattern(p), tMs) ? rgb : OFF;
+    return rgb && ledOn(slowFast && pattern === 'blink-fast' ? 'blink-slow' : pattern, tMs) ? rgb : OFF;
   });
 }
 

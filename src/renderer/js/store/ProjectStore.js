@@ -716,6 +716,20 @@ function kitCommand(label, kitId, mutate) {
   }
 }
 
+/** Copy a code kit into the project when the project has none under that id (no-op otherwise), so slot edits have something to land on. */
+export function SeedKit(kitId, kit) {
+  return {
+    label: 'Seed kit',
+    execute(state) {
+      if (state.kits?.[kitId]) return state
+      const next = JSON.parse(JSON.stringify(state))
+      next.kits = { ...(next.kits || {}), [kitId]: JSON.parse(JSON.stringify(kit)) }
+      return next
+    },
+    undo(state) { return state }
+  }
+}
+
 /** Replace one slot of a kit ({ voice, params, group?, open? }); null removes it. */
 export function SetKitSlot(kitId, note, slot) {
   return kitCommand(`Edit kit slot ${note}`, kitId, kit => {

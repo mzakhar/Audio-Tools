@@ -63,3 +63,17 @@ describe('learned knob override', () => {
       .toEqual({ kind: 'knob', index: 2, value: 64 })
   })
 })
+
+describe('unbinding defaults', () => {
+  it('defaultKey names the profile control for an action', async () => {
+    const { defaultKey } = await import('../src/renderer/js/pads/profile.js')
+    expect(defaultKey(SMC_PAD, 'layer')).toBe('cc:0:26')
+    expect(defaultKey(SMC_PAD, 'knob:1')).toBe('cc:0:37')
+    expect(defaultKey(SMC_PAD, 'overlay')).toBeNull()
+  })
+  it('a key present with null is unbound, not default', () => {
+    expect(resolve(cc(26, 127), SMC_PAD, { 'cc:0:26': null })).toBeNull()
+    expect(resolve(cc(36, 10), SMC_PAD, { 'cc:0:36': null })).toBeNull()
+    expect(resolve(cc(27, 127), SMC_PAD, { 'cc:0:26': null }).action).toBe('repeat')
+  })
+})

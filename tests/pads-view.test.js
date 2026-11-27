@@ -40,12 +40,12 @@ describe('pads view', () => {
     }
     change(root.querySelector('.pads-bars'), 4)
     change(root.querySelector('.pads-countin'), 2)
-    change(root.querySelector('.pads-groove'), 57)
     change(root.querySelector('.pads-snap'), '1/8')
-    change(root.querySelector('.pads-strength'), 50)
     root.querySelector('.pads-metro').click()
-    expect(settings()).toMatchObject({ loopBars: 4, countInBars: 2, groove: 0.58, snapGrid: 0.5, snapStrength: 0.5, metronome: false })
-    expect(root.querySelector('.pads-groove-out').textContent).toBe('58%')
+    expect(settings()).toMatchObject({ loopBars: 4, countInBars: 2, snapGrid: 0.5, metronome: false })
+    expect(root.querySelector('.pads-groove')).toBeNull()   // the knob twins replace the phase-2 sliders
+    expect(root.querySelector('.pads-strength')).toBeNull()
+    expect(root.querySelector('.pads-perf .pads-snap')).not.toBeNull()
   })
 
   it('Layer toggles aria-pressed and reports; Undo calls back', () => {
@@ -93,17 +93,6 @@ describe('pads view', () => {
     expect(root.innerHTML).toBe('')
     // would throw on the emptied DOM if the subscription were still live
     expect(() => ProjectStore.dispatch({ label: 'x', execute: s => s, undo: s => s })).not.toThrow()
-  })
-
-  it('sliders update the readout on input but write the store only on change', () => {
-    mount()
-    const g = root.querySelector('.pads-groove')
-    g.value = '66'
-    g.dispatchEvent(new Event('input', { bubbles: true }))
-    expect(root.querySelector('.pads-groove-out').textContent).toBe('66%')
-    expect(settings().groove).toBe(0.5)
-    g.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(settings().groove).toBe(0.66)
   })
 
   it('Enter/Space on a focused pad triggers it and does not reach the global handler', () => {
@@ -262,5 +251,62 @@ describe('pads view', () => {
     expect(tip.textContent).toContain('Now: off')
     document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }))
     expect(tip.hidden).toBe(true)
+  })
+
+  it('pickPad picks the overlay item like a tap (hardware pads under Overlay)', () => {
+    mount()
+    view.pressControl('overlay', true)
+    view.pickPad(2)
+    expect(settings().muted).toEqual([38])
+    expect(triggerPad).not.toHaveBeenCalled()
+    view.pickPad(null)
+    expect(settings().muted).toEqual([38])
+  })
+
+  it('on-screen pad release (pointerup/leave) and PC key release report the matching note, once', () => {
+    const releasePad = vi.fn()
+    mount({ releasePad })
+    view.setActive(true)
+    pad(1).dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }))
+    pad(1).dispatchEvent(new Event('pointerup', { bubbles: true }))
+    pad(1).dispatchEvent(new Event('pointerleave', { bubbles: true }))
+    expect(releasePad.mock.calls).toEqual([[37]])
+    view.trigger(4, 'keyq')
+    view.setBank(1)   // bank change between press and release: release still names the pressed note
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Q', bubbles: true }))
+    expect(releasePad.mock.calls).toEqual([[37], [40]])
+    view.pressControl('overlay', true)
+    view.trigger(0, 'keyz')
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'z', bubbles: true }))
+    expect(releasePad).toHaveBeenCalledTimes(2)   // an overlay pick never sounded, so nothing to release
+  })
+
+  it('G/H/O/L keydown is ignored while a dialog is open; keyup still ends a hold', () => {
+    const onAction = vi.fn()
+    mount({ onAction })
+    view.setActive(true)
+    const key = (k, type = 'keydown') => document.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true }))
+    key('g')
+    const dlg = document.createElement('dialog')
+    dlg.setAttribute('open', '')
+    document.body.append(dlg)
+    key('h'); key('o')
+    expect(settings().full).toBe(false)
+    expect(view.overlayActive()).toBe(false)
+    key('g', 'keyup')
+    dlg.remove()
+    expect(onAction.mock.calls).toEqual([['repeat', { pressed: true }], ['repeat', { pressed: false }]])
+  })
+
+  it('a store change repaints pads and strip only when what they draw changed', () => {
+    mount()
+    const kit = vi.spyOn(view, 'refreshKit')
+    ProjectStore.dispatch(SetPadsSettings({ metronome: true }))
+    ProjectStore.dispatch(SetPadsSettings({ snapGrid: 0.5 }))
+    expect(kit).not.toHaveBeenCalled()
+    ProjectStore.dispatch(SetPadsSettings({ muted: [36] }))
+    expect(kit).toHaveBeenCalledTimes(1)
+    ProjectStore.dispatch(SetPadsSettings({ ladder: 'tune' }))
+    expect(kit).toHaveBeenCalledTimes(2)
   })
 })

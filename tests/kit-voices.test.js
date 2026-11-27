@@ -124,3 +124,15 @@ describe('kitInstrument override', () => {
     expect(kit.slots[36].params.tune).toBeUndefined()
   })
 })
+
+describe('kitInstrument perfFor', () => {
+  it('reads the slot perf layer live, so a knob move needs no rebuild', () => {
+    const ctx = makeCtx()
+    let perf
+    const inst = kitInstrument(kit, { ctx, output: ctx.createGain(), perfFor: () => perf })
+    const longest = () => { ctx.sources.length = 0; inst.noteOn(36, 100, 0); return Math.max(...ctx.sources.flatMap(s => s.stop.mock.calls.map(c => c[0]))) }
+    const plain = longest()
+    perf = { decayMul: 0.5 }
+    expect(longest()).toBeLessThan(plain)
+  })
+})

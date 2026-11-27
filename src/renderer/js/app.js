@@ -8,7 +8,7 @@ import Palettes, { paletteDefaults } from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam, DEFAULT_PADS, SetPadsSettings, SetKitSlot } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam, DEFAULT_PADS, SetPadsSettings, SetKitSlot, SeedKit } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
@@ -31,7 +31,8 @@ import { createRepeatEngine } from './pads/repeat-engine.js'
 import { REPEAT_RATES } from './pads/repeat.js'
 import { createLedMirror } from './pads/led-mirror.js'
 import { createControllerRouter } from './pads/controller-router.js'
-import { createControllerLearn, loadOverrides } from './components/controller-learn-dialog.js'
+import { createControllerLearn, loadOverrides, safeStorage } from './components/controller-learn-dialog.js'
+import { padOf } from './pads/profile.js'
 import { SMC_PAD } from './pads/profiles/smc-pad.js'
 import { shapeHit } from './pads/hit-shape.js'
 import { PianoRoll } from './components/piano-roll.js'
@@ -197,6 +198,7 @@ function instrumentDeps({ output, trackId } = {}) {
     output: out,
     racks: _hot.racks,
     kits: _hot.kits,
+    getKits: () => _hot.kits,
     packFor,
     sampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
@@ -254,12 +256,15 @@ function ensureMidiTrack(instrument) {
 const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null, racks: undefined, kits: undefined, pads: DEFAULT_PADS, bpm: 120, beatsPerBar: 4 }
 let _prewarmSig = null
 
+/** A kit's signature for instrument rebuilds: slot `perf` (knob layer) is read live, so it must not move the signature. */
+const kitSig = kit => kit && { ...kit, slots: Object.fromEntries(Object.entries(kit.slots ?? {}).map(([n, { perf, ...def }]) => [n, def])) }
+
 function refreshHot(state = ProjectStore.getState()) {
   _hot.midiTracks = state.tracks.filter(track => track.type === 'midi')
   _hot.byId = new Map(_hot.midiTracks.map(track => [track.id, track]))
   // The output node is baked into the instrument at build time, so a move to
   // another mixer channel has to invalidate it too.
-  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? state.kits?.[track.instrument.kitId] ?? null : null])]))
+  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? kitSig(state.kits?.[track.instrument.kitId] ?? null) : null])]))
   _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
   _hot.racks = state.racks
   _hot.kits = state.kits
@@ -704,6 +709,15 @@ const padsLoopBeats = () => _hot.pads.loopBars * _hot.beatsPerBar
 const padsDims = () => ({ loopBars: _hot.pads.loopBars, beatsPerBar: _hot.beatsPerBar })
 const commitPadsPass = () => _padsSession?.commit(_hot.pads.loopBars, _hot.beatsPerBar)
 
+/** The matching release of a view pad (pointer up, key up): a note-off like a hardware pad's, so Repeat lets go. */
+function padsRelease(note) {
+  const target = padsTrack()
+  if (!target) return
+  document.dispatchEvent(new CustomEvent('midi-event', {
+    detail: { kind: 'note-off', channel: target.midiChannel ?? 0, pitch: note, velocity: 0, source: 'pads-view' }
+  }))
+}
+
 /** A pad press from the view — a midi-event like every other pad, so routing, choke and mixer come along. */
 function padsTrigger(note, velocity) {
   ensureAudio()
@@ -772,16 +786,19 @@ function setRepeatHeld(pressed) {
   else _repeat.stop()
 }
 
-/** Run what pads/knob-roles.js asked for. One turn is one undo step. */
+/** Run what pads/knob-roles.js asked for. One turn is one undo step (so a long twist is many; accepted). */
 function runKnobEffects(effects) {
   const commands = []
+  const seeded = new Set()
   for (const fx of effects) {
     if (fx.type === 'pads') commands.push(SetPadsSettings(fx.patch))
     else if (fx.type === 'bpm') commands.push(SetBpm(fx.bpm))
     else if (fx.type === 'slot') {
       const kitId = armedKitId()
-      const def = kitId && kitFor(kitId, _hot.kits)?.slots?.[fx.note]
+      const kit = kitId && kitFor(kitId, _hot.kits)
+      const def = kit?.slots?.[fx.note]
       if (!def) continue
+      if (!_hot.kits?.[kitId] && !seeded.has(kitId)) { seeded.add(kitId); commands.push(SeedKit(kitId, kit)) }   // kit lives in code only: copy it in first
       const { tuneSt, decayMul, filterMul, level } = fx.params
       const perf = { ...def.perf, ...Object.fromEntries(Object.entries({ tuneSt, decayMul, filterMul, level }).filter(([, v]) => v !== undefined)) }
       commands.push(SetKitSlot(kitId, fx.note, { ...def, perf }))
@@ -815,7 +832,7 @@ function shapePadsHit(detail) {
   const shaped = shapeHit(_hot.pads, _padsSource, { note: detail.pitch, velocity: detail.velocity, repeat: detail.source === 'repeat' })
   _padsSource = shaped.source
   if (detail.source !== 'repeat') {
-    if (detail.source !== 'pads-view') _heldPads.set(detail.pitch, detail.velocity)
+    _heldPads.set(detail.pitch, detail.velocity)   // every non-repeat source: its note-off releases Repeat
     if (_repeatHeld) _repeat?.press(detail.pitch, detail.velocity)
   }
   return { detail: { ...detail, pitch: shaped.note, velocity: shaped.velocity }, override: shaped.override }
@@ -837,13 +854,14 @@ function initPadsRouting() {
   _padsRouter = createControllerRouter({
     profileFor: device => (SMC_PAD.match(device) ? SMC_PAD : null),
     overrides: device => {
-      if (!_overrideCache.has(device)) _overrideCache.set(device, loadOverrides(localStorage, device))
+      if (!_overrideCache.has(device)) _overrideCache.set(device, loadOverrides(safeStorage(), device))
       return _overrideCache.get(device)
     },
     applyKnob,
     knobCtx: knobContext,
     run: runKnobEffects,
     view: () => _padsView,
+    active: () => _currentMode === 'pads',
     actions: {
       play: () => document.getElementById(_loopPlayer?.isPlaying() ? 'global-stop-btn' : 'global-play-btn')?.click(),
       layer: () => padsClick('.pads-layer'),
@@ -857,6 +875,7 @@ function initPadsRouting() {
     getDevice: () => _lastDevice ?? _midiInputName,
     isConnected: () => MidiController.isGranted() && !!document.getElementById('midi-device-select')?.value,
     router: _padsRouter,
+    profileFor: device => (SMC_PAD.match(device) ? SMC_PAD : null),
     onChange: device => _overrideCache.delete(device)
   })
 }
@@ -895,6 +914,7 @@ function initPadsView() {
   })
   _padsView = new PadsView(container, {
     triggerPad: padsTrigger,
+    releasePad: padsRelease,
     getKit: () => {
       const instrument = _hot.byId.get(_hot.armedId)?.instrument
       return kitFor(instrument?.type === 'kit' ? instrument.kitId : DEFAULT_KIT_ID, _hot.kits)
@@ -1625,16 +1645,17 @@ function linkPads() {
       const kit = kitId && kitFor(kitId, _hot.kits)
       return kit ? padColours(kit) : null
     },
-    // Pad i is the same colour in every bank, so the bank-A note stands for it.
+    // Pad i is the same colour in every bank; muted/hasSound follow the bank the view shows.
     patterns: () => {
       const kitId = armedKitId()
       const kit = kitId && kitFor(kitId, _hot.kits)
       const wiping = !!_padsView?.isWiping()
       const wiped = _padsView?.wipePitches()
+      const base = 36 + 16 * (_padsView?.bank ?? 0)   // the bank the view shows
       return Array.from({ length: 16 }, (_, i) => ({
-        hasSound: !!kit?.slots?.[36 + i],
-        muted: !!_hot.pads.muted?.includes(36 + i),
-        wipeArmed: wiping && (!wiped || wiped.has(36 + i)),
+        hasSound: !!kit?.slots?.[base + i],
+        muted: !!_hot.pads.muted?.includes(base + i),
+        wipeArmed: wiping && (!wiped || wiped.has(base + i)),
         target: false
       }))
     }
@@ -1700,6 +1721,7 @@ function initMidi() {
   deviceSel?.addEventListener('change', () => {
     ensureAudio()
     MidiController.selectInput(deviceSel.value)
+    _padsRouter?.resetKnobs()
     linkPads()
     if (deviceSel.value) localStorage.setItem(MIDI_DEVICE_KEY, deviceSel.value)
     if (recBtn) recBtn.disabled = !deviceSel.value
@@ -1850,7 +1872,10 @@ function initMidi() {
         if (detail.kind === 'note-on') {
           // Pads view, armed kit only: Full / Ladder / Repeat press, once, before the voice.
           if (_currentMode === 'pads' && trackId === _hot.armedId && track.instrument?.type === 'kit') {
-            if (_padsView?.overlayActive?.()) continue   // pads are a menu while Overlay is held
+            if (_padsView?.overlayActive?.()) {   // pads are a menu while Overlay is held
+              if (detail.source !== 'repeat') _padsView.pickPad(padOf(detail.pitch))   // on-screen pads already picked in the view
+              continue
+            }
             const shaped = shapePadsHit(detail)
             entry.inst.noteOn(shaped.detail.pitch, shaped.detail.velocity, time, shaped.override)
             padsNoteOn(trackId, shaped.detail, time)
@@ -2023,7 +2048,7 @@ function initShortcuts() {
   PAD_KEY_ROWS.forEach((row, r) => row.forEach((key, c) => {
     ShortcutManager.register({ key, context: 'pads' }, (e) => {
       if (['SELECT', 'INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
-      if (!e.repeat) _padsView?.trigger((3 - r) * 4 + c)
+      if (!e.repeat) _padsView?.trigger((3 - r) * 4 + c, `key${key}`)
     })
   }))
   ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' || _currentMode === 'pads' ? _currentMode : 'global')
