@@ -106,10 +106,18 @@ describe('app boots', () => {
   })
 
   it('switches views by attribute, not inline display', () => {
-    for (const view of ['arrange', 'rack', 'tr909', 'synth']) {
+    for (const view of ['arrange', 'rack', 'tr909', 'pads', 'synth']) {
       document.querySelector(`.tool-btn[data-tool="${view}"]`).click()
       expect(document.getElementById('main').dataset.view).toBe(view)
     }
+    expect(errors).toEqual([])
+  })
+
+  it('F5 opens the pads view', () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5' }))
+    expect(document.getElementById('main').dataset.view).toBe('pads')
+    expect(document.querySelectorAll('#pads-view .pads-pad')).toHaveLength(16)
+    document.querySelector('.tool-btn[data-tool="synth"]').click()
     expect(errors).toEqual([])
   })
 })

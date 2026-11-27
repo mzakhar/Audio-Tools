@@ -278,11 +278,11 @@ describe('presets — phase 2', () => {
 })
 
 describe('migrate — presets field', () => {
-  it('a project without a presets field gets an empty array, version stays 6', () => {
+  it('a project without a presets field gets an empty array, version reaches current', () => {
     const v6 = { version: 6, tracks: [] }
     const next = migrate(v6)
     expect(next.presets).toEqual([])
-    expect(next.version).toBe(6)
-    expect(CURRENT_VERSION).toBe(6)
+    expect(next.version).toBe(CURRENT_VERSION)
+    expect(CURRENT_VERSION).toBe(7)
   })
 })

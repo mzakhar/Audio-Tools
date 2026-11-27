@@ -17,6 +17,7 @@ const SHOTS = [
   ['arrange-mixer', `document.querySelector('[data-tool="arrange"]').click(); document.getElementById('mixer-toggle-btn').click()`],
   ['rack', `document.querySelector('[data-tool="rack"]').click()`],
   ['tr909', `document.querySelector('[data-tool="tr909"]').click()`],
+  ['pads', `document.querySelector('[data-tool="pads"]').click()`],
   ['browser-dialog', `document.querySelector('[data-tool="synth"]').click(); document.getElementById('instrument-browser-dialog').showModal()`],
   ['library-dialog', `document.getElementById('library-dialog').showModal()`],
 ]

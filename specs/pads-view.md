@@ -291,7 +291,7 @@ hit.
 |---|---|---|
 | **0 Capture** (needs the user, ~10 min) | `pads/profiles/smc-pad.js` and a hardware table appended here: per-port notes/CCs/buttons, encoder mode, aftertouch yes/no, LED protocol yes/no, velocity floor, double-trigger rate | capture log committed under `specs/hardware/` |
 | **1 Feel fixes** (no new view) — **built 2026-11-26, awaiting hardware check** | hot-path cache + arm-time prewarm; `kit` instrument with a default 16-pad 909 kit; choke groups; velocity → timbre; all ports of the device | new tests green; manual: each of 16 pads a distinct sound, open hat chokes |
-| **2 Pads view core** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
+| **2 Pads view core** — **built 2026-11-26** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
 | **3 Performance** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
 | **4 Lessons** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
 | **5 Samples** | drop WAV on pad, slice to 16 (transient detect, PURE), lesson 11 | slicer tests on synthetic buffers |
@@ -315,6 +315,20 @@ Phase 1 notes: the kit is `{ type: 'kit', kitId: 'default-909' }` (code data in
 heard. Mirror ports (`MIDIIN2 (SMC-PAD)`, `MIDIIN3 (SMC-PAD)`) collapse into one device
 entry. Known leak: `tr909-kit.js` keeps the open hat in a module global, so a kit closed
 hat can also choke the 909 view's open hat.
+
+Phase 2 notes: in `pads` mode the global Play/Stop drive a loop player
+(`pads/loop-player.js`) at the project BPM, as the Sequencer does in synth mode; the
+view has no clock or play button. Swing (Groove) and Snap are baked into the notes at
+record time, so playback never re-swings and the arrange view plays the loop clip as
+heard. One pass (hits plus wipes between loop wraps, Layer off, or Stop) is one undo
+step, labelled `Pads pass`. Undo discards a non-empty open pass; otherwise it undoes
+the last store step only if that step is a Pads pass, else it does nothing (the button
+is disabled). Count-in: Play with Layer on and count-in > 0 starts at a negative beat
+with clicks only. Known ceilings: hits already scheduled in the lookahead (<= 100 ms)
+still sound after Stop; migrated projects carry a copy of the default kit in
+`state.kits`, which shadows later code-side kit changes (revisit with the kit editor
+in phase 3); changing Bars does not truncate notes (they wrap into the shorter loop,
+and the next commit resizes the clip).
 
 ## Constraints that still apply
 

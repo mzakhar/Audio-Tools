@@ -33,9 +33,9 @@ describe('ui shell structure', () => {
     expect(doc.querySelector('#app-menu[popover]')).not.toBeNull()
   })
 
-  it('switches four views from the sidebar, driven by data-view', () => {
+  it('switches five views from the sidebar, driven by data-view', () => {
     const tools = [...doc.querySelectorAll('.tool-btn')].map(btn => btn.dataset.tool)
-    expect(tools).toEqual(['synth', 'arrange', 'rack', 'tr909'])
+    expect(tools).toEqual(['synth', 'arrange', 'rack', 'tr909', 'pads'])
     expect(doc.getElementById('main').dataset.view).toBe('synth')
   })
 

@@ -8,7 +8,7 @@ import Palettes, { paletteDefaults } from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam, DEFAULT_PADS } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
@@ -23,9 +23,13 @@ import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playb
 import MidiController from './midi/MidiController.js'
 import { groupInputs } from './midi/device-group.js'
 import { createSmcPadLink } from './pads/smc-pad-link.js'
-import { kitFor, padColours } from './pads/kit.js'
+import { kitFor, padColours, DEFAULT_KIT_ID } from './pads/kit.js'
+import { createLoopPlayer } from './pads/loop-player.js'
+import { createPadsSession, canRecordHit } from './pads/pads-session.js'
+import { playClick } from './pads/click.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
+import { PadsView, PAD_KEY_ROWS } from './components/pads-view.js'
 import { RackView } from './components/rack-view.js'
 import { InstrumentBrowser } from './components/instrument-browser.js'
 import { InstrumentSettings } from './components/instrument-settings.js'
@@ -183,7 +187,8 @@ function instrumentDeps({ output, trackId } = {}) {
     palettes: Palettes,
     ctx,
     output: out,
-    racks: ProjectStore.getState().racks,
+    racks: _hot.racks,
+    kits: _hot.kits,
     packFor,
     sampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
@@ -238,7 +243,7 @@ function ensureMidiTrack(instrument) {
 // ProjectStore.getState() deep-clones, so the MIDI handler must not call it per
 // hit. This snapshot is rebuilt when the store or the armed track changes and
 // holds the store's own (read-only) track objects.
-const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null }
+const _hot = { midiTracks: [], byId: new Map(), sigs: new Map(), armedId: null, racks: undefined, kits: undefined, pads: DEFAULT_PADS, bpm: 120, beatsPerBar: 4 }
 let _prewarmSig = null
 
 function refreshHot(state = ProjectStore.getState()) {
@@ -246,8 +251,13 @@ function refreshHot(state = ProjectStore.getState()) {
   _hot.byId = new Map(_hot.midiTracks.map(track => [track.id, track]))
   // The output node is baked into the instrument at build time, so a move to
   // another mixer channel has to invalidate it too.
-  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null])]))
+  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? state.kits?.[track.instrument.kitId] ?? null : null])]))
   _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
+  _hot.racks = state.racks
+  _hot.kits = state.kits
+  _hot.pads = state.pads ?? DEFAULT_PADS
+  _hot.bpm = state.bpm
+  _hot.beatsPerBar = state.timeSignature?.[0] ?? 4
   if (_hot.armedId) _midiTargetTrackId = _hot.armedId   // a removed armed track falls back to the first
 }
 
@@ -403,13 +413,16 @@ function disposeLiveInstruments() {
 let _arrangementView = null
 let _pianoRoll = null
 let _tr909View = null
+let _padsView = null
+let _loopPlayer = null
+let _padsSession = null
 let _rackView = null
 let _instrumentBrowser = null
 let _instrumentSettings = null
 let _libraryDialog = null
 let _assistantDialog = null
 let _mixerStrips = new Map()  // channelId → MixerStrip
-let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack' | 'tr909'
+let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack' | 'tr909' | 'pads'
 let _selectedArrangeTrackId = null
 let _rafId = null
 let _midiRecording = false
@@ -568,6 +581,7 @@ function syncInstrumentUi() {
   renderInstrumentSlot()
   renderKnobPanel()
   _padGrid?.render()
+  if (_currentMode === 'pads') _padsView?.refreshKit()
 }
 
 const SLOT_STATE = { ready: '● loaded', unavailable: '○ no audio', missing: '○ missing' }
@@ -635,7 +649,7 @@ function padNote(note, on) {
  *  rather than pretending. Every other source is pitch-mapped already. */
 function padPlayable(note) {
   const instrument = armedInstrument()
-  if (instrument.type === 'kit') return kitAcceptsNote(instrument, note)
+  if (instrument.type === 'kit') return kitAcceptsNote(instrument, note, _hot.kits)
   if (instrument.type !== 'palette') return true
   return paletteAcceptsNote(Palettes[instrument.paletteKey || 'classic'], note)
 }
@@ -647,6 +661,124 @@ function initPads() {
     bankEl: document.getElementById('pad-banks'),
     onPad: padNote,
     isPlayable: padPlayable
+  })
+}
+
+// ─── Pads view ─────────────────────────────────────────────────────────────
+// The view and the loop player are shells; the pass/commit rules live in
+// pads/pads-session.js and the maths in pads/loop-record.js.
+let _padsIdSeq = 0
+
+/** The track the pads play: the armed kit track, else the first kit track, else a new one. */
+function padsTrack() {
+  const armed = _hot.byId.get(_hot.armedId)
+  if (armed?.instrument?.type === 'kit') return armed
+  const kitTrack = _hot.midiTracks.find(track => track.instrument?.type === 'kit')
+  if (kitTrack) {
+    _midiTargetTrackId = kitTrack.id
+    refreshHot()
+    syncInstrumentUi()
+    return kitTrack
+  }
+  return addMidiTrack('Pads', { type: 'kit', kitId: DEFAULT_KIT_ID })
+}
+
+const padsLoopBeats = () => _hot.pads.loopBars * _hot.beatsPerBar
+const padsDims = () => ({ loopBars: _hot.pads.loopBars, beatsPerBar: _hot.beatsPerBar })
+const commitPadsPass = () => _padsSession?.commit(_hot.pads.loopBars, _hot.beatsPerBar)
+
+/** A pad press from the view — a midi-event like every other pad, so routing, choke and mixer come along. */
+function padsTrigger(note, velocity) {
+  ensureAudio()
+  const target = padsTrack()
+  if (!target) return
+  document.dispatchEvent(new CustomEvent('midi-event', {
+    detail: { kind: 'note-on', channel: target.midiChannel ?? 0, pitch: note, velocity, source: 'pads-view' }
+  }))
+}
+
+const canRecordPadsHit = (detail, trackId) => canRecordHit({
+  mode: _currentMode,
+  layerOn: _padsView?.layerOn(),
+  playing: _loopPlayer?.isPlaying(),
+  armedId: _hot.armedId,
+  armedType: _hot.byId.get(_hot.armedId)?.instrument?.type
+}, detail, trackId)
+
+/** Tee from handleMidiEvent: flash the pad, and record it when Layer is armed over a running loop. */
+function padsNoteOn(trackId, detail, time) {
+  if (trackId !== _hot.armedId || !_padsView) return
+  _padsView.flashPad(detail.pitch, detail.velocity)
+  if (!canRecordPadsHit(detail, trackId) || _padsView.isWiping()) return
+  _loopPlayer.syncBpm()
+  const beat = _loopPlayer.beatAt(time)
+  if (beat < 0) return   // count-in
+  const { snapGrid, snapStrength, groove } = _hot.pads
+  _padsSession.hit(trackId, { pitch: detail.pitch, velocity: detail.velocity, beat },
+    { loopBeats: padsLoopBeats(), grid: snapGrid, strength: snapStrength, swing: groove }, padsDims())
+}
+
+function startPadsLoop() {
+  if (!padsTrack()) return
+  _loopPlayer.start({ countInBars: _padsView.layerOn() ? _hot.pads.countInBars : 0 })
+  _padsView.setPlaying(true)
+}
+
+function stopPadsLoop() {
+  _loopPlayer?.stop()
+  commitPadsPass()
+  _padsView?.setPlaying(false)
+}
+
+/** A project was replaced (new/open): the pass and the running loop belong to the old one. */
+function resetPadsForNewProject() {
+  _loopPlayer?.stop()
+  _padsSession?.discard()
+  _padsView?.setPlaying(false)
+}
+
+function initPadsView() {
+  const container = document.getElementById('pads-view')
+  if (!container) return
+  _padsSession = createPadsSession({
+    getTrack: id => _hot.byId.get(id),
+    dispatch: command => ProjectStore.dispatch(command),
+    dispatchBatch: (commands, label) => ProjectStore.dispatchBatch(commands, label),
+    undo: () => ProjectStore.undo(),
+    getUndoLabel: () => ProjectStore.getUndoLabel(),
+    newId: () => `pads-${Date.now().toString(36)}-${++_padsIdSeq}`
+  })
+  _loopPlayer = createLoopPlayer({
+    getContext: () => AudioEngine.getContext(),
+    bpm: () => _hot.bpm,
+    beatsPerBar: () => _hot.beatsPerBar,
+    loopBeats: padsLoopBeats,
+    notes: () => _padsSession.notes(_hot.armedId),
+    playHit: (pitch, velocity, time) => {
+      const track = _hot.byId.get(_hot.armedId)
+      const entry = track && liveEntryFor(track)
+      try { entry?.inst.hit?.(pitch, velocity, time) } catch (err) {}
+    },
+    playClick: (accent, time) => playClick(AudioEngine.getContext(), AudioEngine.getMasterInput(), accent, time),
+    metronome: () => _hot.pads.metronome,
+    onWrap: commitPadsPass,
+    // Wipe-while-held erases whatever the playhead just passed.
+    onTick: (fromBeat, toBeat) => {
+      if (!_padsView?.isWiping() || !_hot.armedId) return
+      _padsSession.wipe(_hot.armedId, { pitches: _padsView.wipePitches(), fromBeat, toBeat, loopBeats: padsLoopBeats() }, padsDims())
+    }
+  })
+  _padsView = new PadsView(container, {
+    triggerPad: padsTrigger,
+    getKit: () => {
+      const instrument = _hot.byId.get(_hot.armedId)?.instrument
+      return kitFor(instrument?.type === 'kit' ? instrument.kitId : DEFAULT_KIT_ID, _hot.kits)
+    },
+    getNotes: () => _padsSession.notes(_hot.armedId),
+    getBeat: () => (_loopPlayer.isPlaying() ? _loopPlayer.currentBeat() : null),
+    canUndo: () => _padsSession.canUndo(),
+    onUndo: () => { _padsSession.undo(); _padsView.drawStrip() },
+    onLayerChange: on => { if (!on) commitPadsPass() }
   })
 }
 
@@ -876,10 +1008,13 @@ function initCommandBar() {
         mixerEngine: MixerEngine,
         palettes: Palettes,
         racks: ProjectStore.getState().racks,
+        kits: ProjectStore.getState().kits,
         packFor,
         sampleStoreFor,
         rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
       })
+    } else if (_currentMode === 'pads') {
+      startPadsLoop()
     } else {
       Sequencer.play()
     }
@@ -888,6 +1023,8 @@ function initCommandBar() {
   document.getElementById('global-stop-btn')?.addEventListener('click', () => {
     if (_currentMode === 'arrange') {
       TimelinePlayer.stop()
+    } else if (_currentMode === 'pads') {
+      stopPadsLoop()
     } else {
       Sequencer.stop()
     }
@@ -995,7 +1132,7 @@ function switchMode(mode) {
   _currentMode = mode
   updateGlobalPlayAvailability()
   // The number row means pads on the synth view and voices on the 909's.
-  ShortcutManager.setContext(mode === 'synth' || mode === 'tr909' ? mode : 'global')
+  ShortcutManager.setContext(mode === 'synth' || mode === 'tr909' || mode === 'pads' ? mode : 'global')
   // #app and #arrange-view visibility is CSS, keyed off this attribute.
   // #rack-view is not: RackView owns its own inline display and reads it back
   // (rack-view.js:183), so an inline style would win over any rule here.
@@ -1009,6 +1146,10 @@ function switchMode(mode) {
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   })
   if (mode !== 'tr909') _tr909View?.stop()
+  if (mode !== 'pads' && (_loopPlayer?.isPlaying() || _padsSession?.hasPass())) stopPadsLoop()
+  else Sequencer.stop()   // one transport at a time
+  _padsView?.setActive(mode === 'pads')
+  syncTransportPressed()
   if (mode === 'arrange') {
     // The rack is a sibling of #arrange-view, both flex: 1 — leaving it visible
     // stacks the two views and keeps RackPoll's interval running.
@@ -1093,6 +1234,7 @@ function initProjectCommands() {
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
     disposeLiveInstruments()
+    resetPadsForNewProject()
     ProjectStore.reset()
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -1119,6 +1261,7 @@ function initProjectCommands() {
       return
     }
     disposeLiveInstruments()
+    resetPadsForNewProject()
     ProjectStore.load(state)
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
@@ -1230,6 +1373,7 @@ function initProjectCommands() {
       audioStore: AudioStore,
       durationBeats,
       racks: state.racks,
+      kits: state.kits,
       packFor,
       sampleStoreFor,
       sampleRate: state.sampleRate,
@@ -1348,7 +1492,7 @@ async function refreshPadLeds() {
   if (!link) return
   const instrument = _hot.byId.get(_hot.armedId)?.instrument
   _padKitId = instrument?.type === 'kit' ? instrument.kitId : null
-  const kit = _padKitId ? kitFor(_padKitId) : null
+  const kit = _padKitId ? kitFor(_padKitId, _hot.kits) : null
   const seq = ++_padSeq
   // Only a kit is laid out as 16 pads; anything else hears the device's own notes.
   const map = kit ? await link.refresh(padColours(kit)) : null
@@ -1524,7 +1668,7 @@ function initMidi() {
       // the note instead of letting it disappear. Pads send percussion notes
       // that have nothing to do with the keys, so they are exempt.
       // Channel 10 is percussion: its note numbers are drum slots, not pitches.
-      if (detail.source !== 'pad' && detail.channel !== 9) Keyboard.ensureVisible(detail.pitch)
+      if (detail.source !== 'pad' && detail.source !== 'pads-view' && detail.channel !== 9) Keyboard.ensureVisible(detail.pitch)
     }
     // Hot path: no store reads. Removed tracks are pruned by the store subscriber.
     const midiTracks = _hot.midiTracks
@@ -1542,7 +1686,10 @@ function initMidi() {
       if (!entry) continue
 
       try {
-        if (detail.kind === 'note-on') entry.inst.noteOn(detail.pitch, detail.velocity, time)
+        if (detail.kind === 'note-on') {
+          entry.inst.noteOn(detail.pitch, detail.velocity, time)
+          if (_currentMode === 'pads') padsNoteOn(trackId, detail, time)
+        }
         else if (detail.kind === 'note-off') entry.inst.noteOff(detail.pitch, time)
         // ponytail: CC1/7/11/120/123 mapped. Add a CC-learn map when a sixth matters.
         else if (detail.kind === 'cc') {
@@ -1656,6 +1803,7 @@ function initPianoRoll() {
 // ─── Shortcuts ────────────────────────────────────────────────────────────────
 /** True while either transport is actually running — never a shadow copy. */
 function isTransportPlaying() {
+  if (_currentMode === 'pads') return !!_loopPlayer?.isPlaying()
   return _currentMode === 'arrange' ? TimelinePlayer.isPlaying() : Sequencer.isPlaying()
 }
 
@@ -1702,11 +1850,18 @@ function initShortcuts() {
       if (!e.repeat) _tr909View?.trigger(TR909_VOICES[idx], 0.9)
     })
   })
-  ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' ? _currentMode : 'global')
+  // Pads view: letter/number keys in the hardware's 4x4 shape (pad 1 bottom-left).
+  PAD_KEY_ROWS.forEach((row, r) => row.forEach((key, c) => {
+    ShortcutManager.register({ key, context: 'pads' }, (e) => {
+      if (['SELECT', 'INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+      if (!e.repeat) _padsView?.trigger((3 - r) * 4 + c)
+    })
+  }))
+  ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' || _currentMode === 'pads' ? _currentMode : 'global')
 
   // Mode switching. Blocked behind a modal: switchMode() rewrites the shortcut
   // context, which the dialog would then restore on top of when it closes.
-  for (const [key, mode] of [['f1', 'synth'], ['f2', 'arrange'], ['f3', 'rack'], ['f4', 'tr909']]) {
+  for (const [key, mode] of [['f1', 'synth'], ['f2', 'arrange'], ['f3', 'rack'], ['f4', 'tr909'], ['f5', 'pads']]) {
     ShortcutManager.register({ key }, () => { if (!modalOpen()) switchMode(mode) })
   }
 
@@ -1746,6 +1901,7 @@ function boot() {
   Sequencer.init('seq-tracks', { playNote: sequencerPlayNote })
   const tr909Container = document.getElementById('tr909-view')
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
+  initPadsView()
 
   renderInstrumentSlot()
   renderKnobPanel()

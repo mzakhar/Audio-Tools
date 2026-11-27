@@ -87,7 +87,7 @@ describe('theme tokens', () => {
 // you remove literals; never raise it — add a token instead.
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g
 const ALLOW = {
-  'styles/base.css': 0, 'styles/rack.css': 0, 'styles/synth.css': 0, 'styles/tr909.css': 0,
+  'styles/base.css': 0, 'styles/rack.css': 0, 'styles/synth.css': 0, 'styles/tr909.css': 0, 'styles/pads.css': 0, 'js/components/pads-view.js': 0,
   'styles/sequencer.css': 0, 'styles/util.css': 0, 'styles/shell.css': 0, 'styles/arrange.css': 0,
   'styles/dialogs.css': 0, 'styles/piano-roll.css': 0, 'styles/assistant.css': 0,
   'js/components/arrangement-view.js': 0, 'js/components/piano-roll.js': 0,
