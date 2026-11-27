@@ -62,3 +62,8 @@ describe('commandItems', () => {
     expect(find(commandItems({ mode: 'synth' }), 'mixer').visible).toBe(false)
   })
 })
+
+it('lists Lessons in setup, always visible', () => {
+  const item = commandItems({}).find(i => i.id === 'lessons')
+  expect(item).toMatchObject({ group: 'setup', enabled: true, visible: true })
+})

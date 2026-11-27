@@ -129,6 +129,14 @@ export function commandItems(opts = {}) {
       visible: true,
     },
     {
+      id: 'lessons',
+      label: 'Lessons…',
+      shortcut: null,
+      group: 'setup',
+      enabled: true,
+      visible: true,
+    },
+    {
       id: 'library',
       label: 'Library',
       shortcut: 'Ctrl+Shift+L',

@@ -18,6 +18,7 @@ const SHOTS = [
   ['rack', `document.querySelector('[data-tool="rack"]').click()`],
   ['tr909', `document.querySelector('[data-tool="tr909"]').click()`],
   ['pads', `document.querySelector('[data-tool="pads"]').click()`],
+  ['lesson', `document.querySelector('[data-tool="pads"]').click(); document.querySelector('.pads-lessons').click(); document.querySelector('[data-lesson="l3"]').click()`],
   ['browser-dialog', `document.querySelector('[data-tool="synth"]').click(); document.getElementById('instrument-browser-dialog').showModal()`],
   ['library-dialog', `document.getElementById('library-dialog').showModal()`],
 ]

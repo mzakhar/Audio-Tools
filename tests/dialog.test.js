@@ -147,3 +147,22 @@ describe('dialog kit with a queued close event', () => {
     expect(ShortcutManager.getContext()).toBe('synth')
   })
 })
+
+describe('dialog modal:false', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    ShortcutManager.setContext('pads')
+  })
+
+  it('uses show(), keeps the shortcut context, and closeDialog still closes', () => {
+    const el = makeDialog('nm')
+    el.show = () => { el.open = true }
+    expect(openDialog('nm', { modal: false })).toBe(true)
+    expect(isOpen('nm')).toBe(true)
+    expect(ShortcutManager.getContext()).toBe('pads')
+    expect(openDialog('nm', { modal: false })).toBe(false)
+    expect(closeDialog('nm')).toBe(true)
+    expect(isOpen('nm')).toBe(false)
+    expect(ShortcutManager.getContext()).toBe('pads')
+  })
+})

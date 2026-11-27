@@ -293,7 +293,7 @@ hit.
 | **1 Feel fixes** (no new view) — **built 2026-11-26, awaiting hardware check** | hot-path cache + arm-time prewarm; `kit` instrument with a default 16-pad 909 kit; choke groups; velocity → timbre; all ports of the device | new tests green; manual: each of 16 pads a distinct sound, open hat chokes |
 | **2 Pads view core** — **built 2026-11-26** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
 | **3 Performance** — **built 2026-11-26, awaiting hardware check** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
-| **4 Lessons** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
+| **4 Lessons** — **built 2026-11-27, awaiting hardware check** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
 | **5 Samples** | drop WAV on pad, slice to 16 (transient detect, PURE), lesson 11 | slicer tests on synthetic buffers |
 
 Phase 1 is shippable alone and should fix most of today's complaint.
@@ -351,6 +351,23 @@ seeded from code in the same batch if missing; (b) the Ladder records velocity o
 tune/decay/filter ladder hits are live-only and recorded loop notes carry no per-hit
 timbre; (c) a live strike within one tick of the next repeat point may double (the repeat
 engine is not told about live hits); (d) the LED blink cap above.
+
+Phase 4 notes: `pads/lesson-score.js` (PURE matcher, windows, calibration, hints),
+`pads/lessons.js` (PURE lessons 0–10, evaluator, progress helpers), `pads/lesson-strip.js`
+(PURE strip geometry), `pads/lesson-session.js` (shell), `components/lesson-card.js`.
+LESSONS button in the Pads view or "Lessons…" in the ⋯ menu opens a non-modal card
+(`openDialog(id, { modal: false })`, `data-nonmodal`, so pad keys and G/H/O/L keep working;
+Escape or ✕ closes it and stops the lesson, as does leaving the Pads view). Starting a
+lesson sets BPM, bars, groove, `full:false`, `ladder:null` plus the lesson's own setup in one
+"Lesson setup" undo step, shows bank A, and restarts the loop. Scoring uses the raw pad hit
+(before Ladder/Full) against ghost targets over the last 4 laps; a placement pass needs at
+least one fully resolved lap. Calibration (lesson 0) takes 16 taps on the click; the median
+error is the offset subtracted from every later score. Progress and calibration live in
+localStorage `synth_pads_lessons`. The next target pad blinks on screen and, in a user
+preset, on the device (LED `target`). Known limits: velocity is scored after the device
+curve and Full; on a phone the card covers the lower pad rows (close it to play); Groove and
+Snap lessons credit a setting once a non-empty loop wraps with it, they cannot tell whether
+you listened.
 
 ## Constraints that still apply
 
