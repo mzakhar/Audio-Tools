@@ -66,3 +66,24 @@ export function velocityTimbre(vel01, params) {
   if (out.tone != null) out.tone *= 0.7 + 0.5 * v
   return { params: out, accent: v >= 0.9 }
 }
+
+// Device RGB bytes for the pad LEDs, by voice family. White is left out: the
+// SMC-PAD flashes white on a hit by itself.
+const VOICE_RGB = {
+  bd: [255, 0, 0],
+  sd: [255, 80, 0],
+  rs: [160, 0, 255],
+  cp: [160, 0, 255],
+  ch: [255, 200, 0],
+  oh: [255, 200, 0],
+  lt: [0, 255, 0],
+  mt: [0, 255, 120],
+  ht: [0, 200, 255],
+  cr: [0, 60, 255],
+  rd: [0, 60, 255]
+}
+
+/** Colour of each of the 16 pads (pad i plays note 36 + i); null where a pad has no voice. */
+export function padColours(kit) {
+  return Array.from({ length: 16 }, (_, i) => VOICE_RGB[kit.slots[36 + i]?.voice] ?? null)
+}

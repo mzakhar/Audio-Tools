@@ -22,6 +22,8 @@ import MixerEngine from './audio/mixer-engine.js'
 import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playback/timeline-player.js'
 import MidiController from './midi/MidiController.js'
 import { groupInputs } from './midi/device-group.js'
+import { createSmcPadLink } from './pads/smc-pad-link.js'
+import { kitFor, padColours } from './pads/kit.js'
 import { PianoRoll } from './components/piano-roll.js'
 import { Tr909View } from './components/tr909-view.js'
 import { RackView } from './components/rack-view.js'
@@ -1307,7 +1309,50 @@ function updateMidiDeviceSelect(inputs) {
     || groups[0]?.primaryId
   sel.value = preferred || ''
   MidiController.selectInput(sel.value)
+  linkPads()
   syncMidiToken(sel)
+}
+
+// ─── SMC-PAD LEDs ─────────────────────────────────────────────────────────
+// In a user preset (SHIFT + Pad 3–8) the host can colour the pads: each pad
+// takes its kit voice's colour, and its notes are mapped onto the kit's 36–51.
+// Performance mode keeps its fixed colours and already sends 36–51. Writes go
+// to working memory only; the save command is never built. specs/pads-view.md
+const PAD_POLL_MS = 2000       // the preset changes on the device with no MIDI, so poll the mode
+let _padLink = null
+let _padPoll = null
+let _padKitId = null
+let _padOutputId = null
+let _padSeq = 0                // only the latest refresh may set the note map
+
+function linkPads() {
+  const output = MidiController.selectedOutput()
+  // statechange fires for every hot-plug; keep a live link to the same port.
+  if (_padLink && output?.id === _padOutputId) return
+  clearInterval(_padPoll)
+  _padLink = null
+  _padKitId = null
+  MidiController.onSysex = null
+  _padOutputId = null
+  if (!output || !/SMC-PAD/i.test(output.name || '')) return
+  _padOutputId = output.id
+  const link = createSmcPadLink({ send: bytes => output.send(bytes) })
+  _padLink = link
+  MidiController.onSysex = bytes => link.onSysex(bytes)
+  refreshPadLeds()
+  _padPoll = setInterval(refreshPadLeds, PAD_POLL_MS)
+}
+
+async function refreshPadLeds() {
+  const link = _padLink
+  if (!link) return
+  const instrument = _hot.byId.get(_hot.armedId)?.instrument
+  _padKitId = instrument?.type === 'kit' ? instrument.kitId : null
+  const kit = _padKitId ? kitFor(_padKitId) : null
+  const seq = ++_padSeq
+  // Only a kit is laid out as 16 pads; anything else hears the device's own notes.
+  const map = kit ? await link.refresh(padColours(kit)) : null
+  if (link === _padLink && seq === _padSeq) MidiController.setNoteMap(map)
 }
 
 /** The command bar shows one live MIDI token: a dot plus the device name. */
@@ -1353,6 +1398,7 @@ function initMidi() {
   deviceSel?.addEventListener('change', () => {
     ensureAudio()
     MidiController.selectInput(deviceSel.value)
+    linkPads()
     if (deviceSel.value) localStorage.setItem(MIDI_DEVICE_KEY, deviceSel.value)
     if (recBtn) recBtn.disabled = !deviceSel.value
     syncMidiToken(deviceSel)
@@ -1795,6 +1841,8 @@ function boot() {
     syncMixerStrips(state)
     syncInstrumentUi()
     prewarmArmed()
+    const armed = _hot.byId.get(_hot.armedId)?.instrument
+    if (_padLink && (armed?.type === 'kit' ? armed.kitId : null) !== _padKitId) refreshPadLeds()
     // A removed track must go quiet immediately. Pruning only inside the MIDI
     // handler left a deleted track sounding until the next incoming event —
     // with no controller attached, forever.

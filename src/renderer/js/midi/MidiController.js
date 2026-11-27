@@ -14,6 +14,10 @@ const MidiController = {
   _access: null,
   _input: null,       // currently subscribed MIDIInput
   _curve: curveForDevice(''), // velocity shaping for that device, resolved at selection
+  _sysex: false,      // granted SysEx; the SMC-PAD LED link needs it
+  _noteMap: null,     // device note → played note (SMC-PAD user preset → kit pads)
+  _mappedHeld: new Map(), // device note → pitch its note-on played, so a map swap cannot strand the note-off
+  onSysex: null,      // (bytes) => void, for the selected input's SysEx replies
   _recording: false,
   _recordStartPerf: 0, // performance.now() when recording started
   _bpm: 120,
@@ -31,7 +35,15 @@ const MidiController = {
       return { granted: false, inputs: [], error: 'Web MIDI API is not supported in this browser.' }
     }
     try {
-      this._access = await navigator.requestMIDIAccess({ sysex: false })
+      // SysEx (approved 2026-11-26) drives the SMC-PAD pad colours. A refusal
+      // must not cost the notes, so fall back to plain access.
+      try {
+        this._access = await navigator.requestMIDIAccess({ sysex: true })
+        this._sysex = true
+      } catch (err) {
+        this._access = await navigator.requestMIDIAccess({ sysex: false })
+        this._sysex = false
+      }
       this._access.onstatechange = () => {
         document.dispatchEvent(new CustomEvent('midi-device-change', {
           detail: { inputs: this.getInputs() }
@@ -58,6 +70,7 @@ const MidiController = {
       this._input = null
     }
     this._curve = curveForDevice('')
+    this._noteMap = null
     if (!this._access || !id) return
     this._input = this._access.inputs.get(id) ?? null
     if (this._input) {
@@ -67,6 +80,16 @@ const MidiController = {
   },
 
   isGranted() { return this._access !== null },
+
+  /** The out port named like the selected input, or null without SysEx. */
+  selectedOutput() {
+    if (!this._sysex || !this._input || !this._access.outputs) return null
+    for (const output of this._access.outputs.values()) if (output.name === this._input.name) return output
+    return null
+  },
+
+  /** Translate device notes before anything sees them; null for none. */
+  setNoteMap(map) { this._noteMap = map },
 
   // ── Recording ────────────────────────────────────────────────────────────────
 
@@ -108,8 +131,18 @@ const MidiController = {
   },
 
   _onMidiMessage(e) {
+    if (e.data[0] === 0xf0) { this.onSysex?.(e.data); return }
     let parsed = parseMidiMessage(e.data)
     if (!parsed) return
+    if (parsed.kind === 'note-on') {
+      const pitch = this._noteMap?.get(parsed.pitch) ?? parsed.pitch
+      this._mappedHeld.set(parsed.pitch, pitch)
+      parsed = { ...parsed, pitch }
+    } else if (parsed.kind === 'note-off') {
+      const pitch = this._mappedHeld.get(parsed.pitch) ?? parsed.pitch
+      this._mappedHeld.delete(parsed.pitch)
+      parsed = { ...parsed, pitch }
+    }
     // A device property, so recordings keep what was heard. 0 = hit dropped.
     if (parsed.kind === 'note-on') {
       const velocity = applyVelocityCurve(parsed.velocity, this._curve)
