@@ -235,7 +235,7 @@ config.
 |---|---|
 | Host | `themachine` (k3s, `192.168.1.3`) — `ssh mzakhar@themachine`, key-based |
 | LAN URL | `http://themachine/synth/` (Traefik StripPrefix) — **not** a secure context |
-| External URL | `https://synth.zakharhome.org` (Cloudflare Tunnel terminates TLS) — secure context, and currently **unauthenticated** |
+| External URL | `https://synth.zakharhome.org` (Cloudflare Tunnel terminates TLS) — secure context, behind **Cloudflare Access** (unauthenticated requests get a 302 to the `zakharhome.cloudflareaccess.com` login) |
 | Image | `ghcr.io/mzakhar/audio-tools:main`, built by `.github/workflows/publish-image.yml` |
 | Reconciler | Flux CD in **`E:\Projects\homelab-fleet`**, not this repo. `scripts/deploy-k3s.sh` and `deploy/systemd/` are a legacy manual fallback |
 
@@ -281,11 +281,13 @@ ssh mzakhar@themachine 'kubectl -n synth logs deploy/synth --tail=50'
 A green Flux status does not prove the new code is serving. Two checks that do:
 
 - The running image digest equals the `sha-<commit>` digest you pinned.
-- The live bundle contains something that commit introduced:
+- The live bundle contains something that commit introduced. Check over the
+  LAN route: the external host is behind Cloudflare Access, so a plain `curl`
+  there only gets the login redirect. The same pod serves both.
 
   ```sh
-  ASSET=$(curl -s https://synth.zakharhome.org/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js')
-  curl -s "https://synth.zakharhome.org/$ASSET" | grep -c 'a string the change introduced'
+  ASSET=$(curl -s http://themachine/synth/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js')
+  curl -s "http://themachine/synth/$ASSET" | grep -c 'a string the change introduced'
   ```
 
 **Do not** compare the deployed `index-*.js` hash against a local `npm run build`.
