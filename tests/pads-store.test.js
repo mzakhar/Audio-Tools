@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import ProjectStore, { migrate, CURRENT_VERSION, SetPadsSettings, SetKitSlot } from '../src/renderer/js/store/ProjectStore.js'
+import ProjectStore, { migrate, CURRENT_VERSION, SetPadsSettings, SetKitSlot, SeedKit } from '../src/renderer/js/store/ProjectStore.js'
 import { kitFor, KITS, DEFAULT_KIT_ID } from '../src/renderer/js/pads/kit.js'
 
 beforeEach(() => ProjectStore.reset())
@@ -9,7 +9,7 @@ describe('schema v7 migration', () => {
     const next = migrate({ version: 6, tracks: [] })
     expect(next.version).toBe(CURRENT_VERSION)
     expect(next.kits[DEFAULT_KIT_ID].slots[36].voice).toBe('bd')
-    expect(next.pads).toEqual({ loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1 })
+    expect(next.pads).toEqual({ loopBars: 2, groove: 0.5, snapGrid: 0.25, snapStrength: 1, metronome: true, countInBars: 1, full: false, ladder: null, repeatRate: '1/16', muted: [] })
   })
 
   it('keeps an existing custom kit and pads values', () => {
@@ -54,5 +54,27 @@ describe('kitFor with a store map', () => {
     expect(kitFor(DEFAULT_KIT_ID, { [DEFAULT_KIT_ID]: edited })).toBe(edited)
     expect(kitFor(DEFAULT_KIT_ID, {})).toBe(KITS[DEFAULT_KIT_ID])
     expect(kitFor('nope', {})).toBeNull()
+  })
+})
+
+describe('SetPadsSettings phase 3 keys', () => {
+  it('sanitises ladder, repeatRate, muted, full', () => {
+    ProjectStore.dispatch(SetPadsSettings({ ladder: 'tune', repeatRate: '1/32', muted: [38, 36, 38, 'x'], full: 1 }))
+    expect(ProjectStore.getState().pads).toMatchObject({ ladder: 'tune', repeatRate: '1/32', muted: [36, 38], full: true })
+    ProjectStore.dispatch(SetPadsSettings({ ladder: 'bogus', repeatRate: '9/9', muted: 'no' }))
+    expect(ProjectStore.getState().pads).toMatchObject({ ladder: null, repeatRate: '1/16', muted: [] })
+  })
+})
+
+describe('SeedKit', () => {
+  it('copies a code kit in once, so a slot edit can land; one batch is one undo', () => {
+    const kit = { name: 'Mine', slots: { 36: { voice: 'bd', params: {} } } }
+    ProjectStore.dispatchBatch([SeedKit('mine', kit), SetKitSlot('mine', 36, { voice: 'bd', params: {}, perf: { level: 1.1 } })], 'x')
+    expect(ProjectStore.getState().kits.mine.slots[36].perf).toEqual({ level: 1.1 })
+    expect(kit.slots[36].perf).toBeUndefined()
+    ProjectStore.dispatch(SeedKit('mine', { slots: {} }))   // already there: untouched
+    expect(ProjectStore.getState().kits.mine.slots[36]).toBeDefined()
+    ProjectStore.undo(); ProjectStore.undo()
+    expect(ProjectStore.getState().kits.mine).toBeUndefined()
   })
 })

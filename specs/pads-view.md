@@ -292,7 +292,7 @@ hit.
 | **0 Capture** (needs the user, ~10 min) | `pads/profiles/smc-pad.js` and a hardware table appended here: per-port notes/CCs/buttons, encoder mode, aftertouch yes/no, LED protocol yes/no, velocity floor, double-trigger rate | capture log committed under `specs/hardware/` |
 | **1 Feel fixes** (no new view) — **built 2026-11-26, awaiting hardware check** | hot-path cache + arm-time prewarm; `kit` instrument with a default 16-pad 909 kit; choke groups; velocity → timbre; all ports of the device | new tests green; manual: each of 16 pads a distinct sound, open hat chokes |
 | **2 Pads view core** — **built 2026-11-26** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
-| **3 Performance** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
+| **3 Performance** — **built 2026-11-26, awaiting hardware check** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
 | **4 Lessons** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
 | **5 Samples** | drop WAV on pad, slice to 16 (transient detect, PURE), lesson 11 | slicer tests on synthetic buffers |
 
@@ -329,6 +329,28 @@ still sound after Stop; migrated projects carry a copy of the default kit in
 `state.kits`, which shadows later code-side kit changes (revisit with the kit editor
 in phase 3); changing Bars does not truncate notes (they wrap into the shorter loop,
 and the next commit resizes the clip).
+
+Phase 3 notes: decisions. No MIDI clock out: Repeat is Synth's own engine (grid-locked
+to the loop when it plays, free-running otherwise), so the SMC-PAD's own Note Repeat stays
+off. Default button roles are CC 25 play, 26 layer, 27 repeat, 28 wipe, 29 full on channel
+1; the hardware labels are unconfirmed, so learn can remap. Keyboard twins: G hold Repeat,
+H Full, O hold Overlay, L cycle Ladder (keydown ignored while a dialog is open; a keyup
+still ends a hold). Learn overrides live in localStorage per device name
+(`synth_pads_map_<device>`), keyed by control (`cc:<ch>:<n>` or `note:<ch>:<n>`), knobs as
+`knob:<n>`; learning an action onto a new control stores the profile's old control as
+`null`, which means unbound. Knob tune is the `tuneSt` semitone key of the slot's `perf`
+layer ({ tuneSt, decayMul, filterMul, level }), never the 909 `tune` float; `perf` is read
+live by the kit instrument, is excluded from the instrument rebuild signature, and is
+combined with the per-hit Ladder override. The controller router acts only in the Pads
+view (elsewhere every control falls through to normal handling); the learn dialog works
+anywhere. The LED mirror counts SysEx writes (8 per 125 ms tick; a pad is up to 8 writes),
+advances only for acknowledged pads, follows the bank the view shows, and blinks at 1 Hz
+instead of 4 Hz when more than 4 pads want the fast blink. Known limits: (a) one knob
+detent is one undo entry (a long twist is many) and edits the project's copy of the kit,
+seeded from code in the same batch if missing; (b) the Ladder records velocity only, so
+tune/decay/filter ladder hits are live-only and recorded loop notes carry no per-hit
+timbre; (c) a live strike within one tick of the next repeat point may double (the repeat
+engine is not told about live hits); (d) the LED blink cap above.
 
 ## Constraints that still apply
 

@@ -19,7 +19,7 @@
 
 .pads-grid {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
-  width: min(100%, 420px); flex: 0 1 420px;
+  width: min(100%, 420px); flex: none; align-content: start; /* flex:none: a 420px basis stretched the rows in the column-flex .pads-left */
 }
 
 .pads-pad {
@@ -57,4 +57,43 @@
   .pads-shell { padding: 8px; }
   .pads-strip { height: 110px; }
   .pads-grid { gap: 5px; }
+}
+
+/* ─── Phase 3: banks, performance buttons, knob twins, overlay, help ─────── */
+.pads-shell { position: relative; }
+.pads-left { display: flex; flex-direction: column; gap: 8px; flex: 0 1 420px; min-width: 0; width: min(100%, 420px); }
+.pads-banks { display: flex; gap: 6px; }
+.pads-bank { min-width: 36px; }
+.pads-perf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pads-perf .btn[data-lit] { color: var(--text-inverse); background: var(--state-on); border-color: var(--state-on); }
+.pads-header .btn[data-lit] { box-shadow: var(--shadow-pressed); }
+
+.pads-knobs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.pads-knob {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; min-width: 0;
+  background: var(--surface-control); border: 1px solid var(--border-subtle); border-radius: var(--radius-m);
+  box-shadow: var(--shadow-raised); cursor: ns-resize; touch-action: none; user-select: none;
+}
+.pads-knob:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pads-knob[data-pulse] { border-color: var(--accent); box-shadow: var(--shadow-pressed); }
+.pads-knob-out { min-width: 6ch; text-align: center; }
+
+.pads-pad[data-empty] .pads-pad-name { opacity: 0.45; }
+.pads-pad[data-muted] {
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, var(--border-subtle) 6px 9px);
+  opacity: 0.7;
+}
+.pads-shell[data-overlay] .pads-pad { outline: 2px dashed var(--accent); outline-offset: -4px; }
+
+.pads-help {
+  position: absolute; z-index: 5; max-width: 240px; padding: 6px 8px; pointer-events: none;
+  font: 12px/1.35 var(--font-ui); color: var(--text);
+  background: var(--surface-control); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-s); box-shadow: var(--shadow-raised);
+}
+.pads-help[hidden] { display: none; }
+
+@media (max-width: 480px) {
+  .pads-knobs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pads-knob { flex-direction: row; justify-content: space-between; padding: 6px 8px; }
 }

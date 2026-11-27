@@ -150,7 +150,7 @@ const MidiController = {
       parsed = { ...parsed, velocity }
     }
 
-    document.dispatchEvent(new CustomEvent('midi-event', { detail: { ...parsed, time: e.timeStamp } }))
+    document.dispatchEvent(new CustomEvent('midi-event', { detail: { ...parsed, time: e.timeStamp, device: this._input?.name } }))
 
     if (parsed.kind === 'note-on') {
       const { pitch, velocity } = parsed
