@@ -742,12 +742,13 @@ const canRecordPadsHit = (detail, trackId) => canRecordHit({
 }, detail, trackId)
 
 /** Tee from handleMidiEvent: flash the pad, and record it when Layer is armed over a running loop. */
-function padsNoteOn(trackId, detail, time) {
+/** `rawPitch` is the pad before Ladder/Full shaping: lessons score the pad the player hit. */
+function padsNoteOn(trackId, detail, time, rawPitch = detail.pitch) {
   if (trackId !== _hot.armedId || !_padsView) return
   _padsView.flashPad(detail.pitch, detail.velocity)
-  if (_lessons?.active() && _loopPlayer.isPlaying() && detail.pitch >= 36 && detail.pitch < 52) {
+  if (_lessons?.active() && _loopPlayer.isPlaying() && rawPitch >= 36 && rawPitch < 52) {
     _loopPlayer.syncBpm()
-    _lessons.hit({ pad: detail.pitch - 36, beat: _loopPlayer.beatAt(time), velocity: detail.velocity, source: detail.source })
+    _lessons.hit({ pad: rawPitch - 36, beat: _loopPlayer.beatAt(time), velocity: detail.velocity, source: detail.source })
   }
   if (!canRecordPadsHit(detail, trackId) || _padsView.isWiping()) return
   _loopPlayer.syncBpm()
@@ -960,10 +961,14 @@ function initLessons() {
     getLoopBeats: padsLoopBeats,
     getBeatsPerBar: () => _hot.beatsPerBar,
     getClipPads: () => new Set((_padsSession?.notes(_hot.armedId) ?? []).map(n => n.pitch - 36).filter(p => p >= 0 && p < 16)),
-    applySetup: lesson => ProjectStore.dispatchBatch([
-      SetBpm(lesson.bpm),
-      SetPadsSettings({ loopBars: lesson.bars, groove: lesson.groove, metronome: true, ...lesson.setup })
-    ], 'Lesson setup'),
+    applySetup: lesson => {
+      ProjectStore.dispatchBatch([
+        SetBpm(lesson.bpm),
+        // Base first: one lesson's Ladder/Full must not leak into the next.
+        SetPadsSettings({ loopBars: lesson.bars, groove: lesson.groove, metronome: true, full: false, ladder: null, ...lesson.setup })
+      ], 'Lesson setup')
+      _padsView?.setBank(0)
+    },
     onUpdate: m => {
       _lessonNextPad = m?.nextPad ?? null
       _padsView?.setLesson?.(m ? { targets: m.lesson.targets, bars: m.lesson.bars } : null)
@@ -975,7 +980,13 @@ function initLessons() {
   })
   _lessonCard = createLessonCard({
     session: _lessons,
-    onStart: id => { _lessons.start(id); if (!_loopPlayer.isPlaying()) startPadsLoop() },
+    onStart: id => {
+      _lessons.start(id)
+      // Restart so beat 0 is the lesson's origin; stopPadsLoop commits any open pass.
+      if (_loopPlayer.isPlaying()) stopPadsLoop()
+      startPadsLoop()
+      _lessonCard.setNotice(_loopPlayer.isPlaying() ? '' : 'No Pads track to play. Arm a kit track first.')
+    },
     onStop: () => _lessons.stop()
   })
 }
@@ -1346,6 +1357,7 @@ function switchMode(mode) {
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   })
   if (mode !== 'tr909') _tr909View?.stop()
+  if (mode !== 'pads') closeDialog('lesson-dialog')   // its close handler stops the lesson
   if (mode !== 'pads' && (_loopPlayer?.isPlaying() || _padsSession?.hasPass())) stopPadsLoop()
   else Sequencer.stop()   // one transport at a time
   _padsView?.setActive(mode === 'pads')
@@ -1925,7 +1937,7 @@ function initMidi() {
             }
             const shaped = shapePadsHit(detail)
             entry.inst.noteOn(shaped.detail.pitch, shaped.detail.velocity, time, shaped.override)
-            padsNoteOn(trackId, shaped.detail, time)
+            padsNoteOn(trackId, shaped.detail, time, detail.pitch)
           } else entry.inst.noteOn(detail.pitch, detail.velocity, time)
         }
         else if (detail.kind === 'note-off') {

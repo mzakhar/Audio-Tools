@@ -91,6 +91,24 @@ describe('scoreHits', () => {
   })
 })
 
+describe('windowing and full laps', () => {
+  const targets = [{ pad: 0, beat: 0 }, { pad: 2, beat: 1, vel: 100 }]
+  const o = { loopBeats: 4, bpm: 120 }
+  it('fromBeat drops earlier laps', () => {
+    const s = scoreHits([], targets, { ...o, toBeat: 20, fromBeat: 12 })
+    expect(Math.min(...s.marks.map(m => m.k))).toBe(3)
+  })
+  it('fullLaps counts only laps with every occurrence resolved', () => {
+    const hits = [{ pad: 0, beat: 0, velocity: 100 }, { pad: 2, beat: 1, velocity: 100 }]
+    expect(scoreHits(hits.slice(0, 1), targets, { ...o, toBeat: 1.1 }).fullLaps).toBe(0)
+    expect(scoreHits(hits, targets, { ...o, toBeat: 3 }).fullLaps).toBe(1)
+  })
+  it('a missed velocity target counts against velPct', () => {
+    const hits = [{ pad: 0, beat: 0, velocity: 100 }]
+    expect(scoreHits(hits, targets, { ...o, toBeat: 3 }).velPct).toBe(0)
+  })
+})
+
 describe('calibration', () => {
   it('tapErrors signed to nearest beat incl. negative', () => {
     const e = tapErrors([1.04, 1.96, 3, 0.9], BPM)

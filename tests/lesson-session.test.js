@@ -93,6 +93,65 @@ describe('session', () => {
     expect(last(updates).done).toBe(true)
   })
 
+  it('groove/snap heard ignore wraps over an empty loop', () => {
+    const { session, state, updates } = make()
+    session.start('l8')
+    session.wrap(0); session.wrap(1)
+    session.tick(20)
+    expect(last(updates).result.progress).toBe(0)
+    state.clip = new Set([6])
+    session.wrap(2)
+    session.tick(20)
+    expect(last(updates).result.progress).toBe(0.5)
+  })
+
+  it('restart resets loop/mute/heard counters', () => {
+    const { session, updates } = make()
+    session.start('l3')
+    session.wrap(0)
+    session.restart()
+    session.tick(1)
+    expect(last(updates).result.label).toContain('0/2 loops')
+  })
+
+  it('lesson 6 completes when a pad recorded after start is wiped', () => {
+    const { session, state, updates } = make()
+    session.start('l6')
+    session.tick(1)
+    state.clip = new Set([0, 2]); session.tick(2)
+    expect(last(updates).done).toBe(false)
+    state.clip = new Set([2]); session.tick(3)
+    expect(last(updates).done).toBe(true)
+  })
+
+  it('done is this run only; completed is the saved flag', () => {
+    const { session, updates } = make()
+    session.start('l0')
+    for (let i = 0; i < 16; i++) session.hit({ pad: 0, beat: i, velocity: 100 })
+    session.start('l0')
+    expect(last(updates)).toMatchObject({ done: false, completed: true })
+  })
+
+  it('scores only the last 4 laps: old misses age out', () => {
+    const { session, updates } = make()   // loopBeats 8, 4 targets/lap in l2? use l2 (bars 2)
+    session.start('l2')
+    const l = lessonById('l2')
+    for (let k = 4; k < 6; k++) for (const t of l.targets) session.hit({ pad: t.pad, beat: k * 8 + t.beat, velocity: 100 })
+    session.tick(6 * 8 - 0.5)
+    const u = last(updates)
+    expect(u.score.marks.every(m => m.k >= 2)).toBe(true)   // laps 0-1 aged out
+    expect(u.score.fullLaps).toBe(4)
+    expect(u.score.counts.miss).toBe(8)   // laps 2-3 never played
+  })
+
+  it('a double mute in one change counts twice', () => {
+    const { session, updates } = make()
+    session.start('l10')
+    session.padsChanged({ muted: [] }, { muted: [36, 37] }, 4.01)
+    session.tick(20)
+    expect(last(updates).result.label).toBe('2/4 mutes')
+  })
+
   it('negative beats are ignored; stop emits null', () => {
     const { session, updates } = make()
     session.start('l2')

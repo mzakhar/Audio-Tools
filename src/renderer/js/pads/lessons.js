@@ -68,7 +68,7 @@ export const LESSONS = [
     title: 'Wipe', concept: 'Remove one pad from the loop while it plays.',
     bpm: 90, groove: 0.5, bars: 2,
     pass: { type: 'pad-empty', pad: 0 },
-    steps: ['Record a kick (Pad 1) and a snare (Pad 2) in the loop.', 'Hold Wipe + Pad 1 while the loop plays.', 'The kick goes, the snare stays.'],
+    steps: ['Record a kick (Pad 1) and a snare (Pad 3) in the loop.', 'Hold Wipe + Pad 1 while the loop plays.', 'The kick goes, the snare stays.'],
     hints: ['Undo brings a wiped pad back.'],
   }),
   L(7, {
@@ -131,7 +131,8 @@ export function evaluate(lesson, ctx = {}) {
     }
     case 'velocity': {
       const v = score?.velPct ?? 0
-      return pct(v, p.pct, 'in band')
+      const r = pct(v, p.pct, 'in band')
+      return { ...r, done: r.done && (score?.fullLaps ?? 0) > 0 }
     }
     case 'score': case 'phrase': {
       if (p.type === 'phrase' && !ctx.pads?.ladder) return { done: false, progress: 0, label: 'turn Ladder on (L)' }
@@ -139,7 +140,7 @@ export function evaluate(lesson, ctx = {}) {
       const loops = p.type === 'score' ? p.loops : 1
       const l = p.type === 'score' ? ctx.loops || 0 : 1
       const gp = clamp01(g / p.goodPct)
-      const done = !!score && score.total > 0 && g >= p.goodPct && l >= loops
+      const done = !!score && (score.fullLaps ?? 0) > 0 && g >= p.goodPct && l >= loops
       const label = `${Math.round(g * 100)}% good` + (loops > 1 ? `, ${Math.min(l, loops)}/${loops} loops` : '')
       return { done, progress: loops > 1 ? (gp + clamp01(l / loops)) / 2 : gp, label }
     }
@@ -147,9 +148,9 @@ export function evaluate(lesson, ctx = {}) {
       const b = ctx.repeatBeats || 0
       return { done: b >= p.beats, progress: clamp01(b / p.beats), label: `${Math.min(Math.floor(b), p.beats)}/${p.beats} beats` }
     }
-    case 'pads-in-loop': return frac(ctx.clipPads?.size || 0, p.count, 'pads')
+    case 'pads-in-loop': return frac([...(ctx.clipPads || [])].filter(x => !ctx.startPads?.has(x)).length, p.count, 'pads')
     case 'pad-empty': {
-      const was = !!ctx.startPads?.has(p.pad)
+      const was = !!(ctx.seenPads?.has(p.pad) || ctx.startPads?.has(p.pad))
       const gone = was && !ctx.clipPads?.has(p.pad)
       return { done: gone, progress: gone ? 1 : 0, label: gone ? 'wiped' : was ? 'wipe the pad' : 'record the pad first' }
     }

@@ -8,6 +8,7 @@ import { lessonById, evaluate, emptyProgress, parseProgress, markDone, setCalibr
 export const PROGRESS_KEY = 'synth_pads_lessons'
 const CAL_TAPS = 16
 const UPDATE_MS = 100
+const WINDOW_LAPS = 4
 
 /** Pad of the first target occurrence with absolute beat >= beat (wraps into the next loop), or null. */
 export function nextTarget(targets, loopBeats, beat) {
@@ -31,8 +32,6 @@ export function inBarWindow(beat, bpm, beatsPerBar, ms = 90) {
   return beatsToMs(Math.min(r, beatsPerBar - r), bpm) <= ms
 }
 
-const setsDiffer = (a, b) => a.size !== b.size || [...a].some(x => !b.has(x))
-
 export function createLessonSession({
   storage = null, getPads, getBpm, getLoopBeats, getBeatsPerBar = () => 4, getClipPads,
   applySetup = () => {}, onUpdate = () => {}, now = () => Date.now(), iso = () => new Date().toISOString()
@@ -50,7 +49,7 @@ export function createLessonSession({
   let lastEmit = 0
 
   const freshCtx = () => ({
-    loops: 0, calibration: null, startPads: new Set(getClipPads()), repeatBeats: 0,
+    loops: 0, calibration: null, startPads: new Set(getClipPads()), seenPads: new Set(), repeatBeats: 0,
     grooveHeard: [], snapHeard: [], mutesInTime: 0
   })
   const uniquePush = (arr, v) => { if (!arr.includes(v)) arr.push(v) }
@@ -60,10 +59,16 @@ export function createLessonSession({
     const pads = getPads()
     const offsetMs = progress.calibration?.offsetMs ?? 0
     const loopBeats = getLoopBeats()
+    const clipPads = getClipPads()
+    clipPads.forEach(p => ctx.seenPads.add(p))
+    // Score only the last WINDOW_LAPS laps: bounded cost, and early misses age out.
+    const lap = loopBeats > 0 ? Math.floor(Math.max(0, beat) / loopBeats) : 0
+    const fromBeat = Math.max(0, lap - (WINDOW_LAPS - 1)) * loopBeats
+    if (fromBeat > 0) hits = hits.filter(h => h.beat >= fromBeat - 1)
     const score = lesson.targets.length
-      ? scoreHits(hits, lesson.targets, { loopBeats, bpm: getBpm(), toBeat: Math.max(0, beat), offsetMs })
+      ? scoreHits(hits, lesson.targets, { loopBeats, bpm: getBpm(), toBeat: Math.max(0, beat), fromBeat, offsetMs })
       : null
-    const full = { ...ctx, score, clipPads: getClipPads(), pads }
+    const full = { ...ctx, score, clipPads, pads }
     const result = evaluate(lesson, full)
     if (result.done && !doneNow) {
       doneNow = true
@@ -75,7 +80,7 @@ export function createLessonSession({
       lesson, result, score, hints, taps: taps.length,
       calibration: ctx.calibration, nextPad: nextTarget(lesson.targets, loopBeats, Math.max(0, beat)),
       marks: score?.marks ?? [], biasMs: score?.biasMs ?? null,
-      done: doneNow || !!progress.done[lesson.id], progress
+      done: doneNow, completed: !!progress.done[lesson.id], progress
     }
   }
 
@@ -88,9 +93,9 @@ export function createLessonSession({
     start(id) {
       const l = lessonById(id)
       if (!l) return false
+      ctx = freshCtx()
       lesson = l
       applySetup(l)
-      ctx = freshCtx()
       hits = []; taps = []; run = null
       doneNow = false
       emit(0)
@@ -101,7 +106,10 @@ export function createLessonSession({
       onUpdate(null)
     },
     active: () => lesson,
-    restart() { hits = []; taps = []; run = null },
+    restart() {
+      hits = []; taps = []; run = null
+      if (ctx) Object.assign(ctx, { loops: 0, repeatBeats: 0, mutesInTime: 0, grooveHeard: [], snapHeard: [] })
+    },
     hit({ pad, beat, velocity, source }) {
       if (!lesson || !(beat >= 0)) return
       if (lesson.pass.type === 'calibration') {
@@ -127,6 +135,7 @@ export function createLessonSession({
     wrap() {
       if (!lesson) return
       ctx.loops++
+      if (!getClipPads().size) return   // nothing recorded: nothing to listen to
       const p = getPads()
       uniquePush(ctx.grooveHeard, p.groove)
       uniquePush(ctx.snapHeard, p.snapStrength)
@@ -137,8 +146,10 @@ export function createLessonSession({
     },
     padsChanged(prev, next, beat) {
       if (!lesson) return
-      if (setsDiffer(new Set(prev?.muted ?? []), new Set(next?.muted ?? [])) &&
-        inBarWindow(beat, getBpm(), getBeatsPerBar())) ctx.mutesInTime++
+      const a = new Set(prev?.muted ?? []), b = new Set(next?.muted ?? [])
+      const changed = [...a].filter(x => !b.has(x)).length + [...b].filter(x => !a.has(x)).length
+      const offBeats = ((progress.calibration?.offsetMs ?? 0) * getBpm()) / 60000   // the hand is late by the offset
+      if (changed && inBarWindow(beat - offBeats, getBpm(), getBeatsPerBar())) ctx.mutesInTime += changed
     },
     progress: () => progress,
     nextAfter: id => nextLesson(id, progress)

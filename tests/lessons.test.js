@@ -37,17 +37,18 @@ describe('evaluate', () => {
     expect(ev('l0', {}).done).toBe(false)
   })
   it('velocity', () => {
-    expect(ev('l1', { score: { velPct: 0.85 } }).done).toBe(true)
-    const r = ev('l1', { score: { velPct: 0.4 } })
+    expect(ev('l1', { score: { velPct: 0.85, fullLaps: 1 } }).done).toBe(true)
+    expect(ev('l1', { score: { velPct: 1, fullLaps: 0, total: 1 } }).done).toBe(false)   // one good hit is not a lap
+    const r = ev('l1', { score: { velPct: 0.4, fullLaps: 1 } })
     expect(r.done).toBe(false)
     expect(r.progress).toBeCloseTo(0.5)
     expect(ev('l1', { score: null }).progress).toBe(0)
   })
   it('score + loops', () => {
-    expect(ev('l2', { score: { goodPct: 0.8, total: 4 }, loops: 1 }).done).toBe(true)
-    expect(ev('l2', { score: { goodPct: 0.7, total: 4 }, loops: 3 }).done).toBe(false)
-    expect(ev('l3', { score: { goodPct: 0.9, total: 12 }, loops: 1 }).done).toBe(false)
-    const r = ev('l3', { score: { goodPct: 0.9, total: 12 }, loops: 2 })
+    expect(ev('l2', { score: { goodPct: 0.8, total: 4, fullLaps: 1 }, loops: 1 }).done).toBe(true)
+    expect(ev('l2', { score: { goodPct: 0.7, total: 4, fullLaps: 1 }, loops: 3 }).done).toBe(false)
+    expect(ev('l3', { score: { goodPct: 0.9, total: 12, fullLaps: 1 }, loops: 1 }).done).toBe(false)
+    const r = ev('l3', { score: { goodPct: 0.9, total: 12, fullLaps: 1 }, loops: 2 })
     expect(r.done).toBe(true)
     expect(r.label).toContain('2/2 loops')
   })
@@ -61,6 +62,18 @@ describe('evaluate', () => {
     expect(ev('l5', { clipPads: new Set([0, 2, 6]) }).done).toBe(true)
     expect(ev('l5', { clipPads: new Set([0, 2]) })).toMatchObject({ done: false, label: '2/3 pads' })
   })
+  it('score/phrase need one full resolved lap', () => {
+    expect(ev('l2', { score: { goodPct: 1, total: 1, fullLaps: 0 }, loops: 1 }).done).toBe(false)
+    expect(ev('l9', { score: { goodPct: 1, total: 1, fullLaps: 0 }, pads: { ladder: 'tune' } }).done).toBe(false)
+  })
+  it('pads-in-loop ignores pads already in the clip at start', () => {
+    expect(ev('l5', { startPads: new Set([0, 2, 6]), clipPads: new Set([0, 2, 6]) }).done).toBe(false)
+    expect(ev('l5', { startPads: new Set([0]), clipPads: new Set([0, 2, 6, 7]) }).done).toBe(true)
+  })
+  it('pad-empty counts a pad seen after start', () => {
+    expect(ev('l6', { startPads: new Set(), seenPads: new Set([0]), clipPads: new Set() }).done).toBe(true)
+    expect(ev('l6', { startPads: new Set(), seenPads: new Set(), clipPads: new Set() }).done).toBe(false)
+  })
   it('pad-empty needs start presence and absence now', () => {
     expect(ev('l6', { startPads: new Set([0, 1]), clipPads: new Set([1]) }).done).toBe(true)
     expect(ev('l6', { startPads: new Set([0, 1]), clipPads: new Set([0, 1]) }).done).toBe(false)
@@ -73,10 +86,10 @@ describe('evaluate', () => {
     expect(ev('l8', { snapHeard: [1] }).done).toBe(false)
   })
   it('phrase needs ladder on', () => {
-    const score = { goodPct: 0.8, total: 8 }
+    const score = { goodPct: 0.8, total: 8, fullLaps: 1 }
     expect(ev('l9', { score, pads: { ladder: 'tune' } }).done).toBe(true)
     expect(ev('l9', { score, pads: { ladder: null } }).done).toBe(false)
-    expect(ev('l9', { score: { goodPct: 0.5, total: 8 }, pads: { ladder: 'tune' } }).done).toBe(false)
+    expect(ev('l9', { score: { goodPct: 0.5, total: 8, fullLaps: 1 }, pads: { ladder: 'tune' } }).done).toBe(false)
   })
   it('mutes', () => {
     expect(ev('l10', { mutesInTime: 4 }).done).toBe(true)

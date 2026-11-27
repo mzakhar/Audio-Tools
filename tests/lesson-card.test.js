@@ -8,6 +8,7 @@ function setup(progress = emptyProgress()) {
   const d = document.getElementById('lesson-dialog')
   d.show = () => { d.open = true }
   d.showModal = () => { d.open = true }
+  d.close = () => { d.open = false; d.dispatchEvent(new Event('close')) }
   const session = { progress: () => progress, nextAfter: id => LESSONS[LESSONS.findIndex(l => l.id === id) + 1] ?? null }
   const onStart = vi.fn()
   const onStop = vi.fn()
@@ -35,6 +36,7 @@ describe('lesson card', () => {
 
   it('active view shows steps, max 2 hints, and Next only when done', () => {
     const { card } = setup()
+    card.open()
     card.render(model(LESSONS[2]))
     expect(document.querySelectorAll('.lesson-steps li').length).toBe(LESSONS[2].steps.length)
     expect(document.querySelectorAll('.lesson-hints li').length).toBe(2)
@@ -43,8 +45,43 @@ describe('lesson card', () => {
     expect(document.querySelector('[data-lesson-next]').dataset.lessonNext).toBe('l3')
   })
 
+  it('live updates keep the same DOM nodes and only change text', () => {
+    const { card } = setup()
+    card.open()
+    card.render(model(LESSONS[2]))
+    const stop = document.querySelector('[data-lesson-act="stop"]')
+    card.render({ ...model(LESSONS[2]), result: { done: false, progress: 0.6, label: '5/10 good' }, hints: ['x'] })
+    expect(document.querySelector('[data-lesson-act="stop"]')).toBe(stop)
+    expect(document.querySelector('.lesson-live').textContent).toBe('5/10 good')
+    expect(document.querySelectorAll('.lesson-hints li').length).toBe(1)
+  })
+
+  it('does not render while the dialog is closed', () => {
+    const { card } = setup()
+    card.render(model(LESSONS[2]))
+    expect(document.querySelector('.lesson-live')).toBeNull()
+  })
+
+  it('Escape closes the card and stops the lesson; open focuses the body, not the close button', () => {
+    const { card, onStop, d } = setup()
+    card.open()
+    expect(document.activeElement).toBe(document.getElementById('lesson-body'))
+    d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(d.open).toBe(false)
+    expect(onStop).toHaveBeenCalled()
+  })
+
+  it('notice shows in the active card', () => {
+    const { card } = setup()
+    card.open()
+    card.render(model(LESSONS[2]))
+    card.setNotice('No Pads track')
+    expect(document.querySelector('.lesson-notice').textContent).toBe('No Pads track')
+  })
+
   it('Stop calls onStop and returns to the picker', () => {
     const { card, onStop } = setup()
+    card.open()
     card.render(model(LESSONS[2]))
     document.querySelector('[data-lesson-act="stop"]').click()
     expect(onStop).toHaveBeenCalled()

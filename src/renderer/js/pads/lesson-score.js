@@ -9,10 +9,11 @@ export function markOf(errorMs, windows = WINDOWS) {
 }
 
 /** Every target repeated per loop, k >= 0, beat < toBeat, sorted by beat. */
-export function targetOccurrences(targets, { loopBeats, toBeat }) {
+export function targetOccurrences(targets, { loopBeats, toBeat, fromBeat = 0 }) {
   const out = []
+  const k0 = loopBeats > 0 ? Math.max(0, Math.floor(fromBeat / loopBeats)) : 0
   targets.forEach((t, idx) => {
-    for (let k = 0; k * loopBeats + t.beat < toBeat; k++) {
+    for (let k = k0; k * loopBeats + t.beat < toBeat; k++) {
       out.push({ idx, k, pad: t.pad, beat: k * loopBeats + t.beat, vel: t.vel })
     }
   })
@@ -26,9 +27,9 @@ const median = (xs) => {
 }
 const round1 = (x) => Math.round(x * 10) / 10
 
-export function scoreHits(hits, targets, { loopBeats, bpm, toBeat, offsetMs = 0, windows = WINDOWS, velBand = 16 }) {
-  const occ = targetOccurrences(targets, { loopBeats, toBeat })
-  const valid = hits.filter((h) => h.beat >= 0)
+export function scoreHits(hits, targets, { loopBeats, bpm, toBeat, fromBeat = 0, offsetMs = 0, windows = WINDOWS, velBand = 16 }) {
+  const occ = targetOccurrences(targets, { loopBeats, toBeat, fromBeat })
+  const valid = hits.filter((h) => h.beat >= 0 && h.beat >= fromBeat - 1)
   const pairs = []
   occ.forEach((o, oi) =>
     valid.forEach((h, hi) => {
@@ -57,7 +58,7 @@ export function scoreHits(hits, targets, { loopBeats, bpm, toBeat, offsetMs = 0,
       const velOk = o.vel == null ? null : Math.abs(h.velocity - o.vel) <= velBand
       marks.push({ idx: o.idx, k: o.k, pad: o.pad, beat: o.beat, mark: markOf(m.errorMs, windows), errorMs: m.errorMs, velocity: h.velocity, velOk })
     } else if (o.beat < overBeat) {
-      marks.push({ idx: o.idx, k: o.k, pad: o.pad, beat: o.beat, mark: 'miss', errorMs: null, velocity: null, velOk: null })
+      marks.push({ idx: o.idx, k: o.k, pad: o.pad, beat: o.beat, mark: 'miss', errorMs: null, velocity: null, velOk: o.vel == null ? null : false })
     } else pending++
   })
 
@@ -66,9 +67,13 @@ export function scoreHits(hits, targets, { loopBeats, bpm, toBeat, offsetMs = 0,
   const total = marks.length
   const matched = marks.filter((m) => m.errorMs != null)
   const velMarks = marks.filter((m) => m.velOk != null)
+  const perLap = new Map()
+  marks.forEach((m) => perLap.set(m.k, (perLap.get(m.k) || 0) + 1))
+  const fullLaps = [...perLap.values()].filter((n) => n >= targets.length).length
   return {
     marks,
     pending,
+    fullLaps,   // laps in the window with every target occurrence resolved
     extras: valid.filter((_, hi) => !usedHits.has(hi)),
     biasMs: matched.length ? matched.reduce((s, m) => s + m.errorMs, 0) / matched.length : null,
     counts,
