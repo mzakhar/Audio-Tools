@@ -43,7 +43,7 @@ load order to respect — import what you need.
 - **`app.js`** — wires everything together. Entry point is `boot()`, called on
   `DOMContentLoaded`.
 
-`ProjectStore` schema is at **version 6**, with `migrate()` in
+`ProjectStore` schema is at **version 7**, with `migrate()` in
 `src/renderer/js/store/ProjectStore.js` (`CURRENT_VERSION` at line 16). Bump both
 together and add a migration step; never renumber an existing one.
 

@@ -294,7 +294,7 @@ hit.
 | **2 Pads view core** — **built 2026-11-26** | F5 view, pad twins, loop strip on project transport, metronome + count-in, Layer / undo / Wipe, Snap, Groove, schema v7 kits | pure tests for groove + loop-record; jsdom view boot test extended |
 | **3 Performance** — **built 2026-11-26, awaiting hardware check** | Repeat (+pressure), Full, Ladder, banks A–D, Overlay menus, knob twins, help overlay, controller learn dialog, LED mirror if available | manual pass with hardware against the mapping table |
 | **4 Lessons** — **built 2026-11-27, awaiting hardware check** | calibration, scorer, lessons 0–10, progress, hints | scorer tests with synthetic early/late hit sets |
-| **5 Samples** | drop WAV on pad, slice to 16 (transient detect, PURE), lesson 11 | slicer tests on synthetic buffers |
+| **5 Samples** — **built 2026-11-27, awaiting hardware check** | drop WAV on pad, slice to 16 (transient detect, PURE), lesson 11 | slicer tests on synthetic buffers |
 
 Phase 1 is shippable alone and should fix most of today's complaint.
 
@@ -368,6 +368,21 @@ preset, on the device (LED `target`). Known limits: velocity is scored after the
 curve and Full; on a phone the card covers the lower pad rows (close it to play); Groove and
 Snap lessons credit a setting once a non-empty loop wraps with it, they cannot tell whether
 you listened.
+
+Phase 5 notes: `pads/slicer.js` (PURE onset envelope, peak picking, 16 contiguous regions
+snapped to zero crossings, bar/BPM estimate), `instruments/user-samples.js` (IndexedDB, works on
+the LAN route; id = 64-bit FNV pair + byte length, no secure-context API), kit slot
+`{ voice: 'sample', sampleId, name, start, end }` played as a region one-shot in
+`pads/kit-voices.js` (velocityGain, perf tune/decay/level, missing sample = silent, failed ids
+negative-cached until prewarm or a new put), `components/slice-dialog.js`, `pads/sample-drop.js`.
+Drop an audio file on a pad (<= 10 MB, <= 60 s) to load it there; drop on the strip/grid or press
+SLICE… to open the Slice dialog (<= 30 s): waveform, 16 markers, sensitivity, click a region to
+audition, "Set BPM to N", Apply = one "Slice sample" undo step on the armed kit, pads 1–16 of bank
+A. Play and bounce preload kit samples first. Lesson 11 "Slice" passes when a recorded pattern uses
+4 sample pads. Known limits: samples live in this browser's IndexedDB and do not travel with a
+saved project (a missing sample plays silent); a sample pad retriggers polyphonically (no self-choke);
+very short or silent files are refused; sliceRegions may return fewer than 16 regions for short
+material.
 
 ## Constraints that still apply
 
