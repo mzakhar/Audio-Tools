@@ -298,6 +298,17 @@ hit.
 
 Phase 1 is shippable alone and should fix most of today's complaint.
 
+LED slice (built 2026-11-26, awaiting hardware check): `pads/smc-pad-sysex.js` (PURE
+codec, byte vectors pinned to the probe that drove the device; no save command exists in
+it) and `pads/smc-pad-link.js` (request/reply shell). `MidiController` asks for
+`sysex: true` and falls back to plain access if refused. When the armed track plays a
+kit and the SMC-PAD is in a user preset, `app.js` paints pad *i* of all 8 banks in the
+active profile (region 4 byte 10) with its voice colour, writing only records whose
+colour differs, and maps every stored record note to kit note `36 + rec % 16`. The mode
+is polled every 2 s because the preset switch sends no MIDI. Performance mode is left
+alone. Not built yet: host blinks (target/mute/Wipe) need the Pads view; transpose and
+octave shift (SHIFT + Pad 13–16) move notes outside the record map and then play raw.
+
 Phase 1 notes: the kit is `{ type: 'kit', kitId: 'default-909' }` (code data in
 `pads/kit.js`, GM 36–51 distinct, no schema change). The velocity curve is applied in
 `MidiController` per input (SMC-PAD: `inMax` 110, linear), so recordings store what was
