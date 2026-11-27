@@ -101,6 +101,13 @@ export const LESSONS = [
     steps: ['Loop a full pattern: kick, snare, hats.', 'Hold O for the bank overlay.', 'Mute and unmute pads right on the bar line.', 'Land 4 mutes within 90 ms of a bar line.'],
     hints: ['Drop the hats for a bar, then bring everything back.'],
   }),
+  L(11, {
+    title: 'Slice', concept: 'Chop a drum loop onto 16 pads and play it back in a new order.',
+    bpm: 90, groove: 0.5, bars: 2,
+    pass: { type: 'sample-pads', count: 4 },
+    steps: ['Drop a drum loop on the pad grid (or press SLICE…).', 'Pick Slice to 16 and press Apply: the 16 pads now play the loop in order.', 'Turn Layer on and play the slices in a new order.', 'Record 4 different sample pads into the loop.'],
+    hints: ['Lower sensitivity gives fewer, bigger cuts; the rest are split evenly.', 'Click a region in the dialog to hear it first.'],
+  }),
 ]
 
 export function lessonById(id) { return LESSONS.find(l => l.id === id) || null }
@@ -149,6 +156,7 @@ export function evaluate(lesson, ctx = {}) {
       return { done: b >= p.beats, progress: clamp01(b / p.beats), label: `${Math.min(Math.floor(b), p.beats)}/${p.beats} beats` }
     }
     case 'pads-in-loop': return frac([...(ctx.clipPads || [])].filter(x => !ctx.startPads?.has(x)).length, p.count, 'pads')
+    case 'sample-pads': return frac([...(ctx.clipPads || [])].filter(x => ctx.samplePads?.has(x) && !ctx.startPads?.has(x)).length, p.count, 'sample pads')
     case 'pad-empty': {
       const was = !!(ctx.seenPads?.has(p.pad) || ctx.startPads?.has(p.pad))
       const gone = was && !ctx.clipPads?.has(p.pad)

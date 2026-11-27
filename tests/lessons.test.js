@@ -5,10 +5,10 @@ import { LESSONS, lessonById, nextLesson, evaluate, emptyProgress, parseProgress
 const ev = (id, ctx) => evaluate(lessonById(id), ctx)
 
 describe('LESSONS data', () => {
-  it('is 0..10 with unique ids and n == index', () => {
-    expect(LESSONS).toHaveLength(11)
+  it('is 0..11 with unique ids and n == index', () => {
+    expect(LESSONS).toHaveLength(12)
     LESSONS.forEach((l, i) => expect(l.n).toBe(i))
-    expect(new Set(LESSONS.map(l => l.id)).size).toBe(11)
+    expect(new Set(LESSONS.map(l => l.id)).size).toBe(12)
   })
   it.each(LESSONS.map(l => [l.id, l]))('%s is valid', (_, l) => {
     expect(l.title && l.concept).toBeTruthy()
@@ -95,12 +95,20 @@ describe('evaluate', () => {
     expect(ev('l10', { mutesInTime: 4 }).done).toBe(true)
     expect(ev('l10', { mutesInTime: 3 }).done).toBe(false)
   })
+  it('sample-pads counts new clip pads that hold samples', () => {
+    const samplePads = new Set([0, 1, 2, 3, 4])
+    const base = { samplePads, startPads: new Set([4]) }
+    expect(ev('l11', { ...base, clipPads: new Set([0, 1, 2, 3]) })).toMatchObject({ done: true, progress: 1 })
+    expect(ev('l11', { ...base, clipPads: new Set([0, 1, 2, 4]) }).done).toBe(false)   // 4 was in the clip at start
+    expect(ev('l11', { ...base, clipPads: new Set([0, 1, 2, 9]) }).done).toBe(false)   // 9 is not a sample pad
+    expect(ev('l11', { clipPads: new Set([0, 1, 2, 3]) }).done).toBe(false)             // no sample pads at all
+  })
 })
 
 describe('progress', () => {
   it('nextLesson skips done and wraps', () => {
     expect(nextLesson('l0', emptyProgress()).id).toBe('l1')
-    expect(nextLesson('l10', emptyProgress()).id).toBe('l0')
+    expect(nextLesson('l11', emptyProgress()).id).toBe('l0')
     let p = emptyProgress()
     p = markDone(p, 'l1', 'x')
     expect(nextLesson('l0', p).id).toBe('l2')

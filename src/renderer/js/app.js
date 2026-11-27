@@ -23,7 +23,11 @@ import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from './playb
 import MidiController from './midi/MidiController.js'
 import { groupInputs } from './midi/device-group.js'
 import { createSmcPadLink } from './pads/smc-pad-link.js'
-import { kitFor, padColours, DEFAULT_KIT_ID } from './pads/kit.js'
+import { kitFor, padColours, DEFAULT_KIT_ID, sampleSlot, sliceSlots } from './pads/kit.js'
+import { createUserSamples } from './instruments/user-samples.js'
+import { createSliceDialog } from './components/slice-dialog.js'
+import { checkSampleFile, padEndSec, slotCommands, samplePadsOf, MAX_SLICE_SEC } from './pads/sample-drop.js'
+import { mono, trimEnd } from './pads/slicer.js'
 import { createLoopPlayer } from './pads/loop-player.js'
 import { createPadsSession, canRecordHit } from './pads/pads-session.js'
 import { playClick } from './pads/click.js'
@@ -784,6 +788,67 @@ const padsClick = selector => _padsView?.container.querySelector(selector)?.clic
 const padsHold = (selector, down) => _padsView?.container.querySelector(selector)
   ?.dispatchEvent(new Event(down ? 'pointerdown' : 'pointerup', { bubbles: true }))
 
+// ─── Sample drops (Pads view) ───────────────────────────────────────────────
+let _userSamples = null
+const userSampleStorage = () => (_userSamples ??= createUserSamples())
+let _sliceDialog = null
+
+/** File -> { bytes, buffer, name } or { error } (a short message for the toast). Never throws. */
+async function decodeDropped(file) {
+  const check = checkSampleFile(file)
+  if (!check.ok) return { error: check.reason }
+  let bytes
+  try { bytes = await file.arrayBuffer() } catch { return { error: 'Could not read file' } }
+  try {
+    await ensureAudio()
+    const buffer = await AudioEngine.getContext().decodeAudioData(bytes.slice(0))
+    return { bytes, buffer, name: file.name.replace(/\.[^.]+$/, '') }
+  } catch { return { error: 'Could not decode audio' } }
+}
+
+function putSlots(kitId, slots, label) {
+  const kit = kitFor(kitId, _hot.kits)
+  ProjectStore.dispatchBatch(slotCommands(kitId, kit, !!_hot.kits?.[kitId], slots), label)
+  refreshPadLeds()
+}
+
+async function onPadsDropFile(file, { pad = null, note = null } = {}) {
+  const kitId = armedKitId()
+  if (!kitId) return showToast('Arm a kit track first')
+  const got = await decodeDropped(file)
+  if (got.error) return showToast(got.error)
+  if (pad == null) {
+    if (got.buffer.duration > MAX_SLICE_SEC) return showToast(`Too long to slice (max ${MAX_SLICE_SEC} s)`)
+    _sliceDialog ??= createSliceDialog({
+      onApply: applySlice,
+      onSetBpm: bpm => ProjectStore.dispatch(SetBpm(bpm)),
+      audition: (buffer, start, end) => {
+        const ctx = AudioEngine.getContext()
+        if (!ctx) return
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        src.connect(AudioEngine.getMasterInput())
+        src.start(0, start, end - start)
+      }
+    })
+    return _sliceDialog.open(got)
+  }
+  let stored
+  try { stored = await userSampleStorage().put({ name: file.name, type: file.type, bytes: got.bytes }) } catch { return showToast('Could not store sample') }
+  const { buffer } = got
+  const trimmed = trimEnd(mono(Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i))))
+  const slot = sampleSlot({ sampleId: stored.id, name: got.name, start: 0, end: padEndSec(trimmed, buffer.sampleRate) })
+  putSlots(kitId, { [note ?? 36 + pad]: slot }, 'Load sample')
+}
+
+async function applySlice({ regions, sampleRate, name, bytes }) {
+  const kitId = armedKitId()
+  if (!kitId) return
+  let stored
+  try { stored = await userSampleStorage().put({ name, type: 'audio/*', bytes }) } catch { return showToast('Could not store sample') }
+  putSlots(kitId, sliceSlots(regions, sampleRate, { sampleId: stored.id, name }), 'Slice sample')
+}
+
 function armedKitId() {
   const instrument = _hot.byId.get(_hot.armedId)?.instrument
   return instrument?.type === 'kit' ? instrument.kitId : null
@@ -937,6 +1002,7 @@ function initPadsView() {
     onUndo: () => { _padsSession.undo(); _padsView.drawStrip() },
     onLayerChange: on => { if (!on) commitPadsPass() },
     onKnob: padsKnob,
+    onDropFile: onPadsDropFile,
     getBpm: () => _hot.bpm,
     onAction: (action, payload) => {
       if (action === 'repeat') setRepeatHeld(!!payload?.pressed)
@@ -961,6 +1027,7 @@ function initLessons() {
     getLoopBeats: padsLoopBeats,
     getBeatsPerBar: () => _hot.beatsPerBar,
     getClipPads: () => new Set((_padsSession?.notes(_hot.armedId) ?? []).map(n => n.pitch - 36).filter(p => p >= 0 && p < 16)),
+    getSamplePads: () => { const id = armedKitId(); return samplePadsOf(id && kitFor(id, _hot.kits)) },
     applySetup: lesson => {
       ProjectStore.dispatchBatch([
         SetBpm(lesson.bpm),
