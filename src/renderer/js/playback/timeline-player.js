@@ -11,6 +11,7 @@ import { sampleInstrumentFor } from '../instruments/sample-instrument.js'
 import { paletteDefaults } from '../palettes.js'
 import { kitFor } from '../pads/kit.js'
 import { kitInstrument } from '../pads/kit-voices.js'
+import { userSampleStoreFor as defaultUserSampleStoreFor } from '../instruments/user-samples.js'
 
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
@@ -30,7 +31,7 @@ export function rackInstrument(handle, moduleId) {
 }
 
 /** Shared by the timeline and the step sequencer: one scheduled note contract. */
-export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, packInstruments }) {
+export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, packInstruments }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)
@@ -54,7 +55,7 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
   if (instrument.type === 'kit') {
     const kit = kitFor(instrument.kitId, kits)
     if (!kit) return null
-    const inst = kitInstrument(kit, { ctx, output })
+    const inst = kitInstrument(kit, { ctx, output, sampleStore: userSampleStoreFor?.(ctx) })
     return (note, time) => inst.hit(note.pitch, note.velocity ?? 0.8, time)
   }
   if (instrument.type !== 'palette') return null
@@ -63,6 +64,18 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
   const params = instrument.params || paletteDefaults(paletteKey)
   return palette ? paletteInstrument(palette, ctx, output, params) : null
 }
+
+/** Sample ids used by the kit tracks' sample slots (deduped). */
+export function kitSampleIds(tracks, kits) {
+  const ids = tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'kit')
+    .flatMap(track => Object.values(kitFor(track.instrument.kitId, kits)?.slots ?? {}))
+    .filter(def => def.voice === 'sample').map(def => def.sampleId)
+  return [...new Set(ids)]
+}
+
+/** Decode every kit sample into `store`; a missing one stays silent. */
+export const preloadKitSamples = (store, tracks, kits) =>
+  store ? Promise.allSettled(kitSampleIds(tracks, kits).map(id => store.get(id))).then(() => {}) : Promise.resolve()
 
 const TimelinePlayer = {
   _sources: [],           // active AudioBufferSourceNode[]
@@ -219,7 +232,7 @@ const TimelinePlayer = {
     return this._startBeat + (elapsed / (60 / bpm))
   },
 
-  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, kits, packFor, sampleStoreFor, palettes = null }) {
+  async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, kits, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, palettes = null }) {
     const totalSeconds = beatsToSeconds(durationBeats, bpm)
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05
@@ -239,10 +252,13 @@ const TimelinePlayer = {
       if (!store) { missing.push(`${track.instrument.packId}@${track.instrument.packVersion}:${track.instrument.patchId}`); continue }
       try { await store.preload((patch.zones || []).map(zone => zone.sampleId)) } catch (error) { missing.push(error.message) }
     }
+    // Kit sample slots: decode into the offline store before render. A missing sample bounces silent, like a missing sample live.
+    const kitStore = userSampleStoreFor?.(offline)
+    await preloadKitSamples(kitStore, tracks, kits)
     if (missing.length) throw new Error(`Missing pack samples: ${missing.join(', ')}`)
     tracks.forEach(track => {
       if (track.type === 'midi') {
-        const playNote = instrumentFor(track, { palettes, ctx: offline, output: offline.destination, rackHandles, kits, packFor, sampleStoreFor, packInstruments })
+        const playNote = instrumentFor(track, { palettes, ctx: offline, output: offline.destination, rackHandles, kits, packFor, sampleStoreFor, userSampleStoreFor, packInstruments })
         for (const clip of track.clips) for (const note of clip.notes || []) {
           if (clip.type !== 'midi') continue
           const at = startTime + beatsToSeconds(clip.startBeat + note.startBeat, bpm)

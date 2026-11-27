@@ -51,6 +51,8 @@
 .pads-pad[data-voice="mt"] { --pad: var(--track-6); }
 .pads-pad[data-voice="ht"] { --pad: var(--track-7); }
 .pads-pad[data-voice="cr"], .pads-pad[data-voice="rd"] { --pad: var(--track-8); }
+.pads-pad[data-sample="1"] { --pad: var(--track-6); }
+.pads-pad[data-drop="on"], .pads-strip[data-drop="on"], .pads-grid[data-drop="on"] { outline: 2px dashed var(--focus); outline-offset: 2px; }
 
 @media (max-width: 480px) {
   #pads-view { padding: 0 6px 40px; }

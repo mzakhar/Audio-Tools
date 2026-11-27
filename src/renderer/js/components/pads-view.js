@@ -5,6 +5,7 @@ import { withAlpha } from './canvas-colors.js'
 import { REPEAT_RATES } from '../pads/repeat.js'
 import { ghostRects, markRects, biasPos, biasText } from '../pads/lesson-strip.js'
 import { KNOB_ROLES, knobLabel } from '../pads/knob-roles.js'
+import { slotLabel } from '../pads/kit.js'
 
 const FIRST_NOTE = 36
 const BANKS = ['A', 'B', 'C', 'D']
@@ -33,6 +34,7 @@ export const HELP = {
   overlayMenu: 'Which menu the pads show while Overlay is held: Mute, Bank, Rate or Ladder.',
   learn: 'Learn: map your controller\'s buttons and knobs.',
   lessons: 'Lessons: short exercises on your own pads. Scores timing against the click.',
+  slice: 'Slice: pick an audio file, cut it into 16 pads. You can also drop a file on a pad (one pad) or the grid (slice).',
   layer: 'Layer: record what you play into the loop.',
   wipe: 'Wipe (hold): erase what the playhead passes for the pads you touch.',
   undo: 'Undo the last pass.',
@@ -50,7 +52,7 @@ const PAD_ROWS = [[12, 13, 14, 15], [8, 9, 10, 11], [4, 5, 6, 7], [0, 1, 2, 3]]
 // Computer-key twins in the same shape; registered by app.js in the 'pads' context.
 export const PAD_KEY_ROWS = [['1', '2', '3', '4'], ['q', 'w', 'e', 'r'], ['a', 's', 'd', 'f'], ['z', 'x', 'c', 'v']]
 // voice -> --track-N colour slot
-const VOICE_TRACK = { bd: 1, sd: 2, rs: 3, cp: 3, ch: 4, oh: 4, lt: 5, mt: 6, ht: 7, cr: 8, rd: 8 }
+const VOICE_TRACK = { bd: 1, sd: 2, rs: 3, cp: 3, ch: 4, oh: 4, lt: 5, mt: 6, ht: 7, cr: 8, rd: 8, sample: 6 }   // sample slots share --track-6 (one fixed token, no new colours)
 const STRIP_TOKENS = [
   'canvas-bg', 'canvas-ruler-bg', 'canvas-ruler-ink', 'canvas-grid-bar', 'canvas-grid-beat',
   'canvas-playhead', 'text-dim', 'font-mono', 'canvas-meter-ok', 'canvas-note', 'canvas-meter-hot', 'canvas-meter-clip', ...Array.from({ length: 8 }, (_, i) => `track-${i + 1}`),
@@ -111,6 +113,8 @@ export class PadsView {
     this._ro?.disconnect()
     document.removeEventListener('keydown', this._onKey)
     document.removeEventListener('keyup', this._onKey)
+    document.removeEventListener('dragover', this._onDocDrag)
+    document.removeEventListener('drop', this._onDocDrag)
     for (const id of [...this._flashTimers.values(), ...this._pulseTimers.values()]) clearTimeout(id)
     this._flashTimers.clear()
     this._pulseTimers.clear()
@@ -271,7 +275,7 @@ export class PadsView {
       const note = this._noteOf(i)
       const slot = this._slotOf(note)
       const voice = slot?.voice ?? ''
-      let name = voice ? voice.toUpperCase() : '—'
+      let name = slotLabel(slot)
       if (this.overlay) {
         const m = this.overlayMenu
         name = m === 'MUTE' ? name
@@ -280,11 +284,12 @@ export class PadsView {
           : (LADDER_PARAMS[i]?.slice(0, 4).toUpperCase() ?? '')
       }
       el.dataset.voice = voice
+      el.dataset.sample = slot?.voice === 'sample' ? '1' : ''
       el.toggleAttribute('data-empty', !slot)
       el.toggleAttribute('data-muted', p.muted.includes(note))
       el.setAttribute('aria-disabled', slot ? 'false' : 'true')
       el.querySelector('.pads-pad-name').textContent = name
-      el.setAttribute('aria-label', `Pad ${i + 1}${voice ? ` ${voice.toUpperCase()}` : ' empty'}${p.muted.includes(note) ? ' muted' : ''}`)
+      el.setAttribute('aria-label', `Pad ${i + 1}${slot ? ` ${slotLabel(slot)}` : ' empty'}${p.muted.includes(note) ? ' muted' : ''}`)
     })
     this._sig = this._viewSig()
     this.drawStrip()
@@ -387,6 +392,8 @@ export class PadsView {
               <label class="pads-field"><span class="micro-label">SNAP</span>
                 <select class="pads-snap" aria-label="Snap grid">${grids}</select></label>
               <button type="button" class="btn pads-learn" data-help="learn" aria-label="Controller learn">LEARN</button>
+              <button type="button" class="btn pads-slice" data-help="slice" aria-label="Slice a sample file to 16 pads">SLICE…</button>
+              <input type="file" class="pads-file" accept="audio/*" hidden>
               <button type="button" class="btn pads-lessons" data-help="lessons" aria-label="Lessons">LESSONS</button>
             </div>
             <div class="pads-knobs" role="group" aria-label="Knobs">${knobs}</div>
@@ -400,7 +407,7 @@ export class PadsView {
       metro: $('.pads-metro'), countin: $('.pads-countin'), bars: $('.pads-bars'),
       snap: $('.pads-snap'), strip: $('.pads-strip'),
       repeat: $('.pads-repeat'), full: $('.pads-full'), overlay: $('.pads-overlay'), overlayMenu: $('.pads-overlay-menu'),
-      ladder: $('.pads-ladder'), rate: $('.pads-rate'), learn: $('.pads-learn'), lessons: $('.pads-lessons'), bias: $('.pads-bias'), help: $('.pads-help'),
+      ladder: $('.pads-ladder'), rate: $('.pads-rate'), learn: $('.pads-learn'), lessons: $('.pads-lessons'), slice: $('.pads-slice'), file: $('.pads-file'), bias: $('.pads-bias'), help: $('.pads-help'),
       banks: [...this.container.querySelectorAll('.pads-bank')], knobs: [...this.container.querySelectorAll('.pads-knob')],
     }
     this.padEls = new Map([...this.container.querySelectorAll('.pads-pad')].map(el => [Number(el.dataset.pad), el]))
@@ -470,6 +477,37 @@ export class PadsView {
     el.lessons.addEventListener('click', () => this.opts.onAction?.('lessons', {}))
     el.banks.forEach((b, i) => b.addEventListener('click', () => this.setBank(i)))
 
+    // File drops: a pad takes the whole file, anywhere else on the shell opens the slicer.
+    const dropTo = (target, pad) => {
+      target.addEventListener('dragover', e => {
+        if (!e.dataTransfer?.types?.includes?.('Files')) return
+        e.preventDefault()
+        e.stopPropagation()
+        target.dataset.drop = 'on'
+      })
+      target.addEventListener('dragleave', e => { if (!target.contains(e.relatedTarget)) delete target.dataset.drop })
+      target.addEventListener('drop', e => {
+        e.preventDefault()
+        e.stopPropagation()
+        delete target.dataset.drop
+        const files = e.dataTransfer?.files
+        if (files?.[0]) this.opts.onDropFile?.(files[0], { pad, note: pad == null ? null : this._noteOf(pad), count: files.length })
+      })
+    }
+    // A file dropped anywhere else would navigate the window to it.
+    this._onDocDrag = e => { if (e.dataTransfer?.types?.includes?.('Files')) e.preventDefault() }
+    document.addEventListener('dragover', this._onDocDrag)
+    document.addEventListener('drop', this._onDocDrag)
+    this.padEls.forEach((pad, i) => dropTo(pad, i))
+    dropTo(el.strip, null)
+    dropTo(this.container.querySelector('.pads-grid'), null)
+    el.slice.addEventListener('click', () => el.file.click())
+    el.file.addEventListener('change', () => {
+      const file = el.file.files?.[0]
+      el.file.value = ''
+      if (file) this.opts.onDropFile?.(file, { pad: null, note: null })
+    })
+
     // Knob twins: drag vertically (8 px per detent), wheel, arrow keys.
     el.knobs.forEach((k, i) => {
       let lastY = null
@@ -527,7 +565,7 @@ export class PadsView {
     const p = this._pads
     const slots = this.opts.getKit?.()?.slots ?? {}
     const notes = (this.opts.getNotes?.() ?? []).map(n => [n.pitch, n.startBeat, n.duration, n.velocity])
-    return JSON.stringify([Object.entries(slots).map(([n, s]) => [n, s.voice]), p.muted, p.ladder, this.bank, this.overlay, this.overlayMenu, p.loopBars, this._beatsPerBar, notes])
+    return JSON.stringify([Object.entries(slots).map(([n, s]) => [n, s.voice, s.sampleId, s.name]), p.muted, p.ladder, this.bank, this.overlay, this.overlayMenu, p.loopBars, this._beatsPerBar, notes])
   }
 
   // ─── Loop strip ─────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@ export function inBarWindow(beat, bpm, beatsPerBar, ms = 90) {
 }
 
 export function createLessonSession({
-  storage = null, getPads, getBpm, getLoopBeats, getBeatsPerBar = () => 4, getClipPads,
+  storage = null, getPads, getBpm, getLoopBeats, getBeatsPerBar = () => 4, getClipPads, getSamplePads = () => new Set(),
   applySetup = () => {}, onUpdate = () => {}, now = () => Date.now(), iso = () => new Date().toISOString()
 }) {
   let progress = emptyProgress()
@@ -68,7 +68,7 @@ export function createLessonSession({
     const score = lesson.targets.length
       ? scoreHits(hits, lesson.targets, { loopBeats, bpm: getBpm(), toBeat: Math.max(0, beat), fromBeat, offsetMs })
       : null
-    const full = { ...ctx, score, clipPads, pads }
+    const full = { ...ctx, score, clipPads, pads, samplePads: getSamplePads() }
     const result = evaluate(lesson, full)
     if (result.done && !doneNow) {
       doneNow = true

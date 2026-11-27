@@ -3,6 +3,12 @@ import ProjectStore, { SetPadsSettings } from '../src/renderer/js/store/ProjectS
 import { PadsView } from '../src/renderer/js/components/pads-view.js'
 import { KITS } from '../src/renderer/js/pads/kit.js'
 
+// slotLabel ships with the engine slice (pads/kit.js); fall back to its contract until that merges.
+vi.mock('../src/renderer/js/pads/kit.js', async orig => {
+  const m = await orig()
+  return { ...m, slotLabel: m.slotLabel ?? (s => (!s ? '—' : s.voice === 'sample' ? (s.name ?? '').slice(0, 8) : s.voice.toUpperCase())) }
+})
+
 let root, view, triggerPad
 const mount = (extra = {}) => {
   root = document.createElement('div')
@@ -359,4 +365,97 @@ describe('pads view', () => {
     dlg.remove()
   })
 
+
+  describe('file drops', () => {
+    const file = { name: 'loop.wav' }
+    const drop = (el, files = [file]) => {
+      const ev = new Event('drop', { bubbles: true, cancelable: true })
+      ev.dataTransfer = { files, types: ['Files'] }
+      el.dispatchEvent(ev)
+    }
+    const dragover = el => {
+      const ev = new Event('dragover', { bubbles: true, cancelable: true })
+      ev.dataTransfer = { types: ['Files'] }
+      el.dispatchEvent(ev)
+      return ev
+    }
+
+    it('a pad drop passes the pad and its banked note; dragover marks it as a target', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      const ev = dragover(pad(3))
+      expect(ev.defaultPrevented).toBe(true)
+      expect(pad(3).dataset.drop).toBe('on')
+      drop(pad(3))
+      expect(pad(3).dataset.drop).toBeUndefined()
+      expect(onDropFile).toHaveBeenCalledWith(file, { pad: 3, note: 39, count: 1 })
+      view.setBank(1)
+      drop(pad(3))
+      expect(onDropFile).toHaveBeenLastCalledWith(file, { pad: 3, note: 55, count: 1 })
+    })
+
+    it('strip and grid drops pass pad null; the pad does not also fire', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      drop(root.querySelector('.pads-strip'))
+      drop(root.querySelector('.pads-grid'))
+      expect(onDropFile.mock.calls).toEqual([[file, { pad: null, note: null, count: 1 }], [file, { pad: null, note: null, count: 1 }]])
+    })
+
+    it('multiple files: first is used and the count is reported', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      drop(pad(0), [file, { name: 'b.wav' }])
+      expect(onDropFile).toHaveBeenCalledWith(file, { pad: 0, note: 36, count: 2 })
+    })
+
+    it('dragleave into a child keeps the outline; document-level file drag is cancelled until destroy', () => {
+      mount({})
+      const grid = root.querySelector('.pads-grid')
+      dragover(grid)
+      const leave = new Event('dragleave', { bubbles: true })
+      leave.relatedTarget = pad(0)
+      grid.dispatchEvent(leave)
+      expect(grid.dataset.drop).toBe('on')
+      const ev = dragover(document.body)
+      expect(ev.defaultPrevented).toBe(true)
+      const plain = new Event('dragover', { bubbles: true, cancelable: true })
+      plain.dataTransfer = { types: ['text/plain'] }
+      document.body.dispatchEvent(plain)
+      expect(plain.defaultPrevented).toBe(false)
+      view.destroy()
+      expect(dragover(document.body).defaultPrevented).toBe(false)
+    })
+
+    it('a drop with no file does nothing', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      drop(pad(0), [])
+      expect(onDropFile).not.toHaveBeenCalled()
+    })
+
+    it('SLICE... opens the picker and forwards the chosen file with pad null', () => {
+      const onDropFile = vi.fn()
+      mount({ onDropFile })
+      const input = root.querySelector('.pads-file')
+      const click = vi.spyOn(input, 'click')
+      root.querySelector('.pads-slice').click()
+      expect(click).toHaveBeenCalled()
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      input.dispatchEvent(new Event('change'))
+      expect(onDropFile).toHaveBeenCalledWith(file, { pad: null, note: null })
+    })
+
+    it('sample pads are labelled from the slot and repaint when the sample changes', () => {
+      let slot = { voice: 'sample', sampleId: 'smp-1', name: 'amen break', start: 0, end: 1 }
+      const kit = { slots: { ...KITS['default-909'].slots, 36: slot } }
+      mount({ getKit: () => kit })
+      expect(pad(0).querySelector('.pads-pad-name').textContent).toBe('amen bre')
+      expect(pad(0).dataset.sample).toBe('1')
+      slot = { ...slot, sampleId: 'smp-2', name: 'other' }
+      kit.slots[36] = slot
+      view.sync()
+      expect(pad(0).querySelector('.pads-pad-name').textContent).toBe('other')
+    })
+  })
 })

@@ -43,6 +43,20 @@ export const KITS = {
   }
 }
 
+/** A pad that plays a region (seconds) of a stored user sample. */
+export const sampleSlot = ({ sampleId, name, start, end }) => ({ voice: 'sample', sampleId, name, start, end })
+
+/** 16 slots for pads 0..15 (notes 36..51) from slicer regions given in sample indexes. */
+export function sliceSlots(regions, sampleRate, { sampleId, name }) {
+  return Object.fromEntries(regions.map((r, i) => [36 + i, sampleSlot({ sampleId, name: `${name} ${i + 1}`, start: r.start / sampleRate, end: r.end / sampleRate })]))
+}
+
+/** Short pad label: 909 voice upper-case, sample name cut to 8, '—' when empty. */
+export function slotLabel(slotDef) {
+  if (!slotDef) return '—'
+  return slotDef.voice === 'sample' ? String(slotDef.name || 'sample').slice(0, 8) : slotDef.voice.toUpperCase()
+}
+
 export const DEFAULT_KIT_ID = 'default-909'
 
 /** Kit for an id, or null — an unknown kit is silent, like a missing pack. */
@@ -80,7 +94,8 @@ const VOICE_RGB = {
   mt: [0, 255, 120],
   ht: [0, 200, 255],
   cr: [0, 60, 255],
-  rd: [0, 60, 255]
+  rd: [0, 60, 255],
+  sample: [255, 0, 140]
 }
 
 /** Colour of each of the 16 pads (pad i plays note 36 + i); null where a pad has no voice. */

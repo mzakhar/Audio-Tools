@@ -4,6 +4,7 @@
 
 import { createTr909Voice, metalBuffer } from '../drums/tr909-kit.js'
 import { slotParams, velocityTimbre } from './kit.js'
+import { velocityGain } from '../utils/velocity.js'
 
 const CHOKE_TC = 0.005 // seconds, duck time constant
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
@@ -31,7 +32,35 @@ function perform(params, o) {
 }
 
 /** perfFor(note) -> the slot's current perf layer; lets a live instrument follow knob moves without being rebuilt (default: the layer the kit carried at build time). */
-export function kitInstrument(kit, { ctx, output, perfFor }) {
+/** One-shot region of a decoded buffer. Tune bends the rate, decayMul shortens the tail, level scales gain. */
+function playSample(ctx, target, def, vel01, t, perf, buffer) {
+  const start = clamp(def.start ?? 0, 0, buffer.duration)
+  const end = clamp(def.end ?? buffer.duration, start, buffer.duration)
+  const rate = 2 ** ((perf?.tuneSt ?? 0) / 12)
+  const len = Math.max((end - start) / rate * Math.min(1, perf?.decayMul ?? 1), 0.005)
+  const fade = Math.min(0.02, len / 2)
+  const level = velocityGain(vel01 * 127) * (def.gain ?? 1) * (perf?.level ?? 1)
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(level, t)
+  gain.gain.setValueAtTime(level, t + len - fade)
+  gain.gain.linearRampToValueAtTime(0, t + len)
+  gain.connect(target)
+  const src = ctx.createBufferSource()
+  src.buffer = buffer
+  src.playbackRate.value = rate
+  src.connect(gain)
+  src.start(t, start, len * rate)
+  src.stop(t + len + 0.01)
+}
+
+const misses = new WeakMap()
+/** Per-sample-store set of ids whose load failed: a missing sample is not re-read on every hit. */
+export function missesOf(store) {
+  if (!misses.has(store)) misses.set(store, new Set())
+  return misses.get(store)
+}
+
+export function kitInstrument(kit, { ctx, output, perfFor, sampleStore }) {
   const open = new Map() // group → gain node carrying the sounding open voice
 
   const duck = (group, t) => {
@@ -58,6 +87,14 @@ export function kitInstrument(kit, { ctx, output, perfFor }) {
         open.set(def.group, target)
       } else duck(def.group, t)
     }
+    if (def.voice === 'sample') {
+      const buffer = sampleStore?.peek(def.sampleId)
+      if (buffer) playSample(ctx, target, def, vel01, t, combine(perfFor ? perfFor(pitch) : def.perf, override), buffer)
+      else if (sampleStore && !missesOf(sampleStore).has(def.sampleId)) {
+        sampleStore.get(def.sampleId).catch(() => missesOf(sampleStore).add(def.sampleId)) // silent this hit; the next one plays
+      }
+      return
+    }
     createTr909Voice(ctx, target, def.voice, { [def.voice]: params }, { velocity: vel01, accent }, t)
   }
 
@@ -67,7 +104,17 @@ export function kitInstrument(kit, { ctx, output, perfFor }) {
     noteOff() {},
     send() {},
     // Build the ROM buffers now so the first hat/crash is not a synth stall.
-    prewarm() { for (const kind of ['hat', 'crash', 'ride']) metalBuffer(ctx, kind) },
+    // Resolves once this kit's user samples are decoded; a missing one must not fail the rest.
+    prewarm() {
+      for (const kind of ['hat', 'crash', 'ride']) metalBuffer(ctx, kind)
+      const ids = Object.values(kit.slots).filter(d => d.voice === 'sample').map(d => d.sampleId)
+      if (!sampleStore || !ids.length) return Promise.resolve()
+      const miss = missesOf(sampleStore)
+      return Promise.allSettled([...new Set(ids)].map(id => {
+        miss.delete(id) // prewarm retries
+        return sampleStore.get(id).catch(error => { miss.add(id); throw error })
+      })).then(() => {})
+    },
     dispose() { for (const group of [...open.keys()]) duck(group, ctx.currentTime) }
   }
 }

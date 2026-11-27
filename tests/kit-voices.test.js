@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { kitFor } from '../src/renderer/js/pads/kit.js'
-import { kitInstrument } from '../src/renderer/js/pads/kit-voices.js'
+import { kitInstrument, missesOf } from '../src/renderer/js/pads/kit-voices.js'
 
 function makeCtx() {
   const gains = []
@@ -134,5 +134,23 @@ describe('kitInstrument perfFor', () => {
     const plain = longest()
     perf = { decayMul: 0.5 }
     expect(longest()).toBeLessThan(plain)
+  })
+})
+
+describe('kitInstrument missing sample', () => {
+  const k = { slots: { 36: { voice: 'sample', sampleId: 'smp-x', start: 0, end: 1 } } }
+  it('a failed load is not retried per hit; prewarm retries; deleting the miss re-enables', async () => {
+    const ctx = makeCtx()
+    const get = vi.fn(() => Promise.reject(new Error('gone')))
+    const sampleStore = { peek: () => null, get }
+    const inst = kitInstrument(k, { ctx, output: {}, sampleStore })
+    inst.hit(36, 1); await Promise.resolve(); await Promise.resolve()
+    inst.hit(36, 1); inst.hit(36, 1)
+    expect(get).toHaveBeenCalledTimes(1)
+    await inst.prewarm()
+    expect(get).toHaveBeenCalledTimes(2)
+    missesOf(sampleStore).delete('smp-x')
+    inst.hit(36, 1)
+    expect(get).toHaveBeenCalledTimes(3)
   })
 })
