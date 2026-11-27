@@ -219,6 +219,20 @@
     </div>
   </dialog>
 
+  <dialog id="slice-dialog" class="app-dialog" aria-labelledby="slice-title">
+    <div class="dlg-header">
+      <span id="slice-title" class="dlg-title">SLICE TO 16</span>
+      <button class="btn dlg-close-btn" data-close-dialog="slice-dialog" aria-label="Close slicer">✕</button>
+    </div>
+    <div class="dlg-body">
+      <canvas class="slice-canvas" aria-label="Waveform with 16 slice markers. Click a slice to hear it."></canvas>
+      <output class="slice-info lcd" role="status"></output>
+      <div class="dlg-row"><label class="dlg-label" for="slice-sens">SENSITIVITY</label><input id="slice-sens" class="slice-sens" type="range" min="0" max="100" value="50"></div>
+      <p class="slice-msg dlg-note" role="status" aria-live="polite"></p>
+      <div class="dlg-row"><button type="button" class="btn slice-setbpm" hidden></button><button type="button" class="btn slice-apply">APPLY</button></div>
+    </div>
+  </dialog>
+
   <dialog id="lesson-dialog" class="app-dialog" data-nonmodal aria-labelledby="lesson-title">
     <div class="dlg-header">
       <span id="lesson-title" class="dlg-title">LESSONS</span>
