@@ -54,6 +54,7 @@ if (typeof globalThis.OfflineAudioContext === 'undefined') {
   }
 }
 
+import { sampleSlot } from '../src/renderer/js/pads/kit.js'
 import TimelinePlayer, { instrumentFor as scheduledInstrumentFor } from '../src/renderer/js/playback/timeline-player.js'
 
 function makeAudioStore(buffers = {}) {
@@ -190,5 +191,16 @@ describe('instrumentFor kit', () => {
   it('is silent for an unknown kit', () => {
     const { ctx } = kitCtx()
     expect(scheduledInstrumentFor({ instrument: { type: 'kit', kitId: 'nope' } }, { ctx, output: {} })).toBeNull()
+  })
+})
+
+describe('TimelinePlayer.bounce preloads kit sample slots', () => {
+  it('asks the offline store for each distinct sample id of kit tracks only', async () => {
+    const get = vi.fn(() => Promise.resolve({ duration: 1 }))
+    const userSampleStoreFor = vi.fn(() => ({ get, peek: () => null }))
+    const kits = { k: { id: 'k', slots: { 36: sampleSlot({ sampleId: 'smp-a', name: 'a', start: 0, end: 1 }), 37: sampleSlot({ sampleId: 'smp-a', name: 'a', start: 0, end: 1 }), 38: { voice: 'sd', params: {} } } } }
+    const tracks = [{ type: 'midi', instrument: { type: 'kit', kitId: 'k' }, clips: [] }]
+    await TimelinePlayer.bounce({ bpm: 120, tracks, audioStore: { getBuffer: () => null }, durationBeats: 4, kits, userSampleStoreFor })
+    expect(get.mock.calls.map(c => c[0])).toEqual(['smp-a'])
   })
 })

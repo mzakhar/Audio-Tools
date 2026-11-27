@@ -52,6 +52,7 @@ import { openDialog, closeDialog } from './ui/dialog.js'
 import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch, packPatchState } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
+import { userSampleStoreFor } from './instruments/user-samples.js'
 import { createPackStore } from './instruments/pack-store-idb.js'
 import { importPackFromFile } from './instruments/pack-import-web.js'
 import { canBrowseFolders, createFolderLibrary } from './instruments/soundfont-folder-web.js'
@@ -203,6 +204,7 @@ function instrumentDeps({ output, trackId } = {}) {
     getKits: () => _hot.kits,
     packFor,
     sampleStoreFor,
+    userSampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
     mountRack: rack => RackEngine.mount(ctx, rack, {
       output: out,
@@ -304,7 +306,7 @@ function prewarmArmed() {
   if (!track || sig === _prewarmSig) return
   const entry = liveEntryFor(track)
   _prewarmSig = entry ? sig : null   // an unavailable pack may come back; try again
-  entry?.inst.prewarm?.()
+  Promise.resolve(entry?.inst.prewarm?.()).catch(() => {})
   const instrument = track.instrument
   if (instrument?.type === 'pack') {
     const pack = packFor(instrument.packId, instrument.packVersion)
