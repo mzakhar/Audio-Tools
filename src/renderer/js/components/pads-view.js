@@ -3,6 +3,7 @@ import { SNAP_GRIDS } from '../pads/groove.js'
 import { readThemeColors, themeStyle, onThemeChange } from '../ui/theme-colors.js'
 import { withAlpha } from './canvas-colors.js'
 import { REPEAT_RATES } from '../pads/repeat.js'
+import { ghostRects, markRects, biasPos, biasText } from '../pads/lesson-strip.js'
 import { KNOB_ROLES, knobLabel } from '../pads/knob-roles.js'
 
 const FIRST_NOTE = 36
@@ -31,6 +32,7 @@ export const HELP = {
   overlay: 'Overlay (hold, key O): while held, pads become a menu and do not sound.',
   overlayMenu: 'Which menu the pads show while Overlay is held: Mute, Bank, Rate or Ladder.',
   learn: 'Learn: map your controller\'s buttons and knobs.',
+  lessons: 'Lessons: short exercises on your own pads. Scores timing against the click.',
   layer: 'Layer: record what you play into the loop.',
   wipe: 'Wipe (hold): erase what the playhead passes for the pads you touch.',
   undo: 'Undo the last pass.',
@@ -51,8 +53,9 @@ export const PAD_KEY_ROWS = [['1', '2', '3', '4'], ['q', 'w', 'e', 'r'], ['a', '
 const VOICE_TRACK = { bd: 1, sd: 2, rs: 3, cp: 3, ch: 4, oh: 4, lt: 5, mt: 6, ht: 7, cr: 8, rd: 8 }
 const STRIP_TOKENS = [
   'canvas-bg', 'canvas-ruler-bg', 'canvas-ruler-ink', 'canvas-grid-bar', 'canvas-grid-beat',
-  'canvas-playhead', 'text-dim', 'font-mono', ...Array.from({ length: 8 }, (_, i) => `track-${i + 1}`),
+  'canvas-playhead', 'text-dim', 'font-mono', 'canvas-meter-ok', 'canvas-note', 'canvas-meter-hot', 'canvas-meter-clip', ...Array.from({ length: 8 }, (_, i) => `track-${i + 1}`),
 ]
+const MARK_TOKEN = { perfect: 'canvas-meter-ok', good: 'canvas-note', ok: 'canvas-meter-hot', miss: 'canvas-meter-clip' }
 const FLASH_MS = 140
 const VELOCITY_DEFAULT = 108
 
@@ -87,6 +90,8 @@ export class PadsView {
     this._pads = { ...DEFAULT_PADS, ...state.pads }
     this._beatsPerBar = state.timeSignature?.[0] ?? 4
     this._colours = null
+    this._lesson = null
+    this._marks = []
     this._unsubTheme = onThemeChange(() => { this._colours = null; this.drawStrip() })
     this._unsub = ProjectStore.subscribe(next => {
       this._pads = { ...DEFAULT_PADS, ...next.pads }
@@ -138,6 +143,7 @@ export class PadsView {
     if (b === this.bank) return
     this.bank = b
     this.el.banks.forEach((btn, i) => btn.setAttribute('aria-pressed', String(i === b)))
+    this._syncTarget()
     this.refreshKit()
   }
 
@@ -186,6 +192,36 @@ export class PadsView {
     else { this._setRepeat(false); this._setOverlay(false); this._showHelp(null); for (const id of [...this._down.keys()]) this.release(id) }
   }
   setPlaying(playing) { this.playing = playing; this._loop(); this.drawStrip() }
+
+  /** Lesson overlay: `{ targets, bars }` or null (clears ghosts, marks, bias, target). */
+  setLesson(lesson) {
+    this._lesson = lesson ?? null
+    if (!lesson) { this._marks = []; this.setBias(null); this.setNextTarget(null) }
+    this.drawStrip()
+  }
+  /** `[{ pad, beat (absolute), mark }]` drawn at beat mod loop. */
+  setMarks(marks) { this._marks = marks ?? []; this.drawStrip() }
+  /** Mean timing error in ms (+ late), or null to hide the needle. */
+  setBias(ms) {
+    const b = this.el.bias
+    b.hidden = ms === null || ms === undefined
+    if (b.hidden) return
+    const text = biasText(ms)
+    b.querySelector('.pads-bias-text').textContent = text
+    b.querySelector('.pads-bias-needle').style.left = `${biasPos(ms) * 100}%`
+    b.setAttribute('aria-label', `Timing: ${text}`)
+  }
+  /** Pad (bank A index) the lesson wants next; lit only while bank A is shown. */
+  setNextTarget(pad) {
+    this._target = pad ?? null
+    this._syncTarget()
+  }
+  _syncTarget() {
+    this.padEls?.forEach((el, i) => {
+      if (this._target === i && this.bank === 0) el.dataset.target = 'on'
+      else delete el.dataset.target
+    })
+  }
 
   _noteOf(i) { return FIRST_NOTE + 16 * this.bank + i }
   _slotOf(note) { return this.opts.getKit?.()?.slots?.[note] ?? null }
@@ -282,7 +318,7 @@ export class PadsView {
     if (!down) this.release(`key${e.key.toLowerCase()}`)
     if (!this.active || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
-    if (down && document.querySelector('dialog[open]')) return   // keyups still pass: a hold must be able to end
+    if (down && document.querySelector('dialog[open]:not([data-nonmodal])')) return   // keyups still pass: a hold must be able to end
     switch (e.key.toLowerCase()) {
       case 'g': this._setRepeat(down); break
       case 'o': this._setOverlay(down); break
@@ -329,6 +365,7 @@ export class PadsView {
             <select class="pads-countin" aria-label="Count-in bars"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select></label>
           <label class="pads-field"><span class="micro-label">BARS</span>
             <select class="pads-bars" aria-label="Loop length in bars">${[1, 2, 4, 8].map(n => `<option value="${n}">${n}</option>`).join('')}</select></label>
+          <div class="pads-bias" role="img" aria-label="" hidden><span class="pads-bias-track"><span class="pads-bias-needle"></span></span><span class="lcd pads-bias-text"></span></div>
         </div>
         <canvas class="pads-strip" aria-label="Loop hits"></canvas>
         <div class="pads-body">
@@ -350,6 +387,7 @@ export class PadsView {
               <label class="pads-field"><span class="micro-label">SNAP</span>
                 <select class="pads-snap" aria-label="Snap grid">${grids}</select></label>
               <button type="button" class="btn pads-learn" data-help="learn" aria-label="Controller learn">LEARN</button>
+              <button type="button" class="btn pads-lessons" data-help="lessons" aria-label="Lessons">LESSONS</button>
             </div>
             <div class="pads-knobs" role="group" aria-label="Knobs">${knobs}</div>
           </div>
@@ -362,7 +400,7 @@ export class PadsView {
       metro: $('.pads-metro'), countin: $('.pads-countin'), bars: $('.pads-bars'),
       snap: $('.pads-snap'), strip: $('.pads-strip'),
       repeat: $('.pads-repeat'), full: $('.pads-full'), overlay: $('.pads-overlay'), overlayMenu: $('.pads-overlay-menu'),
-      ladder: $('.pads-ladder'), rate: $('.pads-rate'), learn: $('.pads-learn'), help: $('.pads-help'),
+      ladder: $('.pads-ladder'), rate: $('.pads-rate'), learn: $('.pads-learn'), lessons: $('.pads-lessons'), bias: $('.pads-bias'), help: $('.pads-help'),
       banks: [...this.container.querySelectorAll('.pads-bank')], knobs: [...this.container.querySelectorAll('.pads-knob')],
     }
     this.padEls = new Map([...this.container.querySelectorAll('.pads-pad')].map(el => [Number(el.dataset.pad), el]))
@@ -429,6 +467,7 @@ export class PadsView {
     el.rate.addEventListener('change', () => set({ repeatRate: el.rate.value }))
     el.overlayMenu.addEventListener('change', () => { this.overlayMenu = el.overlayMenu.value; this.refreshKit() })
     el.learn.addEventListener('click', () => this.opts.onAction?.('learn', {}))
+    el.lessons.addEventListener('click', () => this.opts.onAction?.('lessons', {}))
     el.banks.forEach((b, i) => b.addEventListener('click', () => this.setBank(i)))
 
     // Knob twins: drag vertically (8 px per detent), wheel, arrow keys.
@@ -552,6 +591,17 @@ export class PadsView {
       g.fillRect(x(n.startBeat), h - (row + 1) * rowH + 1, Math.max(3, x(n.duration ?? 0.25)), Math.max(2, rowH - 2))
     }
     g.globalAlpha = 1
+    if (this.bank === 0) {
+      const geo = { loopBeats, w, h, ruler }
+      if (this._lesson) {
+        g.strokeStyle = c['text-dim']; g.lineWidth = 1
+        for (const r of ghostRects(this._lesson.targets, geo)) g.strokeRect(r.x + 0.5, r.y + 0.5, r.w, r.h - 1)
+      }
+      for (const r of markRects(this._marks, geo)) {
+        g.fillStyle = c[MARK_TOKEN[r.mark]] ?? c['text-dim']
+        g.fillRect(r.x, r.y, r.w, r.h)
+      }
+    }
     if (beat !== null && beat >= 0) {
       g.fillStyle = withAlpha(c['canvas-playhead'], 0.95)
       g.fillRect(x(pos), 0, 2, h)

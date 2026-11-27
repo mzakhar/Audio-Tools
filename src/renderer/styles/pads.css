@@ -97,3 +97,17 @@
   .pads-knobs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pads-knob { flex-direction: row; justify-content: space-between; padding: 6px 8px; }
 }
+
+/* ─── Phase 4: lessons — timing needle, next-target blink ────────────────── */
+.pads-bias { display: inline-flex; align-items: center; gap: 8px; }
+.pads-bias[hidden] { display: none; }
+.pads-bias-track { position: relative; width: 90px; height: 10px; background: var(--canvas-ruler-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-s); }
+.pads-bias-track::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--canvas-grid-bar); }
+.pads-bias-needle { position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1px; left: 50%; background: var(--state-on); transition: left 0.15s; }
+.pads-bias-text { min-width: 11ch; text-align: center; }
+.pads-pad[data-target="on"] { outline: 3px solid var(--state-on); outline-offset: -3px; animation: pads-target 1.2s ease-in-out infinite; }
+@keyframes pads-target { 50% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .pads-pad[data-target="on"] { animation: none; }
+  .pads-bias-needle { transition: none; }
+}
