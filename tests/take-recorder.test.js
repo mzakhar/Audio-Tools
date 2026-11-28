@@ -28,6 +28,16 @@ describe('createTakeRecorder', () => {
     expect(clip.notes[0].velocity).toBe(1)
   })
 
+  it('two sources on one pitch do not cut each other; each off closes its own note', () => {
+    const r = rec()
+    r.note({ trackId: 't1', pitch: 60, velocity: 127, on: true, time: at(0), source: 'keys:0' })
+    r.note({ trackId: 't1', pitch: 60, velocity: 64, on: true, time: at(1), source: 'Launchkey:0' })
+    r.note({ trackId: 't1', pitch: 60, on: false, time: at(2), source: 'keys:0' })
+    r.note({ trackId: 't1', pitch: 60, on: false, time: at(3), source: 'Launchkey:0' })
+    const notes = r.finish(at(4))[0].clip.notes.map(x => [x.pitch, +x.startBeat.toFixed(6), +x.duration.toFixed(6), x.velocity])
+    expect(notes).toEqual([[60, 0, 2, 1], [60, 1, 2, 64 / 127]])
+  })
+
   it('a re-trigger closes the open note; overlapping pitches pair independently', () => {
     const r = rec()
     r.note({ trackId: 't1', pitch: 60, velocity: 64, on: true, time: at(0) })

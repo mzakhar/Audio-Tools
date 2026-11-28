@@ -135,10 +135,15 @@ describe('app boots', () => {
     const until = async cond => { for (let i = 0; i < 200 && !cond(); i++) await new Promise(done => setTimeout(done, 5)) }
     const rec = () => document.getElementById('rec-btn')
 
-    it('● is disabled outside arrange, with the reason', () => {
+    it('● is unavailable outside arrange but focusable, with the reason', () => {
       document.querySelector('.tool-btn[data-tool="synth"]').click()
-      expect(rec().disabled).toBe(true)
+      expect(rec().disabled).toBe(false)
+      expect(rec().getAttribute('aria-disabled')).toBe('true')
+      expect(rec().getAttribute('aria-description')).toBe('MIDI recording works in Arrange')
       expect(rec().title).toBe('MIDI recording works in Arrange')
+      rec().click()
+      expect(rec().getAttribute('aria-pressed')).toBe('false')
+      expect(document.getElementById('toast').textContent).toBe('MIDI RECORDING WORKS IN ARRANGE')
       expect(rec().getAttribute('aria-label')).toBe('Record MIDI')
       expect(document.getElementById('midi-record-btn')).toBeNull()
     })
@@ -147,7 +152,8 @@ describe('app boots', () => {
       const { default: ProjectStore } = await import('../src/renderer/js/store/ProjectStore.js')
       const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
       document.querySelector('.tool-btn[data-tool="arrange"]').click()
-      expect(rec().disabled).toBe(false)
+      expect(rec().getAttribute('aria-disabled')).toBe('false')
+      expect(rec().hasAttribute('aria-description')).toBe(false)
       const batch = vi.spyOn(ProjectStore, 'dispatchBatch')
       rec().click()
       await until(() => rec().getAttribute('aria-pressed') === 'true' && document.getElementById('global-play-btn').getAttribute('aria-pressed') === 'true')
@@ -182,34 +188,200 @@ describe('app boots', () => {
       expect(errors).toEqual([])
     })
 
-    it('record-master (⋯ menu) toggles the master Recorder and its label', async () => {
+    it('record-master is disabled with the reason where the recorder worklet is missing', () => {
+      const item = document.querySelector('#app-menu [data-cmd="record-master"]')
+      expect(item.hidden).toBe(false)
+      expect(item.disabled).toBe(true)   // the fake context has no audioWorklet (the LAN http case)
+      expect(item.textContent).toContain('Record master to WAV (needs HTTPS)')
+    })
+
+    it('record-master (⋯ menu) toggles the master Recorder; it shows while running and transport Stop leaves it', async () => {
       const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
       const { default: Recorder } = await import('../src/renderer/js/recorder.js')
       vi.spyOn(AudioEngine, 'hasRecorder').mockReturnValue(true)
       const start = vi.spyOn(Recorder, 'start').mockImplementation(() => {})
       const stop = vi.spyOn(Recorder, 'stop').mockResolvedValue('take.wav')
+      document.querySelector('.tool-btn[data-tool="arrange"]').click()   // re-renders commands
       const item = document.querySelector('#app-menu [data-cmd="record-master"]')
+      expect(item.disabled).toBe(false)
       expect(item.textContent).toContain('Record master to WAV…')
       item.click()
       await until(() => start.mock.calls.length > 0)
       expect(start).toHaveBeenCalledTimes(1)
       expect(item.textContent).toContain('Stop master recording')
-      expect(document.getElementById('rec-timer').hidden).toBe(false)
+      const timer = document.getElementById('rec-timer')
+      expect(timer.hidden).toBe(false)
+      expect(timer.textContent).toContain('REC')
+      expect(timer.getAttribute('aria-live')).toBe('polite')
+      const menuBtn = document.getElementById('app-menu-btn')
+      expect(menuBtn.classList.contains('recording')).toBe(true)
+      expect(menuBtn.getAttribute('aria-label')).toContain('master recording')
+      document.getElementById('global-stop-btn').click()
+      expect(stop).not.toHaveBeenCalled()
       item.click()
       await until(() => stop.mock.calls.length > 0)
       expect(stop).toHaveBeenCalledTimes(1)
       expect(item.textContent).toContain('Record master to WAV…')
+      expect(document.getElementById('app-menu-btn').classList.contains('recording')).toBe(false)
       vi.restoreAllMocks()
       expect(errors).toEqual([])
     })
 
-    it('offers the count-in preference in the ⋯ menu, off by default', () => {
-      const box = document.getElementById('count-in-toggle')
-      expect(box.checked).toBe(false)
-      box.click()
+    it('offers the count-in preference in the ⋯ menu as a menuitemcheckbox, off by default', () => {
+      const item = document.getElementById('count-in-toggle')
+      expect(item.getAttribute('role')).toBe('menuitemcheckbox')
+      expect(item.tagName).toBe('BUTTON')   // Space and Enter activate a button
+      expect(item.getAttribute('aria-checked')).toBe('false')
+      item.click()
+      expect(item.getAttribute('aria-checked')).toBe('true')
       expect(localStorage.getItem('synth_count_in')).toBe('1')
-      box.click()
+      item.click()
+      expect(item.getAttribute('aria-checked')).toBe('false')
       expect(localStorage.getItem('synth_count_in')).toBe('0')
+    })
+
+    it('PC keys play the piano in Arrange, not in Rack', () => {
+      const heard = []
+      const onNote = e => heard.push(e.detail.note)
+      document.addEventListener('note-on', onNote)
+      const press = key => { window.dispatchEvent(new KeyboardEvent('keydown', { key })); window.dispatchEvent(new KeyboardEvent('keyup', { key })) }
+      document.querySelector('.tool-btn[data-tool="arrange"]').click()
+      press('a')
+      expect(heard).toHaveLength(1)
+      document.querySelector('.tool-btn[data-tool="rack"]').click()
+      press('a')
+      expect(heard).toHaveLength(1)
+      document.querySelector('.tool-btn[data-tool="arrange"]').click()
+      document.removeEventListener('note-on', onNote)
+      expect(errors).toEqual([])
+    })
+
+    const takeClips = ProjectStore => ProjectStore.getState().tracks.flatMap(track => track.clips).filter(clip => clip.name?.startsWith('Take '))
+    const open = () => rec().getAttribute('aria-pressed') === 'true' && document.getElementById('global-play-btn').getAttribute('aria-pressed') === 'true'
+
+    it('while a take is starting Play is ignored; Stop then ● again starts exactly one take', async () => {
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      const { default: TimelinePlayer } = await import('../src/renderer/js/playback/timeline-player.js')
+      document.querySelector('.tool-btn[data-tool="arrange"]').click()
+      let release
+      const gate = new Promise(done => { release = done })
+      vi.spyOn(AudioEngine, 'init').mockImplementation(() => gate)
+      const play = vi.spyOn(TimelinePlayer, 'play')
+      rec().click()                       // start 1 waits in ensureAudio
+      expect(rec().getAttribute('aria-pressed')).toBe('true')
+      document.getElementById('global-play-btn').click()
+      rec().click()                       // cancel start 1
+      expect(rec().getAttribute('aria-pressed')).toBe('false')
+      rec().click()                       // start 2 also waits
+      release()
+      await until(open)
+      expect(open()).toBe(true)
+      await new Promise(done => setTimeout(done, 20))
+      expect(play).toHaveBeenCalledTimes(1)
+      rec().click()
+      expect(TimelinePlayer.isPlaying()).toBe(false)
+      vi.restoreAllMocks()
+      expect(errors).toEqual([])
+    })
+
+    it('tempo is locked while a take is open', async () => {
+      const { default: ProjectStore } = await import('../src/renderer/js/store/ProjectStore.js')
+      const bpmEl = document.getElementById('global-bpm')
+      const before = ProjectStore.getState().bpm
+      rec().click()
+      await until(open)
+      expect(open()).toBe(true)
+      expect(bpmEl.disabled).toBe(true)
+      bpmEl.value = String(before + 10)
+      bpmEl.dispatchEvent(new Event('change'))
+      expect(ProjectStore.getState().bpm).toBe(before)
+      expect(bpmEl.value).toBe(String(before))
+      expect(document.getElementById('toast').textContent).toBe('STOP RECORDING TO CHANGE TEMPO')
+      rec().click()
+      expect(bpmEl.disabled).toBe(false)
+    })
+
+    it('count-in: playback is anchored on the downbeat after the clicks; a note there lands on beat 0', async () => {
+      const { default: ProjectStore } = await import('../src/renderer/js/store/ProjectStore.js')
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      const { default: TimelinePlayer } = await import('../src/renderer/js/playback/timeline-player.js')
+      const ctx = AudioEngine.getContext()
+      ctx.currentTime = 10
+      document.getElementById('count-in-toggle').click()   // on
+      const before = takeClips(ProjectStore).length
+      rec().click()
+      await until(open)
+      expect(open()).toBe(true)
+      const bpm = ProjectStore.getState().bpm
+      const downbeat = 10.05 + 4 * 60 / bpm
+      expect(TimelinePlayer.startAudioTime).toBeCloseTo(downbeat, 9)
+      ctx.currentTime = 10.5   // during the count-in: not recorded
+      document.dispatchEvent(new CustomEvent('note-on', { detail: { note: 62 } }))
+      document.dispatchEvent(new CustomEvent('note-off', { detail: { note: 62 } }))
+      ctx.currentTime = downbeat
+      document.dispatchEvent(new CustomEvent('note-on', { detail: { note: 60 } }))
+      ctx.currentTime = downbeat + 0.25
+      document.dispatchEvent(new CustomEvent('note-off', { detail: { note: 60 } }))
+      rec().click()
+      document.getElementById('count-in-toggle').click()   // off again
+      const clips = takeClips(ProjectStore)
+      expect(clips).toHaveLength(before + 1)
+      const notes = clips.at(-1).notes
+      expect(notes.map(note => note.pitch)).toEqual([60])
+      expect(notes[0].startBeat).toBeLessThan(0.02)   // + the 6 ms MIDI slack
+      expect(errors).toEqual([])
+    })
+
+    it('● while playing restarts from the top and says so', async () => {
+      document.getElementById('global-play-btn').click()
+      await until(() => document.getElementById('global-play-btn').getAttribute('aria-pressed') === 'true')
+      try {
+        rec().click()
+        await until(() => document.getElementById('toast').textContent === 'Recording from the start')
+        expect(document.getElementById('toast').textContent).toBe('Recording from the start')
+        await until(open)
+        expect(open()).toBe(true)
+      } finally { rec().click() }
+      expect(rec().getAttribute('aria-pressed')).toBe('false')
+    })
+
+    it('a take whose track was deleted meanwhile adds nothing and says so', async () => {
+      const { default: ProjectStore, RemoveTrack } = await import('../src/renderer/js/store/ProjectStore.js')
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      const ctx = AudioEngine.getContext()
+      rec().click()
+      await until(open)
+      expect(open()).toBe(true)
+      const before = takeClips(ProjectStore).length
+      ctx.currentTime += 0.5
+      document.dispatchEvent(new CustomEvent('note-on', { detail: { note: 64 } }))
+      ctx.currentTime += 0.5
+      document.dispatchEvent(new CustomEvent('note-off', { detail: { note: 64 } }))
+      for (const track of ProjectStore.getState().tracks.filter(track => track.type === 'midi')) ProjectStore.dispatch(RemoveTrack(track.id))
+      rec().click()
+      expect(document.getElementById('toast').textContent).toBe('NOTHING RECORDED')
+      expect(takeClips(ProjectStore).length).toBeLessThanOrEqual(before)
+    })
+
+    it('playback stopping by itself commits the open take', async () => {
+      const { default: ProjectStore } = await import('../src/renderer/js/store/ProjectStore.js')
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      const { default: TimelinePlayer } = await import('../src/renderer/js/playback/timeline-player.js')
+      const ctx = AudioEngine.getContext()
+      rec().click()
+      await until(open)
+      expect(open()).toBe(true)
+      const before = takeClips(ProjectStore).length
+      ctx.currentTime += 0.5
+      document.dispatchEvent(new CustomEvent('note-on', { detail: { note: 65 } }))
+      ctx.currentTime += 0.5
+      document.dispatchEvent(new CustomEvent('note-off', { detail: { note: 65 } }))
+      expect(TimelinePlayer.isPlaying()).toBe(true)
+      TimelinePlayer.stop()
+      expect(rec().getAttribute('aria-pressed')).toBe('false')
+      expect(takeClips(ProjectStore)).toHaveLength(before + 1)
+      expect(document.getElementById('toast').textContent).toBe('TAKE RECORDED')
+      expect(errors).toEqual([])
     })
   })
 })

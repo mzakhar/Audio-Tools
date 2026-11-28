@@ -11,6 +11,7 @@ const DEFAULTS = {
   projectOpen: false,
   recording: false,
   masterRecording: false,
+  canRecordMaster: true,
   midiInput: null,
   canImportPacks: true,
   assistant: false,
@@ -18,7 +19,7 @@ const DEFAULTS = {
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, masterRecording, midiInput, canImportPacks, assistant, fm1Armed } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, masterRecording, canRecordMaster, midiInput, canImportPacks, assistant, fm1Armed } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -168,10 +169,11 @@ export function commandItems(opts = {}) {
     {
       id: 'record-master',
       // A toggle: the menu label is the way back out.
-      label: masterRecording ? 'Stop master recording' : 'Record master to WAV…',
+      // The recorder is a worklet: on plain http it is shown disabled, with the reason.
+      label: masterRecording ? 'Stop master recording' : canRecordMaster ? 'Record master to WAV…' : 'Record master to WAV (needs HTTPS)',
       shortcut: null,
       group: 'setup',
-      enabled: true,
+      enabled: masterRecording || canRecordMaster,
       visible: true,
     },
     {

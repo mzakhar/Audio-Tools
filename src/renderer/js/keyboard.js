@@ -256,10 +256,12 @@ function onTouchEnd(e) {
 const heldKeys = new Map() // key → MIDI note
 window.addEventListener('keydown', (e) => {
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
-  // Only the synth view plays from the PC keyboard. Without this, letter keys
-  // sound notes (and auto-provision a track) from inside every dialog, and
-  // from the arrange, rack and 909 views where the keyboard is not on screen.
-  if (ShortcutManager.getContext() !== 'synth') return
+  // Only the synth and arrange views play from the PC keyboard (arrange: it is
+  // the main input for MIDI takes). Without this, letter keys sound notes (and
+  // auto-provision a track) from inside every dialog, and from the rack, 909
+  // and pads views, whose letter keys mean something else. No unmodified letter
+  // shortcut exists in the arrange context, so nothing moved.
+  if (!['synth', 'arrange'].includes(ShortcutManager.getContext())) return
   // Don't capture if focus is on an input
   if (document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return
 

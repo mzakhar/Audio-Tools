@@ -11,12 +11,13 @@ const MIN_DURATION = 1 / 64   // beats
 
 /**
  * createTakeRecorder({ startTime, playBeat, bpm, beatsPerBar, takeNumber, newId })
- *   note({ trackId, pitch, velocity 0..127, on, time })
+ *   note({ trackId, pitch, velocity 0..127, on, time, source })   source: who sent it (device/keys/pads
+ *     + channel); two sources holding one pitch on one track each keep their own note
  *   finish(endTime) -> [{ trackId, clip }]   one new clip per track that received notes; [] for none
  */
 export function createTakeRecorder({ startTime, playBeat = 0, bpm, beatsPerBar = 4, takeNumber = 1, newId = defaultNewId }) {
   const beatAt = time => playBeat + (time - startTime) * bpm / 60
-  const open = new Map()     // `${trackId}:${pitch}` -> { trackId, pitch, velocity, time }
+  const open = new Map()     // `${trackId}:${source}:${pitch}` -> { trackId, pitch, velocity, time }
   const done = []            // { trackId, pitch, velocity, start, end } in absolute beats
 
   function close(key, time) {
@@ -30,8 +31,8 @@ export function createTakeRecorder({ startTime, playBeat = 0, bpm, beatsPerBar =
   }
 
   return {
-    note({ trackId, pitch, velocity = 0, on, time }) {
-      const key = `${trackId}:${pitch}`
+    note({ trackId, pitch, velocity = 0, on, time, source = '' }) {
+      const key = `${trackId}:${source}:${pitch}`
       close(key, time)   // a re-trigger closes the open note; a note-off closes it
       if (on) open.set(key, { trackId, pitch, velocity, time })
     },

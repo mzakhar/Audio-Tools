@@ -38,8 +38,8 @@
       <span id="project-dirty" class="dirty-mark" aria-label="Unsaved changes" hidden>*</span>
       <button id="global-play-btn" class="btn cmd-btn play btn--toggle" data-cmd="play" aria-label="Play" aria-pressed="false">▶</button>
       <button id="global-stop-btn" class="btn cmd-btn stop" data-cmd="stop" aria-label="Stop">■</button>
-      <button id="rec-btn" class="btn cmd-btn rec-btn btn--danger" data-cmd="record" aria-label="Record MIDI" aria-pressed="false" title="MIDI recording works in Arrange" disabled>●</button>
-      <span id="rec-timer" class="rec-timer" aria-live="off" hidden>00:00</span>
+      <button id="rec-btn" class="btn cmd-btn rec-btn btn--danger" data-cmd="record" aria-label="Record MIDI" aria-pressed="false" title="MIDI recording works in Arrange" aria-disabled="true" aria-description="MIDI recording works in Arrange">●</button>
+      <span id="rec-timer" class="rec-timer" aria-live="polite" hidden>REC <span id="rec-time" aria-hidden="true">00:00</span></span>
       <label class="cmd-label" for="global-bpm">BPM</label>
       <input type="number" id="global-bpm" class="lcd" min="40" max="240" value="120" aria-label="Tempo in BPM">
       <label class="cmd-label" for="master-vol">VOL</label>

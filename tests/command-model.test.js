@@ -54,6 +54,7 @@ describe('commandItems', () => {
   it('record-master is a setup toggle whose label reads the way out', () => {
     expect(find(commandItems({}), 'record-master')).toMatchObject({ label: 'Record master to WAV…', group: 'setup', enabled: true, visible: true })
     expect(find(commandItems({ masterRecording: true }), 'record-master').label).toBe('Stop master recording')
+    expect(find(commandItems({ canRecordMaster: false }), 'record-master')).toMatchObject({ label: 'Record master to WAV (needs HTTPS)', enabled: false, visible: true })
   })
 
   it('gates import-pack on a host that can import, enabled by default', () => {

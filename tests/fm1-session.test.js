@@ -35,7 +35,7 @@ function fakeWorker() {
   }
 }
 
-function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes, createWorker, createWorkletNode } = {}) {
+function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () => worklet, getWasmBytes, createWorker, createWorkletNode } = {}) {
   const ctx = fakeCtx({ worklet })
   const workers = []
   const nodes = []
@@ -45,7 +45,7 @@ function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes, 
     getModule: vi.fn(async () => module),
     getWasmBytes,
     readFirmware: vi.fn(async () => firmware),
-    preferWorklet: () => worklet,
+    ...(prefer ? { preferWorklet: prefer } : {}),
     workletUrl: 'worklets/fm1-worklet.js',
     createWorker: createWorker || (() => { const w = fakeWorker(); workers.push(w); return w }),
     createWorkletNode: createWorkletNode || (() => {
@@ -299,6 +299,20 @@ describe('fm1 session (worklet path)', () => {
     expect(sessions.acquire('t1', { ...desc, mhz: 160 }, out).path).toBe('worklet')   // the replaced one freed it
     sessions.release('t1')
     expect(sessions.acquire('t3', desc, out).path).toBe('worklet')
+  })
+
+  // Smoke: an existing palette track switched to FM-1 (instrument settings -> prune is a no-op,
+  // prewarm acquires the track key) booted a worklet device that went silent with a black LCD:
+  // one device alone saturates the audio thread and its port stops receiving MIDI/lcd messages.
+  // The app no longer passes preferWorklet, so the manager default must pick the Worker.
+  it('the app default (no preferWorklet) boots an existing track switched to FM-1 on a Worker even with a worklet', async () => {
+    const { sessions, nodes, workers, ctx } = setup({ worklet: true, prefer: null, getWasmBytes: async () => new ArrayBuffer(8) })
+    expect(sessions.get('track-1')).toBeNull()   // palette track: no session yet
+    const s = sessions.acquire('track-1', desc, out)
+    await flush(); await flush()
+    expect(s.path).toBe('worker')
+    expect([nodes.length, workers.length]).toEqual([0, 1])
+    expect(ctx.audioWorklet.addModule).not.toHaveBeenCalled()
   })
 
   it('falls back to the Worker path when addModule fails', async () => {
