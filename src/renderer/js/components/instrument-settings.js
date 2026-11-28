@@ -140,10 +140,14 @@ export class InstrumentSettings {
       if (source.value === 'fm1') {
         const record = this.deps.fm1Installed?.()[0]
         if (record) this.set(fm1InstrumentFor(record, keep))
-        else this.render()   // nothing installed: the Patch tab says so below
+        else { this.fm1Missing = true; this.render() }   // nothing to switch to: say why, once
       }
     }
     this.bodyEl.append(field('Source', source))
+    if (this.fm1Missing) {
+      this.fm1Missing = false
+      this.bodyEl.append(note('No FM-1 firmware installed. Open FM-1 firmware… to import one.'))
+    }
 
     if (instrument.type === 'pack') this.renderPack(instrument, packs)
     else if (instrument.type === 'rack') this.renderRack(instrument, racks)

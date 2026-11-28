@@ -1,8 +1,10 @@
 // fm1-device-dialog.js — the FM-1's front panel for one track. A non-modal
 // <dialog>: an LCD canvas fed by the track's session, with real <button> /
-// role=slider elements laid over a scaled panel (geometry: fm1/panel-layout.js)
-// so every control has a name and works from the keyboard.
-// Closing only unsubscribes the LCD; the device keeps running.
+// a role=slider pot laid over a scaled panel (geometry: fm1/panel-layout.js)
+// so every control has a name and works from the keyboard. Encoders are
+// relative (no position), so they are buttons turned with the arrow keys.
+// Closing only unsubscribes the LCD; the device keeps running. refresh() follows
+// the store: the track gone or no longer FM-1 closes it, a new device re-binds.
 
 import { openDialog } from '../ui/dialog.js'
 import { ENCODERS, POT, BUTTONS, KEYS, LCD, boxStyle } from '../fm1/panel-layout.js'
@@ -22,7 +24,8 @@ export function statusLine(status, { strained = false } = {}) {
   if (status.state === 'failed') return failureText(status.reason)
   if (status.state === 'disposed') return 'The device is stopped.'
   const rtf = Number.isFinite(status.rtf) ? ` · ${status.rtf.toFixed(1)}x realtime` : ''
-  return `Running${rtf}${strained ? ' · Struggling to keep up: lower the clock in the instrument settings.' : ''}`
+  const slowBoot = status.bootTimeout ? ' · The firmware took over 8 s to start.' : ''
+  return `Running${rtf}${slowBoot}${strained ? ' · Struggling to keep up: lower the clock in the instrument settings.' : ''}`
 }
 
 const make = (tag, className, attrs = {}) => {
@@ -104,7 +107,7 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
   }
 
   for (const def of ENCODERS) {
-    const node = make('div', 'fm1d-enc', { role: 'slider', tabindex: '0', 'aria-label': def.label, 'aria-valuetext': 'turn', 'aria-valuenow': '0' })
+    const node = make('button', 'fm1d-enc', { type: 'button', 'aria-label': `${def.label} encoder`, 'aria-description': 'Arrow keys turn it' })
     const mark = make('i')
     node.append(mark, document.createTextNode(def.label))
     place(node, def)
@@ -113,8 +116,6 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
     let drag = 0
     const turn = clicks => {
       turns += clicks
-      node.setAttribute('aria-valuenow', String(turns))
-      node.setAttribute('aria-valuetext', `${turns} clicks`)
       mark.style.transform = `rotate(${(turns * 12) % 360}deg)`
       session?.enc(def.enc, clicks)
     }
@@ -147,9 +148,17 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
   const potMark = make('i')
   pot.append(potMark, document.createTextNode(POT.label))
   place(pot, POT)
+  // The device's pot position is unknown until the user moves it here: say so
+  // rather than claim the drawn starting point.
   const showPot = value => {
-    pot.setAttribute('aria-valuenow', String(value))
-    potMark.style.transform = `rotate(${-135 + value / POT.max * 270}deg)`
+    if (value === undefined) {
+      pot.removeAttribute('aria-valuenow')
+      pot.setAttribute('aria-valuetext', 'not set')
+    } else {
+      pot.setAttribute('aria-valuenow', String(value))
+      pot.setAttribute('aria-valuetext', String(value))
+    }
+    potMark.style.transform = `rotate(${-135 + (value ?? POT.initial) / POT.max * 270}deg)`
   }
   const setPot = value => {
     const next = clamp(Math.round(value), 0, POT.max)
@@ -185,6 +194,8 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
 
   function paintStatus() {
     const status = session?.status?.() ?? null
+    // a replaced device (failed, re-acquired, or released) is re-bound once the store settles
+    if (status?.state === 'disposed') queueMicrotask(refresh)
     if (status && (status.underruns > baseline.underruns || status.starved > baseline.starved)) strained = true
     statusEl.textContent = statusLine(status, { strained })
     statusEl.classList.toggle('warn', !status || status.state === 'failed' || strained)
@@ -197,17 +208,30 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
     session = null
   }
 
+  let boundSig = null
+  const sigOf = track => JSON.stringify(fm1Descriptor(track.instrument))
+
+  /** Follow the store: close when the track is gone or no longer FM-1, re-bind when its device changed. */
+  function refresh() {
+    if (!dlg.open || trackId === null) return
+    const track = getTrack(trackId)
+    if (track?.instrument?.type !== 'fm1') { dlg.close?.(); return }
+    // only a different session re-binds, so a disposed one the deps still hand back cannot loop
+    if (sigOf(track) !== boundSig || getSession(trackId) !== session) bind(trackId)
+  }
+
   function bind(id) {
     unbind()
     trackId = id
     const track = getTrack(id)
     const descriptor = fm1Descriptor(track?.instrument)
+    boundSig = track ? sigOf(track) : null
     title.textContent = `FM-1 · ${track?.name || 'MIDI'}`
     session = getSession(id)
     strained = false
     const first = session?.status?.()
     baseline = { underruns: first?.underruns ?? 0, starved: first?.starved ?? 0 }
-    showPot(potValue())
+    showPot(pots.get(id))
     noteEl.textContent = [
       session?.path === 'worker' ? 'Worker mode: about 100 ms latency on this connection.' : '',
       'Saves on the device are not kept yet.'
@@ -231,6 +255,7 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
       return true
     },
     close() { dlg.close?.() },
+    refresh,
     isOpen: () => !!dlg.open
   }
 }

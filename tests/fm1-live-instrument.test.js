@@ -3,7 +3,7 @@ import { instrumentFor, liveInstrumentFor } from '../src/renderer/js/midi/live-i
 
 function fakeSessions() {
   const session = { ready: Promise.resolve(), noteOn: vi.fn(), noteOff: vi.fn(), sendMidi: vi.fn(), panic: vi.fn() }
-  const sessions = { acquire: vi.fn(() => session), release: vi.fn() }
+  const sessions = { acquire: vi.fn(() => session), use: vi.fn(() => session), get: vi.fn(() => session), release: vi.fn() }
   return { session, sessions }
 }
 const ctx = { currentTime: 2 }
@@ -60,11 +60,42 @@ describe('fm1 live adapter', () => {
     expect(sessions.release).not.toHaveBeenCalled()
   })
 
-  it('an audition (no trackId) uses its own key and releases it on dispose', () => {
-    const { sessions } = fakeSessions()
+  it('an audition (no trackId) uses its own unique key, releases it on dispose, then stays silent', () => {
+    const { session, sessions } = fakeSessions()
     const inst = instrumentFor(fm1, { ctx, fm1Sessions: sessions })
-    expect(sessions.acquire.mock.calls[0][0]).toBe('audition')
+    const other = instrumentFor(fm1, { ctx, fm1Sessions: sessions })
+    const [a, b] = sessions.acquire.mock.calls.map(call => call[0])
+    expect(a).toMatch(/^audition:[0-9]+$/)
+    expect(b).toMatch(/^audition:[0-9]+$/)
+    expect(a).not.toBe(b)
     inst.dispose()
-    expect(sessions.release).toHaveBeenCalledWith('audition')
+    expect(sessions.release.mock.calls).toEqual([[a]])
+    inst.noteOn(60, 100)
+    expect(session.noteOn).not.toHaveBeenCalled()
+    other.dispose()
+    expect(sessions.release.mock.calls).toEqual([[a], [b]])
+  })
+
+  it('resolves the session per call: a replaced session gets the next note', () => {
+    const { session, sessions } = fakeSessions()
+    const inst = instrumentFor(fm1, { ctx, fm1Sessions: sessions, trackId: 't1' })
+    inst.noteOn(60, 100)
+    const next = { ...session, noteOn: vi.fn(), panic: vi.fn() }
+    sessions.use.mockImplementation(() => next)
+    sessions.get.mockImplementation(() => next)
+    inst.noteOn(62, 100)
+    inst.panic()
+    expect(session.noteOn).toHaveBeenCalledOnce()
+    expect(next.noteOn).toHaveBeenCalledWith(62, 100, 2)
+    expect(next.panic).toHaveBeenCalledOnce()
+    expect(inst.session).toBe(next)
+  })
+
+  it('prewarm re-acquires, so a failed device is retried', async () => {
+    const { sessions } = fakeSessions()
+    const inst = instrumentFor(fm1, { ctx, fm1Sessions: sessions, trackId: 't1' })
+    sessions.acquire.mockClear()
+    await inst.prewarm()
+    expect(sessions.acquire).toHaveBeenCalledWith('t1', expect.objectContaining({ type: 'fm1' }), undefined)
   })
 })

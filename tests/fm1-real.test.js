@@ -4,8 +4,8 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { bootEmulator, createRunner, CHUNK } from '../src/renderer/js/fm1/emulator.js'
-import { noteOnBytes, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
+import { bootEmulator, bootToReady, createRunner, CHUNK } from '../src/renderer/js/fm1/emulator.js'
+import { noteOnBytes, createBlockWriter, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
 
 const fw = process.env.FM1_FW_DIR && join(process.env.FM1_FW_DIR, 'felucca-1.8.4.fwsc')
 const run = fw && existsSync(fw) ? describe : describe.skip
@@ -28,7 +28,9 @@ run('FM-1 real firmware (Felucca 1.8.4, 120 MHz)', () => {
     const t0 = performance.now()
     const { x, jitStats } = await bootEmulator({ module, pkg: pkg.buffer.slice(pkg.byteOffset, pkg.byteOffset + pkg.byteLength), mhz: 120 })
     const r = createRunner(x, { mhz: 120 })
-    while (!r.playing && x.fm1_ms() < 8000) r.render()
+    const booted = bootToReady(r, x)            // both hosts' ready rule
+    const readyMs = x.fm1_ms()
+    expect(booted).toBe('up')
     expect(r.playing).toBe(true)
     const bootMs = performance.now() - t0
     rms(r, 1)                                   // let it settle
@@ -38,7 +40,13 @@ run('FM-1 real firmware (Felucca 1.8.4, 120 MHz)', () => {
     const loud = rms(r, 1)
     const wall = (performance.now() - t1) / 1000
     const s = r.stats()
-    console.log(`fm1-real: boot ${bootMs.toFixed(0)} ms, rms quiet ${quiet.toExponential(2)} -> note ${loud.toExponential(2)}, ` +
+    // the Worker's 48 kHz block path over real output: contiguous 1024-frame blocks
+    const writer = createBlockWriter(FM1_RATE, 48000, 1024)
+    let blocks = 0, outFrames = 0
+    for (let i = 0; i < 345; i++) { const { l, r: rr } = r.render(); for (const b of writer.push(l, rr)) { expect(b.frame).toBe(blocks * 1024); blocks++; outFrames += 1024 } }
+    expect(Math.abs(outFrames - 345 * CHUNK * 48000 / FM1_RATE)).toBeLessThan(1024 + 2)
+    console.log(`fm1-real: ready rule '${booted}' at ${readyMs} ms emulated; ` +
+      `${blocks} blocks @48k; boot ${bootMs.toFixed(0)} ms, rms quiet ${quiet.toExponential(2)} -> note ${loud.toExponential(2)}, ` +
       `1 s rendered in ${wall.toFixed(2)} s (rtf ${(1 / wall).toFixed(2)}), jit regions ${jitStats.regions} failed ${jitStats.failed}, ` +
       `late ${s.late}, halted ${s.halted}`)
     expect(s.halted).toBe(false)

@@ -63,6 +63,7 @@
   border: 2px solid var(--border-strong);
   color: var(--text);
   font: 600 9px/1.1 var(--font-ui);
+  padding: 0;
   cursor: ns-resize;
   touch-action: none;
   user-select: none;

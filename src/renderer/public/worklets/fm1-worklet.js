@@ -4,11 +4,16 @@
 // frames) >= the event's frame. ONE self-contained file: an AudioWorklet does not import modules
 // everywhere, so the JIT host (fm1/jit.js, from fm1-emu web/jit.js, commit 69cb1ef, MIT,
 // Copyright (c) 2026 Joakim Eriksson) and the queue, key hold and resampler (fm1/host-core.js)
-// are inline copies. Keep them in step.
+// and bootCheck (fm1/host-core.js) are inline copies. Keep them in step.
+//
+// Boot runs inside process() at real time (each quantum gets only its own share of emulated
+// cycles), so a booting device never hogs the audio thread other nodes share. `ready` is posted
+// once the firmware's audio is up (bootCheck: the first render that fills frames) or after 8 s of
+// emulated time, flagged timedOut — the same rule as the Worker path.
 //
 // in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame? }   panic { bytes }
 //      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   dispose
-// out: ready   error { reason, message }   lcd { lcd|null, leds }   status { rtf, starved, late, dropped }
+// out: ready { timedOut }   error { reason, message }   lcd { lcd|null, leds }   status { rtf, starved, late, dropped }
 
 const FM1_RATE = 44100
 const now = globalThis.performance?.now ? () => performance.now() : () => Date.now()
@@ -112,6 +117,11 @@ function createResampler(inRate, outRate) {
   }
 }
 
+function bootCheck({ have = 0, ms = 0 }, timeoutMs = 8000) {
+  if (have > 0) return 'up'
+  return ms >= timeoutMs ? 'timeout' : null
+}
+
 // compiled once per worklet scope, shared by every FM-1 node on the context
 let modulePromise = null
 
@@ -143,7 +153,7 @@ class Fm1Processor extends AudioWorkletProcessor {
   async boot(m) {
     let x
     try {
-      const module = m.module || await (modulePromise ||= WebAssembly.compile(m.wasm))
+      const module = m.module || await (modulePromise ||= WebAssembly.compile(m.wasm).catch((e) => { modulePromise = null; throw e }))
       const stats = { regions: 0, failed: 0, bytes: 0, compileMs: 0, compileMaxMs: 0, error: '' }
       x = (await WebAssembly.instantiate(module, { env: jitImports(() => x, stats) })).exports
     } catch (err) { return this.port.postMessage({ type: 'error', reason: 'wasm-failed', message: String(err) }) }
@@ -158,8 +168,8 @@ class Fm1Processor extends AudioWorkletProcessor {
     }
     this.mhz = m.mhz
     this.playing = false
+    this.booting = true
     this.x = x
-    this.port.postMessage({ type: 'ready' })
   }
 
   onMessage(m) {
@@ -188,7 +198,8 @@ class Fm1Processor extends AudioWorkletProcessor {
     for (const bytes of this.queue.takeUpTo(currentFrame)) for (const b of bytes) x.fm1_midi(b)
     for (const id of this.keys.due(this.emu)) x.fm1_key(id, 0)
     const need = Math.min(1024, this.rs.need(n))
-    const budget = this.playing ? this.mhz * 1e6 * 1.5 * need / FM1_RATE : this.mhz * 1e6 * 0.02
+    // playing: up to 1.5x real time to catch up; boot: this quantum's real-time share only
+    const budget = this.playing ? this.mhz * 1e6 * 1.5 * need / FM1_RATE : this.mhz * 1e6 * n / sampleRate
     const t0 = now()
     let have
     try {
@@ -206,6 +217,10 @@ class Fm1Processor extends AudioWorkletProcessor {
     const l = new Float32Array(buf, x.fm1_out_l(), need), r = new Float32Array(buf, x.fm1_out_r(), need)
     const outR = out[1] || new Float32Array(n)
     this.rs.process(l, r, out[0], outR)
+    if (this.booting) {
+      const up = bootCheck({ have, ms: x.fm1_ms?.() ?? 0 })
+      if (up) { this.booting = false; this.port.postMessage({ type: 'ready', timedOut: up === 'timeout' }) }
+    }
 
     this.sinceLcd += n
     this.sinceStatus += n

@@ -1,14 +1,16 @@
 // Main-thread side of one FM-1 device. Two hosts behind one interface:
 //  - 'worklet' (Path B, secure contexts): an AudioWorkletNode running the emulator in the audio
 //    thread; timed events carry a context frame.
-//  - 'worker' (Path A, everywhere else): a module Worker posts 128-frame blocks which are queued
-//    back to back as AudioBufferSourceNodes; timed events carry an emulator frame mapped from
-//    AudioContext time through the anchor of the block schedule.
+//  - 'worker' (Path A, everywhere else): a module Worker resamples to the context rate and posts
+//    BLOCK_FRAMES blocks, each started as an AudioBufferSourceNode at an exact context frame
+//    (anchor frame + block frame, so no drift); timed events carry an output frame mapped from
+//    AudioContext time through the same anchor.
 // Note and panel methods never throw; before ready they are dropped (no replay on ready).
 import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE } from './host-core.js'
 
 const START_PAD = 0.02           // first block (and after an underrun) starts this far ahead
 const REPORT_MS = 20             // how often the Worker hears how far playback has got
+export const BLOCK_FRAMES = 1024 // Worker path block, in output (context-rate) frames
 
 export function createFm1Session({
   ctx, key, descriptor, output, getModule, getWasmBytes, readFirmware,
@@ -32,8 +34,12 @@ export function createFm1Session({
   const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej })
   ready.catch(() => {})
 
-  const leadSec = () => (path === 'worklet' ? 0.02 : leadMs / 1000 + 0.03)
-  const status = () => ({ state, reason, path, ...counters, leadMs: Math.round(leadSec() * 1000) })
+  // Worker path: the Worker renders leadMs plus one block ahead (a partly filled block is
+  // already rendered but not yet posted), and events need 30 ms of slack on top of that.
+  const horizonSec = () => leadMs / 1000 + BLOCK_FRAMES / ctx.sampleRate
+  const leadSec = () => (path === 'worklet' ? 0.02 : horizonSec() + 0.03)
+  let bootTimeout = false
+  const status = () => ({ state, reason, path, ...counters, bootTimeout, leadMs: Math.round(leadSec() * 1000) })
   const emit = () => { const s = status(); for (const cb of statusCbs) cb(s) }
   const post = (m, t) => { try { port?.postMessage(m, t) } catch {} }
 
@@ -62,15 +68,17 @@ export function createFm1Session({
     emit()
   }
 
+  // Blocks are output frames at ctx.sampleRate; each starts at an integer context frame.
   function onBlock({ l, r, frame }) {
-    const t = ctx.currentTime
-    let at = anchor ? anchor.time + (frame - anchor.frame) / FM1_RATE : -1
+    const t = ctx.currentTime, rate = ctx.sampleRate
+    let at = anchor ? (anchor.ctxFrame + frame - anchor.frame) / rate : -1
     if (at < t) {
       if (anchor) counters.underruns++
-      anchor = { time: t + START_PAD, frame }
+      const ctxFrame = Math.ceil((t + START_PAD) * rate - 1e-6)
+      anchor = { ctxFrame, time: ctxFrame / rate, frame }
       at = anchor.time
     }
-    const buf = ctx.createBuffer(2, l.length, FM1_RATE)
+    const buf = ctx.createBuffer(2, l.length, rate)
     buf.getChannelData(0).set(l)
     buf.getChannelData(1).set(r)
     const src = ctx.createBufferSource()
@@ -82,7 +90,7 @@ export function createFm1Session({
     const ms = now()
     if (ms - lastReport >= REPORT_MS) {
       lastReport = ms
-      post({ type: 'consumed', frame: framesAt(t, anchor) })
+      post({ type: 'consumed', frame: framesAt(t, anchor, rate) })
     }
   }
 
@@ -91,6 +99,7 @@ export function createFm1Session({
     if (m.type === 'block') onBlock(m)
     else if (m.type === 'ready') {
       state = 'ready'
+      bootTimeout = !!m.timedOut
       pkg = null
       resolveReady()
       emit()
@@ -108,34 +117,38 @@ export function createFm1Session({
     }
   }
 
+  // Both starters catch everything (fetch, compile, constructing the host, connecting, posting):
+  // they run un-awaited, so a throw must become a failure or `ready` would never settle.
   async function startWorker() {
-    let module
-    try { module = await getModule() } catch { return fail('wasm-failed') }
-    if (state !== 'booting') return
-    worker = createWorker()
-    port = worker
-    worker.onmessage = (e) => onMessage(e.data)
-    worker.onerror = () => fail('wasm-failed')
-    const copy = pkg.slice(0)
-    post({ type: 'boot', module, package: copy, mhz: descriptor.mhz, leadFrames: Math.round(leadMs / 1000 * FM1_RATE) }, [copy])
-    if (lcdOn) post({ type: 'lcd', on: true })
+    try {
+      const module = await getModule()
+      if (state !== 'booting') return
+      worker = createWorker()
+      port = worker
+      worker.onmessage = (e) => onMessage(e.data)
+      worker.onerror = () => fail('wasm-failed')
+      const copy = pkg.slice(0)
+      port.postMessage({ type: 'boot', module, package: copy, mhz: descriptor.mhz, sampleRate: ctx.sampleRate,
+        blockFrames: BLOCK_FRAMES, leadFrames: Math.round(horizonSec() * FM1_RATE) }, [copy])
+      if (lcdOn) port.postMessage({ type: 'lcd', on: true })
+    } catch { fail('wasm-failed') }
   }
 
   async function startWorklet() {
-    let wasm = null, module = null
     try {
+      let wasm = null, module = null
       await loadWorklet()
       if (getWasmBytes) wasm = await getWasmBytes()
       else module = await getModule()
-    } catch { return fail('wasm-failed') }
-    if (state !== 'booting') return
-    node = createWorkletNode(ctx)
-    node.connect(gain)
-    port = node.port
-    port.onmessage = (e) => onMessage(e.data)
-    const copy = pkg.slice(0)
-    post({ type: 'boot', wasm, module, package: copy, mhz: descriptor.mhz }, [copy])
-    if (lcdOn) post({ type: 'lcd', on: true })
+      if (state !== 'booting') return
+      node = createWorkletNode(ctx)
+      node.connect(gain)
+      port = node.port
+      port.onmessage = (e) => onMessage(e.data)
+      const copy = pkg.slice(0)
+      port.postMessage({ type: 'boot', wasm, module, package: copy, mhz: descriptor.mhz }, [copy])
+      if (lcdOn) port.postMessage({ type: 'lcd', on: true })
+    } catch { fail('wasm-failed') }
   }
 
   ;(async () => {
@@ -152,7 +165,7 @@ export function createFm1Session({
     let frame
     if (time != null && Number.isFinite(time)) {
       if (path === 'worklet') frame = Math.round(time * ctx.sampleRate)
-      else if (anchor) frame = framesAt(time, anchor)
+      else if (anchor) frame = framesAt(time, anchor, ctx.sampleRate)
     }
     post({ type: 'midi', bytes, frame })
   }

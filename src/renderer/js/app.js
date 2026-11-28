@@ -395,7 +395,9 @@ function prewarmArmed() {
   const entry = liveEntryFor(track)
   _prewarmSig = entry ? sig : null   // an unavailable pack may come back; try again
   Promise.resolve(entry?.inst.prewarm?.()).catch(error => {
-    if (track.instrument?.type === 'fm1' && error?.message !== 'disposed') showToast(`FM-1: ${failureText(error?.message)}`)
+    if (track.instrument?.type !== 'fm1' || error?.message === 'disposed') return
+    if (_prewarmSig === sig) _prewarmSig = null   // a failed device is retried on the next prewarm
+    showToast(`FM-1: ${failureText(error?.message)}`)
   })
   const instrument = track.instrument
   if (instrument?.type === 'pack') {
@@ -444,6 +446,16 @@ function sequencerPlayNote(note, velocity, time) {
     _seqPlayer = { sig, play, packInstruments }
   }
   _seqPlayer.play({ pitch: note, velocity }, time, time + SEQ_GATE)
+}
+
+/** How far ahead the step sequencer must send notes: an FM-1 device's lead plus timer slack, else 0. */
+function sequencerLead() {
+  const track = armedTrack()
+  const instrument = armedInstrument()
+  if (instrument?.type !== 'fm1' || !track) return 0
+  const output = MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput()
+  const session = fm1Sessions()?.acquire(track.id, fm1Descriptor(instrument), output)
+  return session ? session.leadSec + 0.03 : 0
 }
 
 /**
@@ -908,6 +920,8 @@ async function openFm1Library() {
       seedCatalog: seed.default,
       // Every import/remove outcome toasts, so it is also the moment the shared list may have moved.
       toast: message => { showToast(message); refreshFm1Cache() },
+      // Firmware added or removed: the armed FM-1 track's device may now boot (or must stop).
+      onChange: () => { _prewarmSig = null; prewarmArmed() },
       pickFile: () => pickFile('.fwsc'),
       pickCatalogFile: () => pickFile('.json')
     })
@@ -2392,7 +2406,7 @@ function boot() {
   applyTheme(savedTheme())
   Keyboard.render('keyboard')
   initPads()
-  Sequencer.init('seq-tracks', { playNote: sequencerPlayNote })
+  Sequencer.init('seq-tracks', { playNote: sequencerPlayNote, lead: sequencerLead, onStop: () => _seqPlayer?.play.panic?.() })
   const tr909Container = document.getElementById('tr909-view')
   if (tr909Container) _tr909View = new Tr909View(tr909Container, { ensureAudio })
   initPadsView()
@@ -2495,6 +2509,7 @@ function boot() {
     pruneFm1(state)   // before refreshHot/prewarm, which may acquire the replacement device
     const prevPads = _hot.pads
     refreshHot(state)
+    _fm1.dialog?.refresh()   // track gone or no longer FM-1 -> close; new device -> re-bind
     if (_lessons?.active() && prevPads !== _hot.pads) _lessons.padsChanged(prevPads, _hot.pads, _loopPlayer?.isPlaying() ? _loopPlayer.currentBeat() : -1)
     syncMixerStrips(state)
     syncInstrumentUi()

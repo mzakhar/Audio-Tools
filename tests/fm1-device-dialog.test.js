@@ -53,13 +53,14 @@ describe('fm1 device dialog', () => {
   it('renders every control with an accessible name: 7 encoders, 1 pot, 14 buttons, 27 keys', () => {
     expect(dialog.open('t1')).toBe(true)
     expect(el.open).toBe(true)
-    expect(document.querySelectorAll('.fm1d-enc[role="slider"]')).toHaveLength(7)
+    expect(document.querySelectorAll('button.fm1d-enc')).toHaveLength(7)
+    expect(document.querySelectorAll('.fm1d-enc[role="slider"], .fm1d-enc[aria-valuenow]')).toHaveLength(0)
     expect(document.querySelectorAll('.fm1d-pot[role="slider"]')).toHaveLength(1)
     expect(document.querySelectorAll('button.fm1d-btn')).toHaveLength(14)
     expect(document.querySelectorAll('button.fm1d-key')).toHaveLength(27)
     for (const node of document.querySelectorAll('.fm1d-panel [aria-label]')) expect(node.getAttribute('aria-label')).toBeTruthy()
     for (const node of document.querySelectorAll('.fm1d-panel button, .fm1d-panel [role="slider"]')) expect(node.getAttribute('aria-label')).toBeTruthy()
-    expect(byName('SELECT')).not.toBeNull()
+    expect(byName('SELECT encoder')).not.toBeNull()
     expect(byName('Key C4')).not.toBeNull()
     expect(document.querySelector('canvas[aria-label="FM-1 display"]')).not.toBeNull()
     expect(document.getElementById('fm1d-title').textContent).toBe('FM-1 · Lead')
@@ -67,12 +68,14 @@ describe('fm1 device dialog', () => {
 
   it('encoder arrows send +-1, Page keys +-5, other keys nothing', () => {
     dialog.open('t1')
-    const select = byName('SELECT')
+    const select = byName('SELECT encoder')
+    expect(select.tagName).toBe('BUTTON')
+    expect(select.getAttribute('aria-description')).toBe('Arrow keys turn it')
     press(select, 'ArrowUp'); press(select, 'ArrowDown'); press(select, 'PageUp'); press(select, 'PageDown'); press(select, 'a')
     expect(session.enc.mock.calls).toEqual([[0, 1], [0, -1], [0, 5], [0, -5]])
-    press(byName('ALGORITHM'), 'ArrowRight')
+    press(byName('ALGORITHM encoder'), 'ArrowRight')
     expect(session.enc).toHaveBeenLastCalledWith(1, 1)
-    expect(select.getAttribute('aria-valuenow')).toBe('0')
+    expect(select.hasAttribute('aria-valuenow')).toBe(false)
   })
 
   it('a button presses on keydown and releases on keyup, once per hold', () => {
@@ -104,13 +107,18 @@ describe('fm1 device dialog', () => {
     expect(session.dispose).toBeUndefined()
   })
 
-  it('the pot is a 0..1023 slider starting at 900', () => {
+  it('the pot is a 0..1023 slider that reports "not set" until moved', () => {
     dialog.open('t1')
     const pot = byName('MASTER')
+    expect(pot.getAttribute('role')).toBe('slider')
+    expect(pot.getAttribute('aria-valuemin')).toBe('0')
     expect(pot.getAttribute('aria-valuemax')).toBe('1023')
-    expect(pot.getAttribute('aria-valuenow')).toBe('900')
+    expect(pot.hasAttribute('aria-valuenow')).toBe(false)
+    expect(pot.getAttribute('aria-valuetext')).toBe('not set')
     press(pot, 'End'); press(pot, 'Home'); press(pot, 'ArrowUp')
     expect(session.pot.mock.calls).toEqual([[1023], [0], [16]])
+    expect(pot.getAttribute('aria-valuenow')).toBe('16')
+    expect(pot.getAttribute('aria-valuetext')).toBe('16')
   })
 
   it('paints LCD frames and LEDs from the subscription', () => {
@@ -145,6 +153,56 @@ describe('fm1 device dialog', () => {
   })
 })
 
+describe('fm1 device dialog follows the store', () => {
+  it('closes when the track is deleted or stops being FM-1', () => {
+    dialog.open('t1')
+    track.instrument = { type: 'palette' }
+    dialog.refresh()
+    expect(el.open).toBe(false)
+    track.instrument = { type: 'fm1', firmwareHash: 'sha256:a' }
+    dialog.open('t1')
+    track = null
+    dialog.refresh()
+    expect(el.open).toBe(false)
+  })
+
+  it('re-binds to a new session after a descriptor change, unsubscribing the old one', () => {
+    dialog.open('t1')
+    const old = session
+    session = fakeSession()
+    track.instrument = { ...track.instrument, mhz: 200 }
+    dialog.refresh()
+    expect(old.unLcd).toHaveBeenCalledOnce()
+    expect(session.lcdSubs).toHaveLength(1)
+    press(byName('PLAY'), 'Enter')
+    expect(session.key).toHaveBeenCalledWith(12, true)
+    expect(old.key).not.toHaveBeenCalled()
+  })
+
+  it('a disposed session re-binds to its replacement; an unchanged store is a no-op', async () => {
+    dialog.open('t1')
+    dialog.refresh()
+    expect(session.lcdSubs).toHaveLength(1)
+    const old = session
+    session = fakeSession()
+    old.state = { state: 'disposed', underruns: 0, starved: 0 }
+    old.statusSubs.at(-1)()
+    await Promise.resolve()
+    expect(session.lcdSubs).toHaveLength(1)
+    press(byName('SELECT encoder'), 'ArrowUp')
+    expect(session.enc).toHaveBeenCalledWith(0, 1)
+  })
+
+  it('a disposed session handed back again does not loop', async () => {
+    dialog.open('t1')
+    session.state = { state: 'disposed', underruns: 0, starved: 0 }
+    session.statusSubs.at(-1)()
+    await Promise.resolve(); await Promise.resolve()
+    expect(session.lcdSubs).toHaveLength(1)
+    expect(document.querySelector('.fm1d-status').textContent).toMatch(/stopped/)
+  })
+})
+
 describe('statusLine', () => {
   it('covers each state', () => {
     expect(statusLine(null)).toMatch(/not available/)
@@ -152,5 +210,6 @@ describe('statusLine', () => {
     expect(statusLine({ state: 'disposed' })).toMatch(/stopped/)
     expect(statusLine({ state: 'failed', reason: 'halted' })).toMatch(/crashed/)
     expect(statusLine({ state: 'ready' })).toBe('Running')
+    expect(statusLine({ state: 'ready', bootTimeout: true })).toMatch(/over 8 s to start/)
   })
 })

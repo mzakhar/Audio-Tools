@@ -35,9 +35,55 @@ function quantum(p, frame) {
 }
 
 describe('fm1-worklet', () => {
+  it('posts ready only once the firmware makes sound, booting at real time per quantum', async () => {
+    const { p, x } = await booted(fakeFm1Exports({ silentFor: 5 }))
+    for (let q = 0; q < 5; q++) quantum(p, q * 128)
+    expect(p.port.sent.some(m => m.type === 'ready')).toBe(false)
+    const cap = 120e6 * 128 / 48000
+    expect(x.budgets.every(b => b <= cap + 1e-6)).toBe(true)
+    quantum(p, 5 * 128)
+    expect(p.port.sent.filter(m => m.type === 'ready')).toEqual([{ type: 'ready', timedOut: false }])
+    quantum(p, 6 * 128)
+    expect(x.budgets.at(-1)).toBeGreaterThan(cap)        // playing: catch-up budget
+    quantum(p, 7 * 128)
+    expect(p.port.sent.filter(m => m.type === 'ready')).toHaveLength(1)
+  })
+
+  it('a redrawn LCD alone does not end boot; 8 s without audio is ready anyway, flagged', async () => {
+    const lcd = await booted(fakeFm1Exports({ silentFor: 1e9 }))
+    quantum(lcd.p, 0)
+    lcd.x.lcdRev++
+    quantum(lcd.p, 128)
+    expect(lcd.p.port.sent.some(m => m.type === 'ready')).toBe(false)
+
+    let ms = 0
+    const slow = await booted(fakeFm1Exports({ silentFor: 1e9, ms: () => ms }))
+    quantum(slow.p, 0)
+    ms = 8000
+    quantum(slow.p, 128)
+    expect(slow.p.port.sent.find(m => m.type === 'ready')).toEqual({ type: 'ready', timedOut: true })
+  })
+
+  it('a failed wasm compile is not cached: the next boot compiles again', async () => {
+    const compile = vi.spyOn(WebAssembly, 'compile').mockRejectedValueOnce(new Error('bad')).mockResolvedValue({})
+    const inst = vi.spyOn(WebAssembly, 'instantiate').mockResolvedValue({ exports: fakeFm1Exports() })
+    const boot = { type: 'boot', wasm: new ArrayBuffer(8), package: new ArrayBuffer(16), mhz: 120 }
+    const a = new Processor()
+    a.port.onmessage({ data: boot })
+    await new Promise(r => setTimeout(r, 0))
+    expect(a.port.sent[0]).toMatchObject({ type: 'error', reason: 'wasm-failed' })
+    const b = new Processor()
+    b.port.onmessage({ data: boot })
+    await new Promise(r => setTimeout(r, 0))
+    expect(compile).toHaveBeenCalledTimes(2)
+    expect(b.port.sent.some(m => m.type === 'error')).toBe(false)
+    quantum(b, 0)
+    expect(b.port.sent).toContainEqual({ type: 'ready', timedOut: false })
+    compile.mockRestore(); inst.mockRestore()
+  })
+
   it('injects a timed event at the first quantum whose start >= its frame', async () => {
     const { p, x } = await booted()
-    expect(p.port.sent).toContainEqual({ type: 'ready' })
     globalThis.currentFrame = 0
     p.port.onmessage({ data: { type: 'midi', bytes: [0x90, 60, 100], frame: 200 } })
     quantum(p, 0)

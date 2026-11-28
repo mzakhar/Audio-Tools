@@ -16,6 +16,9 @@ import { fm1Descriptor, failureText } from '../fm1/descriptor.js'
 
 const FM1_SLACK = 0.03 // seconds of timer jitter on top of the session's own lead
 
+/** Seconds from play() to beat 0: 50 ms, or an FM-1 device's lead plus slack when longer. Pure. */
+export const fm1StartOffset = (fm1Lead = 0) => Math.max(0.05, fm1Lead > 0 ? fm1Lead + FM1_SLACK : 0)
+
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
 export function paletteInstrument(palette, ctx, output, params) {
@@ -66,13 +69,18 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
     if (!fm1Sessions || !key) return null
     // The device runs in its own clock: notes go to it ahead of time with exact
     // audio times, and the session owns the device, so nothing here disposes it.
-    const session = fm1Sessions.acquire(key, fm1Descriptor(instrument), output)
+    // The manager may replace the session mid-play, so each call resolves it.
+    const descriptor = fm1Descriptor(instrument)
+    fm1Sessions.acquire(key, descriptor, output)
+    const session = () => fm1Sessions.use(key, descriptor, output)
     const play = (note, time, stopTime) => {
-      session.noteOn(note.pitch, Math.round((note.velocity ?? 0.8) * 127), time)
-      session.noteOff(note.pitch, stopTime)
+      const s = session()
+      s.noteOn(note.pitch, Math.round((note.velocity ?? 0.8) * 127), time)
+      s.noteOff(note.pitch, stopTime)
     }
-    play.session = session
-    play.lead = () => session.leadSec + FM1_SLACK
+    Object.defineProperty(play, 'session', { get: session })
+    play.lead = () => session().leadSec + FM1_SLACK
+    play.panic = () => fm1Sessions.get(key)?.panic()
     return play
   }
   if (instrument.type !== 'palette') return null
@@ -104,7 +112,7 @@ const TimelinePlayer = {
   _rackClockTimer: null,
   _instrumentRackHandles: [],
   _packInstruments: [],
-  _fm1Sessions: [],       // device sessions this playback drives; stop() silences, never disposes
+  _fm1Players: [],        // FM-1 note players this playback drives; stop() silences, never disposes
 
   play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
     this.stop()  // cancel any previous playback
@@ -112,13 +120,18 @@ const TimelinePlayer = {
     const ctx = AudioEngine.getContext()
     if (!ctx) return
 
-    this._startAudioTime = ctx.currentTime + 0.05  // 50ms scheduling offset
+    // 50 ms scheduling offset, or more when an FM-1 device needs its notes earlier
+    // than that: the first notes would otherwise arrive late.
+    const fm1Lead = Math.max(0, ...tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'fm1')
+      .map(track => fm1Sessions?.acquire(track.id, fm1Descriptor(track.instrument),
+        mixerEngine ? mixerEngine.getOutput(track.mixerChannelId) : AudioEngine.getMasterInput())?.leadSec ?? 0))
+    this._startAudioTime = ctx.currentTime + fm1StartOffset(fm1Lead)
     this._startBeat = beat
     this._isPlaying = true
     this._sources = []
     this._midiTimeouts = []
     this._packInstruments = []
-    this._fm1Sessions = []
+    this._fm1Players = []
     const fm1Problems = []
     this._instrumentRackHandles = tracks
       .filter(track => track.type === 'midi' && track.instrument?.type === 'rack')
@@ -159,7 +172,7 @@ const TimelinePlayer = {
           if (!playNote) fm1Problems.push(`${track.name || 'MIDI'}: no device`)
           else if (status.state === 'failed') fm1Problems.push(`${track.name || 'MIDI'}: ${failureText(status.reason)}`)
           else if (status.state !== 'ready') fm1Problems.push(`${track.name || 'MIDI'}: still starting, early notes will be missed`)
-          if (playNote) this._fm1Sessions.push(playNote.session)
+          if (playNote) this._fm1Players.push(playNote)
         }
         if (!playNote) return
         const lead = playNote.lead?.() ?? 0
@@ -244,8 +257,8 @@ const TimelinePlayer = {
     this._instrumentRackHandles = []
     this._packInstruments.forEach(instrument => instrument.dispose())
     this._packInstruments = []
-    this._fm1Sessions.forEach(session => { try { session.panic() } catch (e) {} })
-    this._fm1Sessions = []
+    this._fm1Players.forEach(player => { try { player.panic() } catch (e) {} })
+    this._fm1Players = []
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []
     this._midiTimeouts.forEach(id => clearTimeout(id))

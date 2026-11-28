@@ -6,12 +6,12 @@ vi.mock('../src/renderer/js/audio-engine.js', () => {
 })
 vi.mock('../src/renderer/js/utils/wav-encoder.js', () => ({ audioBufferToWAV: vi.fn(() => new ArrayBuffer(44)) }))
 
-const { default: TimelinePlayer } = await import('../src/renderer/js/playback/timeline-player.js')
+const { default: TimelinePlayer, fm1StartOffset } = await import('../src/renderer/js/playback/timeline-player.js')
 const { _ctx } = await import('../src/renderer/js/audio-engine.js')
 
 function fakeSessions(status = { state: 'ready' }) {
   const session = { leadSec: 0.08, status: () => status, noteOn: vi.fn(), noteOff: vi.fn(), panic: vi.fn() }
-  return { session, sessions: { acquire: vi.fn(() => session) } }
+  return { session, sessions: { acquire: vi.fn(() => session), use: vi.fn(() => session), get: vi.fn(() => session) } }
 }
 const track = (extra = {}) => ({
   id: 't1', name: 'Pluck', type: 'midi', mixerChannelId: 'c1',
@@ -29,12 +29,33 @@ describe('timeline player with an FM-1 track', () => {
     const { session, sessions } = fakeSessions()
     play([track()], { fm1Sessions: sessions })
     expect(sessions.acquire).toHaveBeenCalledWith('t1', expect.objectContaining({ type: 'fm1', mhz: 120 }), { out: true })
-    // note due at audio time 0.05 + 1 s; lead 0.11 s
-    vi.advanceTimersByTime(939)
+    // lead 0.08 + 0.03 = 0.11 s moves beat 0 to 0.11, so the note is due at 1.11 and sent at 1.0
+    vi.advanceTimersByTime(999)
     expect(session.noteOn).not.toHaveBeenCalled()
     vi.advanceTimersByTime(2)
-    expect(session.noteOn).toHaveBeenCalledWith(60, 64, 1.05)
-    expect(session.noteOff).toHaveBeenCalledWith(60, 2.05)
+    expect(session.noteOn).toHaveBeenCalledWith(60, 64, expect.closeTo(1.11, 9))
+    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9))
+  })
+
+  it('a note on beat 0 still reaches the device a full lead ahead (start offset follows the FM-1 lead)', () => {
+    const { session, sessions } = fakeSessions()
+    session.leadSec = 0.131
+    play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [{ pitch: 62, velocity: 1, startBeat: 0, duration: 1 }] }] })], { fm1Sessions: sessions })
+    vi.advanceTimersByTime(0)
+    expect(session.noteOn).toHaveBeenCalledWith(62, 127, expect.closeTo(0.161, 9))
+    expect(fm1StartOffset()).toBe(0.05)
+    expect(fm1StartOffset(0.01)).toBe(0.05)
+    expect(fm1StartOffset(0.131)).toBeCloseTo(0.161, 9)
+  })
+
+  it('a session replaced mid-play gets the later notes', () => {
+    const { session, sessions } = fakeSessions()
+    const next = { ...session, noteOn: vi.fn(), noteOff: vi.fn() }
+    play([track()], { fm1Sessions: sessions })
+    sessions.use.mockImplementation(() => next)
+    vi.advanceTimersByTime(2000)
+    expect(session.noteOn).not.toHaveBeenCalled()
+    expect(next.noteOn).toHaveBeenCalledOnce()
   })
 
   it('stop() silences the device and cancels pending notes, without disposing', () => {

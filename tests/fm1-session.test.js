@@ -35,7 +35,7 @@ function fakeWorker() {
   }
 }
 
-function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes } = {}) {
+function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes, createWorker, createWorkletNode } = {}) {
   const ctx = fakeCtx({ worklet })
   const workers = []
   const nodes = []
@@ -47,13 +47,13 @@ function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes }
     readFirmware: vi.fn(async () => firmware),
     preferWorklet: () => worklet,
     workletUrl: 'worklets/fm1-worklet.js',
-    createWorker: () => { const w = fakeWorker(); workers.push(w); return w },
-    createWorkletNode: () => {
+    createWorker: createWorker || (() => { const w = fakeWorker(); workers.push(w); return w }),
+    createWorkletNode: createWorkletNode || (() => {
       const n = { port: fakeWorker(), connect() {}, disconnect() { this.gone = true } }
       n.port.emit = (data) => n.port.onmessage({ data })
       nodes.push(n)
       return n
-    },
+    }),
     now: () => performance.now(),
   })
   return { ctx, sessions, workers, nodes, module }
@@ -61,7 +61,7 @@ function setup({ firmware = new ArrayBuffer(32), worklet = false, getWasmBytes }
 
 const desc = { type: 'fm1', firmwareHash: 'sha256:aa', deviceChannel: 2, mhz: 120 }
 const out = { name: 'mixer' }
-const block = (frame, n = 128) => ({ type: 'block', frame, l: new Float32Array(n).fill(0.1), r: new Float32Array(n).fill(0.2) })
+const block = (frame, n = 1024) => ({ type: 'block', frame, l: new Float32Array(n).fill(0.1), r: new Float32Array(n).fill(0.2) })
 
 async function readySession(opts) {
   const env = setup(opts)
@@ -79,15 +79,16 @@ describe('fm1 session (Worker path)', () => {
     expect(s.status().state).toBe('booting')
     await flush()
     const boot = workers[0].sent[0]
-    expect(boot).toMatchObject({ type: 'boot', module, mhz: 120, leadFrames: Math.round(0.08 * R) })
+    expect(boot).toMatchObject({ type: 'boot', module, mhz: 120, sampleRate: 48000, blockFrames: 1024,
+      leadFrames: Math.round((0.08 + 1024 / 48000) * R) })
     expect(boot.package.byteLength).toBe(32)
     const seen = []
     s.onStatus(st => seen.push(st.state))
     workers[0].emit({ type: 'ready' })
     await expect(s.ready).resolves.toBeUndefined()
     expect(seen).toEqual(['ready'])
-    expect(s.status()).toMatchObject({ state: 'ready', path: 'worker', underruns: 0, late: 0, leadMs: 110 })
-    expect(s.leadSec).toBeCloseTo(0.11)
+    expect(s.status()).toMatchObject({ state: 'ready', path: 'worker', underruns: 0, late: 0, bootTimeout: false, leadMs: 131 })
+    expect(s.leadSec).toBeCloseTo(0.08 + 1024 / 48000 + 0.03, 9)
   })
 
   it('missing firmware fails without starting a worker', async () => {
@@ -107,28 +108,52 @@ describe('fm1 session (Worker path)', () => {
     expect(ctx.sources[0].stopped).toBe(true)
   })
 
-  it('schedules blocks back to back and counts an underrun', async () => {
+  it('schedules context-rate blocks at exact, contiguous frames and counts an underrun', async () => {
     const { s, w, ctx } = await readySession()
-    w.emit(block(1000))
-    w.emit(block(1128))
-    expect(ctx.sources[0].startAt).toBeCloseTo(1.02, 9)
-    expect(ctx.sources[1].startAt).toBeCloseTo(1.02 + 128 / R, 9)
+    ctx.currentTime = 1.0000123                 // not on a frame boundary
+    for (let i = 0; i < 50; i++) { w.emit(block(i * 1024)); ctx.currentTime += 0.004 }
+    const frames = ctx.sources.map(src => src.startAt * 48000)
+    expect(frames.every(f => Math.abs(f - Math.round(f)) < 1e-6)).toBe(true)
+    expect(frames.every((f, i) => i === 0 || Math.round(f - frames[i - 1]) === 1024)).toBe(true)
+    expect(Math.round(frames[0])).toBe(Math.ceil(1.0200123 * 48000))
+    expect(ctx.sources[0].buffer).toMatchObject({ length: 1024, sampleRate: 48000 })
     expect(ctx.sources[0].buffer.getChannelData(1)[0]).toBeCloseTo(0.2)
-    expect(w.sent.find(m => m.type === 'consumed').frame).toBe(1000 - Math.round(0.02 * R))
-    ctx.currentTime = 2
-    w.emit(block(1256))
+    expect(w.sent.find(m => m.type === 'consumed').frame).toBe(-960)
+    expect(s.status().underruns).toBe(0)
+    ctx.currentTime = 10
+    w.emit(block(50 * 1024))
     expect(s.status().underruns).toBe(1)
-    expect(ctx.sources[2].startAt).toBeCloseTo(2.02, 9)
+    expect(ctx.sources.at(-1).startAt).toBeCloseTo(10.02, 9)
+  })
+
+  it('a ready that came from the boot timeout is flagged in status', async () => {
+    const { sessions, workers } = setup()
+    const s = sessions.acquire('t1', desc, out)
+    await flush()
+    workers[0].emit({ type: 'ready', timedOut: true })
+    expect(s.status()).toMatchObject({ state: 'ready', bootTimeout: true })
+  })
+
+  it('a throw while starting the Worker fails the session and settles ready', async () => {
+    for (const createWorker of [
+      () => { throw new Error('no workers') },
+      () => ({ postMessage() { throw new Error('clone') }, terminate() {} }),
+    ]) {
+      const { sessions } = setup({ createWorker })
+      const s = sessions.acquire('t1', desc, out)
+      await expect(s.ready).rejects.toThrow('wasm-failed')
+      expect(s.status()).toMatchObject({ state: 'failed', reason: 'wasm-failed' })
+    }
   })
 
   it('stamps notes with the device channel and the frame of their audio time', async () => {
     const { s, w } = await readySession()
-    w.emit(block(1000))
+    w.emit(block(1024))
     s.noteOn(60, 100, 1.12)
     s.noteOff(60, 1.22)
     const midi = w.sent.filter(m => m.type === 'midi')
-    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1000 + Math.round(0.1 * R) })
-    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1000 + Math.round(0.2 * R) })
+    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1024 + 4800 })
+    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1024 + 9600 })
     s.sendMidi([0xB2, 1, 64])
     expect(w.sent.at(-1)).toEqual({ type: 'midi', bytes: [0xB2, 1, 64], frame: undefined })
   })
@@ -246,6 +271,20 @@ describe('fm1 session (worklet path)', () => {
     expect(s.status().state).toBe('ready')
   })
 
+  it('a throw constructing or connecting the node falls back to the Worker; a throw there too fails', async () => {
+    const env = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8),
+      createWorkletNode: () => ({ port: fakeWorker(), connect() { throw new Error('no') }, disconnect() {} }) })
+    const s = env.sessions.acquire('t1', desc, out)
+    await flush(); await flush()
+    expect(s.path).toBe('worker')
+    expect(env.workers).toHaveLength(1)
+
+    const bad = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8),
+      createWorkletNode: () => { throw new Error('no') }, createWorker: () => { throw new Error('no') } })
+    const t = bad.sessions.acquire('t1', desc, out)
+    await expect(t.ready).rejects.toThrow('wasm-failed')
+  })
+
   it('falls back to the Worker path when addModule fails', async () => {
     const { sessions, workers, ctx } = setup({ worklet: true })
     ctx.audioWorklet.addModule.mockRejectedValueOnce(new Error('no'))
@@ -285,6 +324,20 @@ describe('fm1 session manager', () => {
       expect(prev.status().state).toBe('disposed')
     }
     expect(a.status().state).toBe('disposed')
+  })
+
+  it('use(): keeps a failed session (no reboot per note), replaces a disposed one, else acquires', async () => {
+    const env = setup({ firmware: null })
+    const a = env.sessions.acquire('t1', desc, out)
+    await flush()
+    expect(env.sessions.use('t1', desc, out)).toBe(a)
+    expect(env.sessions.use('t1', { ...desc, mhz: 240 }, out)).not.toBe(a)
+    const b = env.sessions.get('t1')
+    b.dispose()
+    const c = env.sessions.use('t1', { ...desc, mhz: 240 }, out)
+    expect(c).not.toBe(b)
+    expect(c.status().state).toBe('booting')
+    expect(env.sessions.use('t1', { ...desc, mhz: 240 }, out)).toBe(c)
   })
 
   it('replaces a failed session on the next acquire', async () => {

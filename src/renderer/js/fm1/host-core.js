@@ -119,3 +119,43 @@ export function allNotesOffBytes() {
 export function overload({ starved = 0, underruns = 0 } = {}, prev = {}) {
   return starved > (prev.starved ?? 0) || underruns > (prev.underruns ?? 0)
 }
+
+// Worker path: resample 44.1 kHz chunks to the context rate and cut the result into blocks of
+// `size` output frames. push() returns the blocks completed by that chunk; each owns its arrays
+// (safe to transfer) and carries its start frame in output frames, contiguous from 0.
+export function createBlockWriter(inRate, outRate, size = 1024) {
+  const rs = createResampler(inRate, outRate)
+  let l = new Float32Array(size), r = new Float32Array(size), fill = 0, frame = 0
+  let sl = new Float32Array(0), sr = new Float32Array(0)
+  return {
+    push(inL, inR) {
+      const cap = Math.ceil(inL.length * outRate / inRate) + 2
+      if (sl.length < cap) { sl = new Float32Array(cap); sr = new Float32Array(cap) }
+      const n = rs.process(inL, inR, sl, sr)
+      const blocks = []
+      for (let i = 0; i < n;) {
+        const k = Math.min(n - i, size - fill)
+        l.set(sl.subarray(i, i + k), fill)
+        r.set(sr.subarray(i, i + k), fill)
+        fill += k
+        i += k
+        if (fill === size) {
+          blocks.push({ l, r, frame })
+          frame += size
+          l = new Float32Array(size); r = new Float32Array(size); fill = 0
+        }
+      }
+      return blocks
+    },
+  }
+}
+
+// Boot is over once the firmware's audio is up: the first render that fills any frames (have >
+// 0; any non-silent output implies it). A redrawn LCD is not used: on every firmware tried
+// (Felucca, Sloop, FM-1 015, Dock) the first redraw lands ~60-110 ms emulated, well before audio
+// starts (~320 ms). After timeoutMs of emulated time it is called ready anyway ('timeout', which
+// the status reports). Both hosts use this rule; the worklet carries an inline copy.
+export function bootCheck({ have = 0, ms = 0 }, timeoutMs = 8000) {
+  if (have > 0) return 'up'
+  return ms >= timeoutMs ? 'timeout' : null
+}

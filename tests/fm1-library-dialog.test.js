@@ -125,6 +125,19 @@ describe('fm1 library dialog', () => {
     expect(toast).toHaveBeenLastCalledWith('Not a valid catalog (json)')
   })
 
+  it('calls onChange after a successful import and a remove, not after a failed import', async () => {
+    const onChange = vi.fn()
+    const d = createFm1LibraryDialog({ store, seedCatalog: seed, toast, onChange, pickFile: async () => picked, pickCatalogFile: async () => pickedCatalog })
+    await d.open()
+    picked = fileOf([5, 8]); $('.fm1-import').click(); await tick()
+    expect(onChange).not.toHaveBeenCalled()
+    picked = fileOf([5, 1, 1], 'Mine.fwsc'); $('.fm1-import').click(); await tick()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    document.querySelector('.fm1-remove').click()
+    document.querySelector('.fm1-remove').click()
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+  })
+
   it('remove is two-step, warns about projects, then removes', async () => {
     await dlg.open()
     picked = fileOf([5, 1, 1], 'Mine.fwsc')

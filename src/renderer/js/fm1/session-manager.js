@@ -1,6 +1,7 @@
-// One FM-1 session per key (a track id, or 'audition'), shared by live play, timeline playback
-// and the device panel. Lives outside the live-instrument cache so rebuilding an adapter or a
-// panic never reboots a device.
+// One FM-1 session per key (a track id, or 'audition:<n>'), shared by live play, timeline
+// playback and the device panel. Lives outside the live-instrument cache so rebuilding an adapter
+// or a panic never reboots a device. Audition keys ('audition…') are unique per play, so one
+// audition ending can never release the next one's device; their owner releases them.
 import { createFm1Session } from './session.js'
 
 const defaultWorker = () => new Worker(new URL('../workers/fm1-worker.js', import.meta.url), { type: 'module' })
@@ -28,7 +29,7 @@ export function createFm1Sessions({
     sessions.delete(key)
   }
 
-  return {
+  const api = {
     // Same key and descriptor -> the existing session (re-pointed at output). A different
     // descriptor, or a session that failed or was disposed, is replaced by a fresh boot.
     acquire(key, descriptor, output) {
@@ -50,9 +51,19 @@ export function createFm1Sessions({
       sessions.set(key, session)
       return session
     },
+    // Per-call resolution for adapters (every note, panel input): the current session for key,
+    // booting one only when there is none or it was disposed. Unlike acquire it keeps a failed
+    // session with an equal descriptor, so notes into a broken device do not reboot it per note;
+    // retries go through acquire (prewarm, play, a firmware import).
+    use(key, descriptor, output) {
+      const s = sessions.get(key)
+      if (s && s.status().state === 'failed' && same(s.descriptor, normalize(descriptor))) return s
+      return api.acquire(key, descriptor, output)
+    },
     get: (key) => sessions.get(key) ?? null,
     release,
     disposeAll() { for (const key of [...sessions.keys()]) release(key) },
     panicAll() { for (const s of sessions.values()) s.panic() },
   }
+  return api
 }

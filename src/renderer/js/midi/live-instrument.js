@@ -15,6 +15,7 @@ import { fm1Descriptor, bendBytes, modBytes } from '../fm1/descriptor.js'
 import { userSampleStoreFor as defaultUserSampleStoreFor } from '../instruments/user-samples.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
+let auditionSeq = 0          // FM-1 audition keys: 'audition:<n>', one per build
 
 /** An internal drum palette answers to fixed voices, not to pitches. */
 const isDrumPalette = palette => palette?.type === 'drum' && !!palette.createDrumVoice
@@ -127,24 +128,32 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, 
   if (instrument.type === 'fm1') {
     if (!fm1Sessions) return null
     // One device per track, owned by the session manager so the live path, the
-    // timeline and the panel share it; only an audition owns (and ends) its own.
-    const key = trackId || 'audition'
+    // timeline and the panel share it; only an audition owns (and ends) its own,
+    // under a key unique to this play so a late dispose cannot end the next one.
+    const key = trackId || `audition:${++auditionSeq}`
     const descriptor = fm1Descriptor(instrument)
-    const session = fm1Sessions.acquire(key, descriptor, output)
+    // The manager may replace the session (failed, disposed), so every call
+    // resolves the current one; prewarm/preload go through acquire, which also
+    // retries a failed device.
+    // A disposed audition adapter stays silent rather than booting a new device.
+    let gone = false
+    const session = () => gone ? null : fm1Sessions.use(key, descriptor, output)
+    const acquired = () => fm1Sessions.acquire(key, descriptor, output).ready
+    fm1Sessions.acquire(key, descriptor, output)
     const at = time => Math.max(time ?? 0, ctx.currentTime)
     const ch = descriptor.deviceChannel
     return {
-      session,
-      prewarm: () => session.ready,
-      preload: () => session.ready,
-      noteOn: (pitch, velocity, time = ctx.currentTime) => session.noteOn(pitch, velocity, at(time)),
-      noteOff: (pitch, time = ctx.currentTime) => session.noteOff(pitch, at(time)),
+      get session() { return session() },
+      prewarm: acquired,
+      preload: acquired,
+      noteOn: (pitch, velocity, time = ctx.currentTime) => session()?.noteOn(pitch, velocity, at(time)),
+      noteOff: (pitch, time = ctx.currentTime) => session()?.noteOff(pitch, at(time)),
       send(event) {
-        if (event?.type === 'pitch-bend') session.sendMidi(bendBytes(ch, event.value), ctx.currentTime)
-        else if (event?.type === 'mod' && !modOff) session.sendMidi(modBytes(ch, event.value), ctx.currentTime)
+        if (event?.type === 'pitch-bend') session()?.sendMidi(bendBytes(ch, event.value), ctx.currentTime)
+        else if (event?.type === 'mod' && !modOff) session()?.sendMidi(modBytes(ch, event.value), ctx.currentTime)
       },
-      panic: () => session.panic(),
-      dispose() { if (key === 'audition') fm1Sessions.release(key) }
+      panic: () => fm1Sessions.get(key)?.panic(),
+      dispose() { if (key.startsWith('audition')) { gone = true; fm1Sessions.release(key) } }
     }
   }
 

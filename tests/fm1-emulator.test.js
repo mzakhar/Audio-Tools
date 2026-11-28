@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createRunner, CHUNK } from '../src/renderer/js/fm1/emulator.js'
+import { createRunner, bootToReady, CHUNK } from '../src/renderer/js/fm1/emulator.js'
 import { fakeFm1Exports } from './helpers/fm1-fake-exports.js'
 
 const bytesAt = (x, at) => x.midi.filter(m => m.at === at).map(m => m.b)
@@ -57,5 +57,17 @@ describe('emulator runner', () => {
     const s = run.screen()
     expect(s.lcd).toHaveLength(57600)
     expect(s.leds).toHaveLength(41)
+  })
+})
+
+describe('bootToReady', () => {
+  it('renders until the firmware makes sound, and reports a halt', () => {
+    const x = fakeFm1Exports({ silentFor: 3 })
+    expect(bootToReady(createRunner(x, { mhz: 120 }), x)).toBe('up')
+    expect(x.rendered).toHaveLength(4)
+    let ms = 0
+    const slow = fakeFm1Exports({ silentFor: 1e9, ms: () => (ms += 1000) })
+    expect(bootToReady(createRunner(slow, { mhz: 120 }), slow)).toBe('timeout')
+    expect(bootToReady(createRunner(slow, { mhz: 120 }), { ...slow, fm1_halted: () => 1 })).toBe('halted')
   })
 })

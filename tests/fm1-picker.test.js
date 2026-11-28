@@ -161,6 +161,16 @@ describe('instrument settings FM-1 source', () => {
     expect(select('Firmware').selectedOptions[0].textContent).toBe('Missing firmware')
   })
 
+  it('choosing FM-1 with no firmware installed explains why instead of silently snapping back', () => {
+    deps.fm1Installed = () => []
+    change(select('Instrument source'), 'fm1')
+    expect(dispatched).toHaveLength(0)
+    expect(select('Instrument source').value).toBe('palette')
+    expect(document.getElementById('is-body').textContent).toMatch(/No FM-1 firmware installed. Open FM-1 firmware… to import one./)
+    settings.render()
+    expect(document.getElementById('is-body').textContent).not.toMatch(/No FM-1 firmware installed/)
+  })
+
   it('says so when nothing is installed', () => {
     deps.fm1Installed = () => []
     track.instrument = { type: 'fm1', firmwareHash: 'sha256:aaa', deviceChannel: 0, mhz: 120 }

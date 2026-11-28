@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   framesAt, createEventQueue, createKeyHold, createResampler, rgb565ToRgba,
-  noteOnBytes, noteOffBytes, allNotesOffBytes, overload,
+  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, bootCheck,
 } from '../src/renderer/js/fm1/host-core.js'
 
 describe('framesAt', () => {
@@ -138,5 +138,37 @@ describe('overload', () => {
     expect(overload({ starved: 1, underruns: 0, late: 0 }, { starved: 0, underruns: 0 })).toBe(true)
     expect(overload({ starved: 1, underruns: 2 }, { starved: 1, underruns: 1 })).toBe(true)
     expect(overload({ starved: 1, underruns: 1, late: 50 }, { starved: 1, underruns: 1, late: 0 })).toBe(false)
+  })
+})
+
+describe('createBlockWriter (Worker path: 44.1 kHz -> context rate, fixed blocks)', () => {
+  it('cuts contiguous 1024-frame blocks of the right total length at 48 kHz, keeping a sine in tune', () => {
+    const w = createBlockWriter(44100, 48000, 1024)
+    const blocks = []
+    const chunks = 3445                                // ~10 s of 128-frame chunks
+    for (let c = 0; c < chunks; c++) {
+      const l = new Float32Array(128), r = new Float32Array(128)
+      for (let i = 0; i < 128; i++) { const t = (c * 128 + i) / 44100; l[i] = Math.sin(2 * Math.PI * 1000 * t); r[i] = -l[i] }
+      blocks.push(...w.push(l, r))
+    }
+    const expected = chunks * 128 * 48000 / 44100
+    expect(blocks.every((b, i) => b.frame === i * 1024 && b.l.length === 1024 && b.r.length === 1024)).toBe(true)
+    expect(blocks.length).toBe(Math.floor((expected - 2) / 1024))
+    expect(new Set(blocks.map(b => b.l.buffer)).size).toBe(blocks.length)   // each block owns its buffer
+    // continuity across chunk and block seams: compare against the ideal 48 kHz sine
+    let worst = 0
+    blocks.forEach(b => b.l.forEach((v, i) => {
+      worst = Math.max(worst, Math.abs(v - Math.sin(2 * Math.PI * 1000 * (b.frame + i) / 48000)))
+    }))
+    expect(worst).toBeLessThan(0.02)
+  })
+})
+
+describe('bootCheck', () => {
+  it('up once the firmware fills audio frames, timeout after 8 s, else still booting', () => {
+    expect(bootCheck({ have: 0, ms: 100 })).toBeNull()
+    expect(bootCheck({ have: 128, ms: 100 })).toBe('up')
+    expect(bootCheck({ have: 128, ms: 9000 })).toBe('up')
+    expect(bootCheck({ have: 0, ms: 8000 })).toBe('timeout')
   })
 })
