@@ -134,8 +134,8 @@ describe('fm1 library dialog', () => {
     expect(rm().textContent).toBe('Confirm remove')
     expect($('.fm1-detail').textContent).toContain('Projects may reference')
     expect(names()).toContain('Mine')
-    rm().click(); await tick()
-    expect(names()).toEqual(['Felucca', 'SLOOP'])
+    rm().click()
+    await vi.waitFor(() => expect(names()).toEqual(['Felucca', 'SLOOP']))
     expect(toast).toHaveBeenLastCalledWith('Removed')
   })
 
