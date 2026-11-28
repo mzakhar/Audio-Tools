@@ -1,6 +1,8 @@
 // descriptor.js — the FM-1 track instrument descriptor and the pure helpers the
 // UI and the live/timeline adapters share. No DOM, no audio.
-//   { type: 'fm1', firmwareHash: 'sha256:<hex>', deviceChannel: 0..15, mhz: 60..240 }
+//   { type: 'fm1', firmwareHash: 'sha256:<hex>', deviceChannel: 0..15, mhz: 60..240, flashAssetId? }
+// `flashAssetId` names the track's saved device flash, <project>/fm1/<id>.flash. It is kept on the
+// track but is not part of the device's identity: a save moves it, and a save must not reboot.
 // `deviceChannel` is the channel the firmware listens on; it is NOT
 // track.midiChannel, which is Synth's own input routing.
 
@@ -18,8 +20,17 @@ export function fm1Descriptor(instrument) {
     type: 'fm1',
     firmwareHash: instrument?.firmwareHash ?? null,
     deviceChannel: clampInt(instrument?.deviceChannel, 0, 15, 0),
-    mhz: clampInt(instrument?.mhz, 60, 240, FM1_DEFAULT_MHZ)
+    mhz: clampInt(instrument?.mhz, 60, 240, FM1_DEFAULT_MHZ),
+    ...(FLASH_ID.test(instrument?.flashAssetId ?? '') ? { flashAssetId: instrument.flashAssetId } : {})
   }
+}
+
+const FLASH_ID = /^[\w-]+$/
+
+/** The device's identity for "same device?" decisions (release, re-bind): the descriptor without flashAssetId. */
+export function fm1Sig(instrument) {
+  const { flashAssetId, ...identity } = fm1Descriptor(instrument)
+  return JSON.stringify(identity)
 }
 
 /** Instrument for an installed firmware record (firmware-store list()). */
@@ -46,7 +57,10 @@ export const FAILURE_TEXT = {
   'missing-firmware': 'The firmware for this track is not installed.',
   'boot-failed': 'The firmware did not start.',
   'wasm-failed': 'The emulator could not be loaded.',
-  halted: 'The device stopped (the firmware crashed).'
+  halted: 'The device stopped (the firmware crashed).',
+  'flash-missing': 'The saved device state file is missing from the project folder.',
+  'flash-corrupt': 'The saved device state file is damaged.',
+  'flash-wrong-firmware': 'The saved device state belongs to a different firmware.'
 }
 
 export const failureText = reason => FAILURE_TEXT[reason] || `The device failed${reason ? ` (${reason})` : ''}.`

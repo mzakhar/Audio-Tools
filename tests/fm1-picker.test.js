@@ -141,7 +141,7 @@ describe('instrument settings FM-1 source', () => {
     expect(select('Emulated clock').value).toBe('100')
     const text = document.getElementById('is-body').textContent
     expect(text).toMatch(/at least 120 MHz/)
-    expect(text).toMatch(/Saves on the device are not kept yet/)
+    expect(text).toMatch(/Saves on the device are kept when the project is saved to a folder/)
   })
 
   it('writes clock and channel changes back as a descriptor, and opens the device', () => {
@@ -153,6 +153,16 @@ describe('instrument settings FM-1 source', () => {
     expect(dispatched[1]).toMatchObject({ deviceChannel: 9 })
     ;[...document.querySelectorAll('#is-body button')].find(b => /Open device/.test(b.textContent)).click()
     expect(deps.openFm1Device).toHaveBeenCalledWith('t1')
+  })
+
+  it('keeps the saved device state across clock/channel changes, drops it on a firmware change', () => {
+    track.instrument = { type: 'fm1', firmwareHash: 'sha256:aaa', deviceChannel: 0, mhz: 120, flashAssetId: 'saved' }
+    settings.render()
+    change(select('Emulated clock'), '200')
+    change(select('Firmware'), 'sha256:bbb')
+    expect(dispatched[0]).toMatchObject({ mhz: 200, flashAssetId: 'saved' })
+    expect(dispatched[1]).toMatchObject({ firmwareHash: 'sha256:bbb' })
+    expect(dispatched[1]).not.toHaveProperty('flashAssetId')
   })
 
   it('marks a missing firmware instead of silently showing another', () => {
