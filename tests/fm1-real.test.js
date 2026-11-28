@@ -49,6 +49,13 @@ run('FM-1 real firmware (Felucca 1.8.4, 120 MHz)', () => {
       `${blocks} blocks @48k; boot ${bootMs.toFixed(0)} ms, rms quiet ${quiet.toExponential(2)} -> note ${loud.toExponential(2)}, ` +
       `1 s rendered in ${wall.toFixed(2)} s (rtf ${(1 / wall).toFixed(2)}), jit regions ${jitStats.regions} failed ${jitStats.failed}, ` +
       `late ${s.late}, halted ${s.halted}`)
+    // Worker-path runner: FX click (down, up 80 ms later, no further input) opens the page
+    const shot = () => new Uint16Array(x.memory.buffer, x.fm1_lcd(), 240 * 240).slice()
+    const a = shot()
+    r.key(2, true); rms(r, 0.08); r.key(2, false); rms(r, 1.5)
+    const fx = shot().reduce((n, v, i) => n + (v !== a[i]), 0)
+    console.log(`fm1-real runner: FX click ${fx} px changed`)
+    expect(fx).toBeGreaterThan(1000)
     expect(s.halted).toBe(false)
     expect(s.late).toBe(0)
     expect(loud).toBeGreaterThan(quiet * 4 + 1e-4)
@@ -92,16 +99,28 @@ run('FM-1 real firmware through the worklet host', () => {
       const first = quanta(150)                       // 0.4 s
       send({ type: 'lcd', on: true })
       quanta(40)
-      const rev = p.x.fm1_lcd_revision()
-      const before = p.port.sent.length
-      send({ type: 'key', id: 2, down: true })        // FX
-      send({ type: 'key', id: 2, down: false })       // the host holds it 4410 frames
-      quanta(225)                                     // 0.6 s
+      const shot = () => new Uint16Array(p.x.memory.buffer, p.x.fm1_lcd(), 240 * 240).slice()
+      const changed = (a, b) => a.reduce((n, v, i) => n + (v !== b[i]), 0)
+      quanta(375)
+      // the UI's click: FX down, up 80 ms later (before the 100 ms hold expires), then no further
+      // input. The pending release must still be applied by the render loop.
+      const a = shot(), before = p.port.sent.length
+      send({ type: 'key', id: 2, down: true })
+      quanta(30)
+      send({ type: 'key', id: 2, down: false })
+      quanta(560)                                     // 1.5 s
+      const fx = changed(a, shot())
       const images = p.port.sent.slice(before).filter(m => m.type === 'lcd' && m.lcd)
-      console.log(`fm1-real worklet: ready at ${readyMs} ms emulated, first-note rms ${first.toExponential(2)}, FX lcd rev ${rev} -> ${p.x.fm1_lcd_revision()}, ${images.length} images posted`)
+      // Felucca's page buttons are long-press aware: held ~0.4 s or more they do not open the page
+      // (firmware behaviour, not the host) — so the panel must release a click promptly.
+      send({ type: 'key', id: 8, down: true }); quanta(30); send({ type: 'key', id: 8, down: false }); quanta(560)   // HOME
+      const b = shot()
+      send({ type: 'key', id: 2, down: true }); quanta(560); send({ type: 'key', id: 2, down: false }); quanta(560)
+      const held = changed(b, shot())
+      console.log(`fm1-real worklet: ready at ${readyMs} ms emulated, first-note rms ${first.toExponential(2)}, FX click ${fx} px changed (${images.length} images posted), FX held 1.5 s ${held} px`)
       expect(p.port.sent.some(m => m.type === 'error')).toBe(false)
       expect(first).toBeGreaterThan(1e-3)
-      expect(p.x.fm1_lcd_revision()).not.toBe(rev)
+      expect(fx).toBeGreaterThan(1000)
       expect(images.length).toBeGreaterThan(0)
     } finally {
       for (const [k, v] of saved) globalThis[k] = v
