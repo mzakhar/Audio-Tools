@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src blob: 'self' http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob: https://cdn.freesound.org; connect-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src blob: 'self' http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob: https://cdn.freesound.org; connect-src 'self';">
   <title>SYNTH</title>
   <script src="/theme-init.js"></script>
   <link rel="stylesheet" href="style.css">
@@ -230,6 +230,19 @@
       <div class="dlg-row"><label class="dlg-label" for="slice-sens">SENSITIVITY</label><input id="slice-sens" class="slice-sens" type="range" min="0" max="100" value="50"></div>
       <p class="slice-msg dlg-note" role="status" aria-live="polite"></p>
       <div class="dlg-row"><button type="button" class="btn slice-setbpm" hidden></button><button type="button" class="btn slice-apply">APPLY</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="fm1-library-dialog" class="app-dialog" aria-labelledby="fm1-library-title">
+    <div class="dlg-header">
+      <span id="fm1-library-title" class="dlg-title">FM-1 FIRMWARE</span>
+      <button class="btn dlg-close-btn" data-close-dialog="fm1-library-dialog" aria-label="Close firmware library">✕</button>
+    </div>
+    <div class="dlg-body">
+      <input class="fm1-search" type="search" placeholder="Search firmware" aria-label="Search firmware">
+      <ul class="fm1-list"></ul>
+      <p class="fm1-detail dlg-note" role="status" aria-live="polite"></p>
+      <div class="dlg-row"><button type="button" class="btn fm1-import">Import firmware…</button><button type="button" class="btn fm1-import-catalog">Import catalog…</button></div>
     </div>
   </dialog>
 

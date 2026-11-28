@@ -137,6 +137,14 @@ export function commandItems(opts = {}) {
       visible: true,
     },
     {
+      id: 'fm1-library',
+      label: 'FM-1 firmware…',
+      shortcut: null,
+      group: 'setup',
+      enabled: true,
+      visible: true,
+    },
+    {
       id: 'library',
       label: 'Library',
       shortcut: 'Ctrl+Shift+L',
