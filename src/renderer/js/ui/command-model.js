@@ -155,6 +155,15 @@ export function commandItems(opts = {}) {
       visible: true,
     },
     {
+      id: 'fm1-record',
+      label: 'Record FM-1 to audio track…',
+      shortcut: null,
+      group: 'setup',
+      // Captures the armed FM-1 track into an audio track of the open project.
+      enabled: !!projectOpen && !!fm1Armed,
+      visible: true,
+    },
+    {
       id: 'library',
       label: 'Library',
       shortcut: 'Ctrl+Shift+L',

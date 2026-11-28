@@ -66,6 +66,9 @@ import { createFirmwareStore } from './fm1/firmware-store.js'
 import { libraryRows } from './fm1/catalog.js'
 import { fm1Descriptor, failureText } from './fm1/descriptor.js'
 import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
+import { createFm1RecordDialog } from './components/fm1-record-dialog.js'
+import { createFm1RecordFlow } from './fm1/record-flow.js'
+import { encodeWAV, interleaveToI16 } from './utils/wav-encoder.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
 import { PadGrid } from './components/pad-grid.js'
@@ -249,6 +252,69 @@ async function refreshFm1Cache() {
     console.warn('Could not read FM-1 firmware:', error)
     return false
   }
+}
+
+/** Arguments for TimelinePlayer.play from the current project; shared by the Play button and FM-1 recording. */
+function arrangePlayArgs(beat) {
+  const state = ProjectStore.getState()
+  return {
+    beat,
+    bpm: state.bpm,
+    tracks: state.tracks,
+    audioStore: AudioStore,
+    mixerEngine: MixerEngine,
+    palettes: Palettes,
+    racks: state.racks,
+    kits: state.kits,
+    packFor,
+    sampleStoreFor,
+    rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
+    fm1Sessions: fm1Sessions(),
+    notify: showToast
+  }
+}
+
+let _fm1Rec = null
+function fm1Record() {
+  if (_fm1Rec) return _fm1Rec
+  const fm1Tracks = () => _hot.midiTracks.filter(track => track.instrument?.type === 'fm1')
+  const flow = createFm1RecordFlow({
+    sessions: { get: id => { const track = _hot.byId.get(id); if (track) liveEntryFor(track); return fm1Sessions()?.get(id) ?? null } },
+    timeline: {
+      prepare: async () => {
+        const state = ProjectStore.getState()
+        await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
+      },
+      play: ({ beat, bpm }) => {
+        const started = TimelinePlayer.play({ ...arrangePlayArgs(beat), bpm })
+        syncTransportPressed()
+        return typeof started === 'number' ? started : TimelinePlayer.startAudioTime
+      },
+      stop: options => { TimelinePlayer.stop(options); syncTransportPressed() }
+    },
+    store: ProjectStore,
+    getTrack: id => _hot.byId.get(id) ?? null,
+    files: FileAdapter,
+    audioStore: AudioStore,
+    encode: (L, R, rate) => encodeWAV(interleaveToI16(L, R), rate, 2),
+    time: () => AudioEngine.getContext().currentTime,
+    now: () => new Date(),
+    bpm: () => ProjectStore.getState().bpm,
+    newId: () => crypto.randomUUID(),
+    commands: { AddTrack, AddClip, SetMixerParam },
+    notify: showToast
+  })
+  const dialog = createFm1RecordDialog({
+    flow,
+    getTracks: () => fm1Tracks().map(track => ({ id: track.id, name: track.name })),
+    armedId: () => _hot.armedId
+  })
+  return (_fm1Rec = { flow, dialog })
+}
+
+async function openFm1Record() {
+  await ensureAudio()
+  return fm1Record().dialog?.open()
 }
 
 async function openFm1Device(trackId) {
@@ -1453,21 +1519,7 @@ function initCommandBar() {
       const state = ProjectStore.getState()
       // Decode every kit track's samples first: otherwise each one's first hit is silent.
       await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
-      TimelinePlayer.play({
-        beat: 0,
-        bpm: state.bpm,
-        tracks: state.tracks,
-        audioStore: AudioStore,
-        mixerEngine: MixerEngine,
-        palettes: Palettes,
-        racks: ProjectStore.getState().racks,
-        kits: ProjectStore.getState().kits,
-        packFor,
-        sampleStoreFor,
-        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
-        fm1Sessions: fm1Sessions(),
-        notify: showToast
-      })
+      TimelinePlayer.play(arrangePlayArgs(0))
     } else if (_currentMode === 'pads') {
       startPadsLoop()
     } else {
@@ -1496,6 +1548,7 @@ function initCommandBar() {
     const track = _hot.byId.get(_hot.armedId)
     if (track?.instrument?.type === 'fm1') return openFm1Device(track.id)
   }
+  COMMANDS['fm1-record'] = () => openFm1Record()
   COMMANDS['mixer'] = () => toggleMixer()
   // No listener yet for these two — the instrument agent wires them.
   COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
