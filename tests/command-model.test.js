@@ -44,10 +44,17 @@ describe('commandItems', () => {
     expect(find(withInput, 'midi-token').label).toBe('K25')
   })
 
-  it('labels record by mode and recording state', () => {
-    expect(find(commandItems({ mode: 'arrange' }), 'record').label).toBe('Record MIDI')
-    expect(find(commandItems({ mode: 'synth' }), 'record').label).toBe('Record audio')
-    expect(find(commandItems({ mode: 'synth', recording: true }), 'record').label).toBe('Stop recording')
+  it('record (header ●) is MIDI record, enabled only in arrange', () => {
+    expect(find(commandItems({ mode: 'arrange' }), 'record')).toMatchObject({ label: 'Record MIDI', enabled: true, group: 'transport' })
+    expect(find(commandItems({ mode: 'synth' }), 'record').enabled).toBe(false)
+    expect(find(commandItems({ mode: 'pads' }), 'record').enabled).toBe(false)
+    expect(find(commandItems({ mode: 'arrange', recording: true }), 'record').label).toBe('Stop recording')
+  })
+
+  it('record-master is a setup toggle whose label reads the way out', () => {
+    expect(find(commandItems({}), 'record-master')).toMatchObject({ label: 'Record master to WAV…', group: 'setup', enabled: true, visible: true })
+    expect(find(commandItems({ masterRecording: true }), 'record-master').label).toBe('Stop master recording')
+    expect(find(commandItems({ canRecordMaster: false }), 'record-master')).toMatchObject({ label: 'Record master to WAV (needs HTTPS)', enabled: false, visible: true })
   })
 
   it('gates import-pack on a host that can import, enabled by default', () => {

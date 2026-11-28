@@ -114,13 +114,16 @@ const TimelinePlayer = {
   _instrumentRackHandles: [],
   _packInstruments: [],
   _fm1Players: [],        // FM-1 note players this playback drives; stop() silences, never disposes
+  onStop: null,           // () => void, called when a running playback stops, for any reason
 
   /** endBeat (optional): no MIDI note starting at or after it is scheduled; notes that start
    *  before it keep their full length (an FM-1 recording's length).
    *  fm1Lookahead (seconds, optional): send FM-1 notes at least this far ahead. Timers in a
    *  hidden or occluded window fire up to ~1 s late; the device queues timed notes, so a
-   *  recording sends them early enough that throttling cannot make them late. */
-  play({ beat = 0, endBeat = Infinity, fm1Lookahead = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
+   *  recording sends them early enough that throttling cannot make them late.
+   *  at (AudioContext seconds, optional): the audible time of `beat` (a count-in's downbeat).
+   *  Used only when it is later than now plus the usual start offset; otherwise ignored. */
+  play({ beat = 0, endBeat = Infinity, fm1Lookahead = 0, at, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -131,7 +134,8 @@ const TimelinePlayer = {
     const fm1Lead = Math.max(0, ...tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'fm1')
       .map(track => fm1Sessions?.acquire(track.id, fm1Descriptor(track.instrument),
         mixerEngine ? mixerEngine.getOutput(track.mixerChannelId) : AudioEngine.getMasterInput())?.leadSec ?? 0))
-    this._startAudioTime = ctx.currentTime + fm1StartOffset(fm1Lead)
+    const earliest = ctx.currentTime + fm1StartOffset(fm1Lead)
+    this._startAudioTime = at > earliest ? at : earliest
     this._startBeat = beat
     this._isPlaying = true
     this._sources = []
@@ -262,6 +266,7 @@ const TimelinePlayer = {
   /** panic:false lets notes the FM-1 devices are sounding play out (a recording's tail); notes
    *  already queued to start later are dropped (their offs stay). */
   stop({ panic = true } = {}) {
+    const wasPlaying = this._isPlaying
     this._isPlaying = false
     if (this._rackClockTimer !== null) clearInterval(this._rackClockTimer)
     this._rackClockTimer = null
@@ -278,6 +283,7 @@ const TimelinePlayer = {
     this._sources = []
     this._midiTimeouts.forEach(id => clearTimeout(id))
     this._midiTimeouts = []
+    if (wasPlaying) this.onStop?.()
   },
 
   /** Public running state — the UI derives the transport button from this. */

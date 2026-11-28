@@ -20,9 +20,6 @@ beforeEach(() => {
   // Reset internal state
   MidiController._access = null
   MidiController._input = null
-  MidiController._recording = false
-  MidiController._pendingNotes = {}
-  MidiController._recordedNotes = []
 })
 
 describe('requestAccess', () => {
@@ -59,56 +56,6 @@ describe('getInputs', () => {
     setupMockMidi([{ id: '1', name: 'Piano' }, { id: '2', name: 'Pad' }])
     await MidiController.requestAccess()
     expect(MidiController.getInputs()).toHaveLength(2)
-  })
-})
-
-describe('recording', () => {
-  it('stopRecording returns empty array with no notes played', () => {
-    MidiController.startRecording(120)
-    const notes = MidiController.stopRecording()
-    expect(notes).toEqual([])
-  })
-
-  it('records a note-on then note-off as a single note', () => {
-    MidiController.startRecording(120)
-    // Simulate instant note-on / off (same perf timestamp for simplicity)
-    const perfStart = performance.now()
-    MidiController._recordStartPerf = perfStart - 1000  // 1 second ago = 2 beats at 120 bpm
-    // Trigger note-on at t=0 beats (perfNow = recordStartPerf)
-    MidiController._pendingNotes[60] = { startBeat: 0, velocity: 0.8 }
-    // Trigger note-off 1 beat later
-    MidiController._recordStartPerf = performance.now() - 500  // 0.5s = 1 beat at 120bpm
-    // Simulate note-off processing
-    const startBeat = 0
-    const duration = Math.max(0.0625, MidiController._perfToBeat(performance.now()) - startBeat)
-    MidiController._recordedNotes.push({ id: 'n1', pitch: 60, startBeat, duration, velocity: 0.8 })
-    delete MidiController._pendingNotes[60]
-
-    const notes = MidiController.stopRecording()
-    expect(notes).toHaveLength(1)
-    expect(notes[0].pitch).toBe(60)
-    expect(notes[0].velocity).toBe(0.8)
-    expect(notes[0].duration).toBeGreaterThan(0)
-  })
-
-  it('closes pending notes on stopRecording', () => {
-    MidiController.startRecording(120)
-    MidiController._pendingNotes[64] = { startBeat: 0, velocity: 0.7 }
-    const notes = MidiController.stopRecording()
-    expect(notes).toHaveLength(1)
-    expect(notes[0].pitch).toBe(64)
-    expect(notes[0].duration).toBeGreaterThanOrEqual(0.0625)
-  })
-
-  it('sorts notes by startBeat', () => {
-    MidiController.startRecording(120)
-    MidiController._recordedNotes = [
-      { id: 'n2', pitch: 64, startBeat: 2, duration: 0.5, velocity: 0.8 },
-      { id: 'n1', pitch: 60, startBeat: 0, duration: 0.5, velocity: 0.8 }
-    ]
-    const notes = MidiController.stopRecording()
-    expect(notes[0].startBeat).toBe(0)
-    expect(notes[1].startBeat).toBe(2)
   })
 })
 

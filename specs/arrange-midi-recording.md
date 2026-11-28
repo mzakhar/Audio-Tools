@@ -1,6 +1,6 @@
 # Arrange MIDI recording — plan
 
-Status: plan, not built. Owner decisions marked **DECIDE**.
+Status: **built 2026-11-28**. Decisions taken: ● records MIDI in Arrange and master WAV moved to ⋯ "Record master to WAV…"; a new clip per take; optional 1-bar count-in, off by default; FM-1 panel keys are not notes (nothing to record).
 
 ## Problem
 

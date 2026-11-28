@@ -16,6 +16,7 @@
 /* Last in the row and never shrunk — it is the only way to reach everything
    that lost its dedicated button. */
 #app-menu-btn { flex-shrink: 0; margin-left: auto; }
+#app-menu-btn.recording { color: var(--state-record); border-color: var(--state-record); }
 @media (max-width: 620px) {
   /* Narrow windows drop the readouts, not the controls. */
   #command-bar .cmd-label, #command-bar #master-vol-display { display: none; }
@@ -74,6 +75,7 @@
   border-color: var(--state-record);
 }
 #command-bar .rec-timer {
+  color: var(--state-record);
   font: 12px var(--font-mono);
   font-variant-numeric: tabular-nums;
   min-width: 0;

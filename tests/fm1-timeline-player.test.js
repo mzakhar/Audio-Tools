@@ -49,6 +49,33 @@ describe('timeline player with an FM-1 track', () => {
     expect(fm1StartOffset(0.131)).toBeCloseTo(0.161, 9)
   })
 
+  it('at: a count-in downbeat later than the start offset anchors beat 0 there; an earlier one is ignored', () => {
+    const { session, sessions } = fakeSessions()
+    _ctx.currentTime = 10
+    // count-in: 4 clicks at 120 BPM from 10.05 -> downbeat 12.05
+    expect(play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [{ pitch: 60, velocity: 1, startBeat: 0, duration: 1 }] }] })],
+      { fm1Sessions: sessions, bpm: 120, at: 12.05 })).toBeCloseTo(12.05, 9)
+    vi.advanceTimersByTime(2000)
+    expect(session.noteOn).toHaveBeenCalledWith(60, 127, expect.closeTo(12.05, 9), 'timeline')
+    // too soon for the FM-1 lead (0.08 + 0.03): the player's own offset wins
+    expect(play([track()], { fm1Sessions: sessions, at: 10.05 })).toBeCloseTo(10.11, 9)
+  })
+
+  it('onStop fires once when a running playback stops, not for an idle stop', () => {
+    const { sessions } = fakeSessions()
+    const onStop = vi.fn()
+    TimelinePlayer.onStop = onStop
+    try {
+      TimelinePlayer.stop()
+      expect(onStop).not.toHaveBeenCalled()
+      play([track()], { fm1Sessions: sessions })
+      play([track()], { fm1Sessions: sessions })   // play() stops the previous playback first
+      expect(onStop).toHaveBeenCalledTimes(1)
+      TimelinePlayer.stop()
+      expect(onStop).toHaveBeenCalledTimes(2)
+    } finally { TimelinePlayer.onStop = null }
+  })
+
   it('a session replaced mid-play gets the later notes', () => {
     const { session, sessions } = fakeSessions()
     const next = { ...session, noteOn: vi.fn(), noteOff: vi.fn() }
@@ -162,7 +189,7 @@ describe('timeline player: recording support', () => {
     const w = workers[0]
     w.onmessage({ data: { type: 'ready' } })
     w.onmessage({ data: { type: 'block', frame: 0, l: new Float32Array(1024), r: new Float32Array(1024) } })
-    // MidiController.stopRecording() shape, as app.js stores it in the 'Rec' clip
+    // A recorded take's clip shape (midi/take-recorder.js)
     t.clips = [{ id: 'midi-clip-1', type: 'midi', name: 'Rec', startBeat: 0, duration: 4, notes: [
       { id: 'n1', pitch: 60, startBeat: 0.5, duration: 0.25, velocity: 100 / 127 },
       { id: 'n2', pitch: 67, startBeat: 1, duration: 0.0625, velocity: 1 }] }]

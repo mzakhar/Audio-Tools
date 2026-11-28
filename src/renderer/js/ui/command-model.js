@@ -10,6 +10,8 @@ const DEFAULTS = {
   mode: 'synth',
   projectOpen: false,
   recording: false,
+  masterRecording: false,
+  canRecordMaster: true,
   midiInput: null,
   canImportPacks: true,
   assistant: false,
@@ -17,7 +19,7 @@ const DEFAULTS = {
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, midiInput, canImportPacks, assistant, fm1Armed } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, masterRecording, canRecordMaster, midiInput, canImportPacks, assistant, fm1Armed } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -41,10 +43,11 @@ export function commandItems(opts = {}) {
     },
     {
       id: 'record',
-      label: recording ? 'Stop recording' : (isArrange ? 'Record MIDI' : 'Record audio'),
+      // The header ●: a MIDI take in Arrange. recording = a take is open.
+      label: recording ? 'Stop recording' : 'Record MIDI',
       shortcut: null,
       group: 'transport',
-      enabled: true,
+      enabled: isArrange,
       visible: true,
     },
     {
@@ -161,6 +164,16 @@ export function commandItems(opts = {}) {
       group: 'setup',
       // Captures the armed FM-1 track into an audio track of the open project.
       enabled: !!projectOpen && !!fm1Armed,
+      visible: true,
+    },
+    {
+      id: 'record-master',
+      // A toggle: the menu label is the way back out.
+      // The recorder is a worklet: on plain http it is shown disabled, with the reason.
+      label: masterRecording ? 'Stop master recording' : canRecordMaster ? 'Record master to WAV…' : 'Record master to WAV (needs HTTPS)',
+      shortcut: null,
+      group: 'setup',
+      enabled: masterRecording || canRecordMaster,
       visible: true,
     },
     {

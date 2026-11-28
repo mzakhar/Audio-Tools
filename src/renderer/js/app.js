@@ -12,6 +12,7 @@ import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, Se
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
+import { createTakeRecorder } from './midi/take-recorder.js'
 import { liveInstrumentFor, paletteAcceptsNote, kitAcceptsNote } from './midi/live-instrument.js'
 import FileAdapter from './io/FileAdapter.js'
 import { pickAudioFile } from './io/audio-picker.js'
@@ -230,7 +231,10 @@ function fm1Sessions() {
     getModule: async () => (await fm1Wasm()).module,
     getWasmBytes: async () => (await fm1Wasm()).bytes,
     readFirmware: async id => (await fm1Store().read(id))?.slice(0) ?? null,
-    preferWorklet: () => AudioEngine.hasWorklet(),
+    // No preferWorklet: every device runs on the Worker path. One Felucca at 120 MHz takes 75-100%
+    // of the audio rendering thread (rtf 1.2-1.4 in Electron), and a saturated render thread stops
+    // delivering port messages to the worklet, so MIDI and the LCD request never arrive: a silent
+    // device with a black LCD. See the fm1-session test "the app default…".
     workletUrl: new URL('worklets/fm1-worklet.js', document.baseURI).href,
     now: () => performance.now()
   })
@@ -332,9 +336,10 @@ async function exportWavOrDownload(bytes, name) {
 
 // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode. An FM-1
 // recording owns the transport: Play is ignored (checked again after every await, a recording may
-// have started meanwhile), Stop is the record dialog's Stop.
+// have started meanwhile), Stop is the record dialog's Stop. In arrange, resolves with the audible
+// start time TimelinePlayer.play() returns (the MIDI take's anchor). An open MIDI take owns it too.
 async function transportPlay() {
-  if (fm1Recording()) return
+  if (fm1Recording() || midiTakeOpen()) return
   await ensureAudio()
   if (fm1Recording()) return
   if (_currentMode === 'arrange') {
@@ -342,7 +347,9 @@ async function transportPlay() {
     // Decode every kit track's samples first: otherwise each one's first hit is silent.
     await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
     if (fm1Recording()) return
-    TimelinePlayer.play(arrangePlayArgs(0))
+    const started = TimelinePlayer.play(arrangePlayArgs(0))
+    syncTransportPressed()
+    return started
   } else if (_currentMode === 'pads') {
     startPadsLoop()
   } else {
@@ -353,6 +360,7 @@ async function transportPlay() {
 
 function transportStop() {
   if (fm1Recording()) return fm1RecordStop()
+  if (midiTakeOpen()) return stopMidiTake()
   if (_currentMode === 'arrange') {
     TimelinePlayer.stop()
   } else if (_currentMode === 'pads') {
@@ -372,6 +380,8 @@ function fm1RecordStop() {
 }
 
 async function openFm1Record() {
+  // One recording owns the transport at a time.
+  if (midiTakeOpen()) return showToast('STOP MIDI RECORDING FIRST')
   await ensureAudio()
   return fm1Record().dialog?.open()
 }
@@ -688,9 +698,10 @@ let _mixerStrips = new Map()  // channelId → MixerStrip
 let _currentMode = 'synth'    // 'synth' | 'arrange' | 'rack' | 'tr909' | 'pads'
 let _selectedArrangeTrackId = null
 let _rafId = null
-let _midiRecording = false
-let _midiTargetTrackId = null  // track to write recorded MIDI into
-let _midiTargetClipId = null
+let _midiTargetTrackId = null  // the armed track: routing target for notes on unclaimed channels
+let _take = null               // Arrange MIDI take recorder while a take is open
+let _takeStarting = 0          // generation of a pending ● start (prep / count-in); 0 = none
+let _takeGen = 0
 let _projectOpen = false
 let _projectName = ''
 let _projectDirty = false
@@ -703,8 +714,13 @@ let _reverbAmount = 0.2       // AudioEngine has no getter; this is the knob's c
 
 // ─── Audio init on first gesture ──────────────────────────────────────────
 async function ensureAudio() {
+  const first = !AudioEngine.getContext()
   await AudioEngine.init()
+  if (first) renderCommands()
 }
+
+/** The master recorder is a worklet: known after init; before it, a secure context is the tell. */
+const canRecordMaster = () => AudioEngine.getContext() ? AudioEngine.hasRecorder() : !!window.isSecureContext
 
 // ─── Commands ──────────────────────────────────────────────────────────────
 // One implementation per command id. The command bar, the ⋯ menu and the
@@ -732,7 +748,9 @@ function renderCommands() {
   const items = commandItems({
     mode: _currentMode,
     projectOpen: _projectOpen,
-    recording: _audioRecording,
+    recording: midiTakeOpen(),
+    masterRecording: _audioRecording,
+    canRecordMaster: canRecordMaster(),
     midiInput: _midiInputName,
     // Electron imports through IPC, the browser through a file input plus
     // IndexedDB. Dead only when neither backend exists.
@@ -744,7 +762,32 @@ function renderCommands() {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
       el.hidden = !item.visible
       if ('disabled' in el) el.disabled = !item.enabled
+      // Menu labels can change with state (record-master is a toggle).
+      if (el.classList.contains('menu-item')) el.firstElementChild.textContent = item.label
     })
+  }
+  const recBtn = document.getElementById('rec-btn')
+  if (recBtn) {
+    // Unavailable, not disabled: it stays focusable and says why.
+    const off = _currentMode !== 'arrange'
+    recBtn.disabled = false
+    recBtn.setAttribute('aria-disabled', String(off))
+    recBtn.title = off ? 'MIDI recording works in Arrange' : 'Record MIDI'
+    if (off) recBtn.setAttribute('aria-description', 'MIDI recording works in Arrange')
+    else recBtn.removeAttribute('aria-description')
+    recBtn.setAttribute('aria-pressed', midiTakeOpen() ? 'true' : 'false')
+  }
+  // A take is timed against the tempo it started with.
+  const bpmEl = document.getElementById('global-bpm')
+  if (bpmEl) {
+    bpmEl.disabled = midiTakeOpen()
+    bpmEl.title = bpmEl.disabled ? 'Stop recording to change the tempo' : ''
+  }
+  // Master WAV recording runs on with the transport stopped: the ⋯ button shows it, and stops it.
+  const menuBtn = document.getElementById('app-menu-btn')
+  if (menuBtn) {
+    menuBtn.classList.toggle('recording', _audioRecording)
+    menuBtn.setAttribute('aria-label', _audioRecording ? 'More commands (master recording; stop it here)' : 'More commands')
   }
   const nameEl = document.getElementById('project-name')
   if (nameEl) nameEl.textContent = _projectOpen ? (_projectName || 'Untitled') : 'No Project'
@@ -804,6 +847,22 @@ function buildAppMenu() {
   select.addEventListener('change', () => applyTheme(select.value))
   row.append(rowLabel, select)
   menu.appendChild(row)
+
+  // Arrange MIDI recording preference; device-local like the theme.
+  // A button, so Space and Enter toggle it; the menu stays open.
+  const countItem = Object.assign(document.createElement('button'), { type: 'button', id: 'count-in-toggle', className: 'menu-item' })
+  countItem.setAttribute('role', 'menuitemcheckbox')
+  const countMark = Object.assign(document.createElement('span'), { className: 'menu-shortcut' })
+  countMark.setAttribute('aria-hidden', 'true')
+  const showCountIn = on => { countItem.setAttribute('aria-checked', String(on)); countMark.textContent = on ? '✓' : '' }
+  countItem.append(Object.assign(document.createElement('span'), { textContent: 'Count-in before recording' }), countMark)
+  countItem.addEventListener('click', () => {
+    const on = !countInOn()
+    safeStorage()?.setItem(COUNT_IN_KEY, on ? '1' : '0')
+    showCountIn(on)
+  })
+  showCountIn(countInOn())
+  menu.appendChild(countItem)
 }
 
 /** Mixer drawer open/closed. Session state — never written to the project. */
@@ -1120,7 +1179,7 @@ async function onPadsDropFile(file, { pad = null, note = null, count = 1 } = {})
     if (got.buffer.duration > MAX_SLICE_SEC) return showToast(`Too long to slice (max ${MAX_SLICE_SEC} s)`)
     _sliceDialog ??= createSliceDialog({
       onApply: applySlice,
-      onSetBpm: bpm => ProjectStore.dispatch(SetBpm(bpm)),
+      onSetBpm: setBpm,
       audition: auditionRegion,
       onClose: stopAudition
     })
@@ -1160,7 +1219,7 @@ function runKnobEffects(effects) {
   const seeded = new Set()
   for (const fx of effects) {
     if (fx.type === 'pads') commands.push(SetPadsSettings(fx.patch))
-    else if (fx.type === 'bpm') commands.push(SetBpm(fx.bpm))
+    else if (fx.type === 'bpm') { if (midiTakeOpen()) showToast('STOP RECORDING TO CHANGE TEMPO'); else commands.push(SetBpm(fx.bpm)) }
     else if (fx.type === 'slot') {
       const kitId = armedKitId()
       const kit = kitId && kitFor(kitId, _hot.kits)
@@ -1562,7 +1621,7 @@ function initCommandBar() {
   const bpmEl = document.getElementById('global-bpm')
   bpmEl?.addEventListener('change', (e) => {
     const bpm = parseInt(e.target.value) || 120
-    ProjectStore.dispatch(SetBpm(bpm))
+    if (!setBpm(bpm)) e.target.value = ProjectStore.getState().bpm
   })
   // Store is the source of truth; push into Sequencer's copy and keep the
   // input in sync (e.g. after project open).
@@ -1636,57 +1695,159 @@ function initTransport() {
 // ─── Recorder ───────────────────────────────────────────────────────────────
 function pad(n) { return String(n).padStart(2, '0') }
 
-function initRecorder() {
-  const btn   = document.getElementById('rec-btn')
+/** Master to WAV: a ⋯ menu toggle. The recorder is a worklet, so this needs a secure context. */
+let _masterTimer = null
+async function toggleMasterRecording() {
   const timer = document.getElementById('rec-timer')
-  if (!btn) return
-
-  let interval = null, elapsed = 0
-
-  btn.addEventListener('click', async () => {
-    await ensureAudio()
-    if (!_audioRecording) {
-      if (!AudioEngine.hasRecorder()) {
-        showToast('REC NEEDS HTTPS')
-        return
-      }
-      _audioRecording = true
-      elapsed = 0
-      btn.classList.add('recording')
-      btn.setAttribute('aria-pressed', 'true')
-      if (timer) { timer.textContent = '00:00'; timer.hidden = false }
-      showToast('● RECORDING')
-      Recorder.start(AudioEngine.getContext(), AudioEngine.getRecordTap())
-      interval = setInterval(() => {
-        elapsed++
-        if (timer) timer.textContent = pad(Math.floor(elapsed / 60)) + ':' + pad(elapsed % 60)
-      }, 1000)
-    } else {
-      _audioRecording = false
-      clearInterval(interval)
-      btn.classList.remove('recording')
-      btn.setAttribute('aria-pressed', 'false')
-      if (timer) { timer.hidden = true; timer.textContent = '00:00' }
-      showToast('SAVING…')
-      const ts = new Date().toISOString().replace('T', '-').replace(/:/g, '-').slice(0, 19)
-      try {
-        const path = await Recorder.stop('synth-' + ts + '.wav', AudioStore.getProjectDir())
-        showToast(path ? `SAVED: ${path}` : 'SAVE CANCELED')
-      } catch (error) {
-        console.error('Audio recording save failed:', error)
-        showToast(`SAVE FAILED: ${error.message}`)
-      }
+  await ensureAudio()
+  if (!_audioRecording) {
+    if (!AudioEngine.hasRecorder()) {
+      showToast('REC NEEDS HTTPS')
+      return
     }
+    _audioRecording = true
+    let elapsed = 0
+    const digits = document.getElementById('rec-time')
+    if (digits) digits.textContent = '00:00'
+    if (timer) timer.hidden = false
+    showToast('● RECORDING')
+    Recorder.start(AudioEngine.getContext(), AudioEngine.getRecordTap())
+    _masterTimer = setInterval(() => {
+      elapsed++
+      const digits = document.getElementById('rec-time')
+      if (digits) digits.textContent = pad(Math.floor(elapsed / 60)) + ':' + pad(elapsed % 60)
+    }, 1000)
     renderCommands()
+  } else {
+    _audioRecording = false
+    clearInterval(_masterTimer)
+    if (timer) timer.hidden = true
+    renderCommands()
+    showToast('SAVING…')
+    const ts = new Date().toISOString().replace('T', '-').replace(/:/g, '-').slice(0, 19)
+    try {
+      const path = await Recorder.stop('synth-' + ts + '.wav', AudioStore.getProjectDir())
+      showToast(path ? `SAVED: ${path}` : 'SAVE CANCELED')
+    } catch (error) {
+      console.error('Audio recording save failed:', error)
+      showToast(`SAVE FAILED: ${error.message}`)
+    }
+  }
+}
+
+function initRecorder() {
+  COMMANDS['record-master'] = toggleMasterRecording
+  document.getElementById('rec-btn')?.addEventListener('click', () => {
+    if (midiTakeOpen()) return stopMidiTake()
+    if (_currentMode !== 'arrange') return showToast('MIDI RECORDING WORKS IN ARRANGE')
+    startMidiTake()
   })
+  // Playback stopping for any reason ends an open take (and keeps it).
+  TimelinePlayer.onStop = () => { if (_take) stopMidiTake() }
+}
+
+// ─── Arrange MIDI recording ─────────────────────────────────────────────────
+// The header ● in Arrange: play from the top and record every note the routed tracks are told to
+// play into a new clip per track, one undo step. The tap is in handleMidiEvent, where keys, pads
+// and MIDI devices all converge.
+const COUNT_IN_KEY = 'synth_count_in'
+const countInOn = () => safeStorage()?.getItem(COUNT_IN_KEY) === '1'
+function midiTakeOpen() { return !!_take || !!_takeStarting }
+
+/** Tempo edits wait while a take is open: its notes are timed against the tempo it started with. */
+function setBpm(bpm) {
+  if (midiTakeOpen()) { showToast('STOP RECORDING TO CHANGE TEMPO'); return false }
+  ProjectStore.dispatch(SetBpm(bpm))
+  return true
+}
+
+/** Everything slow before the first click: kit samples decoded, FM-1 devices booted. */
+async function prepareArrangeTake() {
+  const state = ProjectStore.getState()
+  await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
+  const sessions = fm1Sessions()
+  await Promise.allSettled(state.tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'fm1')
+    .map(track => sessions?.acquire(track.id, fm1Descriptor(track.instrument), MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput())?.ready))
+}
+
+/** One bar of metronome clicks from just after now, accent first. Returns the downbeat after them. */
+function scheduleCountIn(ctx, bpm, beatsPerBar) {
+  const beat = 60 / bpm
+  const t0 = ctx.currentTime + 0.05
+  for (let i = 0; i < beatsPerBar; i++) playClick(ctx, AudioEngine.getMasterInput(), i === 0, t0 + i * beat)
+  return t0 + beatsPerBar * beat
+}
+
+async function startMidiTake() {
+  if (_currentMode !== 'arrange' || midiTakeOpen()) return
+  if (fm1Recording()) return showToast('FM-1 RECORDING IN PROGRESS')
+  // A generation, not a flag: Stop then ● again while the first start still awaits must not
+  // let the first one start a second take.
+  const gen = _takeStarting = ++_takeGen
+  const current = () => _takeStarting === gen && _currentMode === 'arrange' && !fm1Recording()
+  renderCommands()
+  await ensureAudio()
+  if (TimelinePlayer.isPlaying() && current()) {   // no seek: a take starts from the top
+    TimelinePlayer.stop()
+    syncTransportPressed()
+    showToast('Recording from the start')
+  }
+  if (current()) await prepareArrangeTake()
+  if (!current()) {   // Stop / ● pressed, view left or FM-1 recording started meanwhile
+    if (_takeStarting === gen) _takeStarting = 0
+    renderCommands()
+    return
+  }
+  const state = ProjectStore.getState()
+  const ctx = AudioEngine.getContext()
+  // The timeline is anchored on the downbeat after the clicks, so nothing can make it late.
+  const at = countInOn() ? scheduleCountIn(ctx, state.bpm, _hot.beatsPerBar) : undefined
+  const startTime = TimelinePlayer.play({ ...arrangePlayArgs(0), at })
+  _takeStarting = 0
+  syncTransportPressed()
+  if (typeof startTime !== 'number') { renderCommands(); return }
+  const takeNumber = 1 + Math.max(0, ...state.tracks.flatMap(track => (track.clips || []).map(clip => Number(/^Take (\d+)$/.exec(clip.name)?.[1] ?? 0))))
+  // Always from beat 0 (no seek yet). Notes played during the count-in are before startTime: dropped.
+  _take = createTakeRecorder({ startTime, playBeat: 0, bpm: state.bpm, beatsPerBar: _hot.beatsPerBar, takeNumber })
+  renderCommands()
+}
+
+function stopMidiTake() {
+  if (_takeStarting) { _takeStarting = 0; renderCommands(); return }   // startMidiTake unwinds
+  if (!_take) return
+  const take = _take
+  _take = null
+  const recorded = take.finish(AudioEngine.getContext().currentTime)
+  TimelinePlayer.stop()
+  syncTransportPressed()
+  // A track deleted during the take has nowhere to put its clip.
+  const kept = recorded.filter(({ trackId }) => _hot.byId.has(trackId))
+  ProjectStore.dispatchBatch(kept.map(({ trackId, clip }) => AddClip(trackId, clip)), 'Record MIDI')
+  showToast(kept.length ? 'TAKE RECORDED' : 'NOTHING RECORDED')
+  renderCommands()
+}
+
+/** New / Open during a take: the tracks it was recording into are going away. */
+function discardMidiTake() {
+  if (!midiTakeOpen()) return
+  _take = null
+  _takeStarting = 0
+  TimelinePlayer.stop()
+  syncTransportPressed()
+  showToast('TAKE DISCARDED')
+  renderCommands()
 }
 
 // ─── Mode switching ──────────────────────────────────────────────────────────
+// The number row means pads on the synth view and voices on the 909's; 'synth' and 'arrange'
+// also let the PC keys play the piano (keyboard.js). Rack keeps 'global': no keyboard there.
+const shortcutContext = mode => ['synth', 'tr909', 'pads', 'arrange'].includes(mode) ? mode : 'global'
+
 function switchMode(mode) {
+  if (mode !== 'arrange' && midiTakeOpen()) stopMidiTake()   // a take is an Arrange thing
   _currentMode = mode
   updateGlobalPlayAvailability()
-  // The number row means pads on the synth view and voices on the 909's.
-  ShortcutManager.setContext(mode === 'synth' || mode === 'tr909' || mode === 'pads' ? mode : 'global')
+  ShortcutManager.setContext(shortcutContext(mode))
   // #app and #arrange-view visibility is CSS, keyed off this attribute.
   // #rack-view is not: RackView owns its own inline display and reads it back
   // (rack-view.js:183), so an inline style would win over any rule here.
@@ -1788,6 +1949,7 @@ function initProjectCommands() {
     const handle = await FileAdapter.createProjectFolder(getLastDir(DIR_KEY_PROJECT))
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
+    discardMidiTake()
     disposeLiveInstruments()
     disposeFm1()
     resetPadsForNewProject()
@@ -1816,6 +1978,7 @@ function initProjectCommands() {
       alert(`Could not open project:\n${e.message}`)
       return
     }
+    discardMidiTake()
     disposeLiveInstruments()
     disposeFm1()
     resetPadsForNewProject()
@@ -2097,7 +2260,6 @@ function initMidi() {
   const enableBtn  = document.getElementById('midi-enable-btn')
   const statusEl   = document.getElementById('midi-status')
   const deviceSel  = document.getElementById('midi-device-select')
-  const recBtn     = document.getElementById('midi-record-btn')
 
   if (!enableBtn) return
 
@@ -2113,7 +2275,6 @@ function initMidi() {
     }
     enableBtn.style.display = 'none'
     if (deviceSel) deviceSel.style.display = ''
-    if (recBtn) recBtn.style.display = ''
     updateMidiDeviceSelect(inputs)
   }
 
@@ -2132,65 +2293,7 @@ function initMidi() {
     _padsRouter?.resetKnobs()
     linkPads()
     if (deviceSel.value) localStorage.setItem(MIDI_DEVICE_KEY, deviceSel.value)
-    if (recBtn) recBtn.disabled = !deviceSel.value
     syncMidiToken(deviceSel)
-  })
-
-  recBtn?.addEventListener('click', () => {
-    if (!MidiController.isGranted()) return
-    if (!_midiRecording) {
-      // Find or create a MIDI target track
-      let state = ProjectStore.getState()
-      let midiTrack = _midiTargetTrackId
-        ? state.tracks.find(t => t.id === _midiTargetTrackId)
-        : state.tracks.find(t => t.type === 'midi')
-
-      if (!midiTrack) {
-        midiTrack = addMidiTrack()
-        state = ProjectStore.getState()
-      }
-      _midiTargetTrackId = midiTrack.id
-      refreshHot()
-
-      // Create a new empty MIDI clip
-      const clipId = `midi-clip-${Date.now()}`
-      const startBeat = 0
-      ProjectStore.dispatch(AddClip(midiTrack.id, {
-        id: clipId, type: 'midi', name: 'Rec',
-        startBeat, duration: 0, notes: []
-      }))
-      _midiTargetClipId = clipId
-
-      MidiController.startRecording(ProjectStore.getState().bpm)
-      _midiRecording = true
-      recBtn.textContent = '■ STOP'
-      recBtn.classList.add('recording')
-    } else {
-      const notes = MidiController.stopRecording()
-      _midiRecording = false
-      recBtn.textContent = '⏺ REC'
-      recBtn.classList.remove('recording')
-
-      if (_midiTargetTrackId && _midiTargetClipId && notes.length) {
-        const dur = notes.reduce((m, n) => Math.max(m, n.startBeat + n.duration), 0)
-        // SetMidiClipNotes also sets duration
-        ProjectStore.dispatch({
-          label: 'MIDI recording',
-          execute(state) {
-            const next = JSON.parse(JSON.stringify(state))
-            const track = next.tracks.find(t => t.id === _midiTargetTrackId)
-            if (!track) return next
-            const clip = track.clips.find(c => c.id === _midiTargetClipId)
-            if (!clip) return next
-            clip.notes = notes
-            clip.duration = Math.max(4, dur)
-            return next
-          },
-          undo(state) { return state }
-        })
-      }
-      _midiTargetClipId = null
-    }
   })
 
   // Route live MIDI note events → track instruments (routeChannel), falling
@@ -2273,6 +2376,10 @@ function initMidi() {
     for (const trackId of ids) {
       const track = _hot.byId.get(trackId)
       if (!track) continue
+      // Arrange MIDI take: what this track is told to play, at the time it is told to play it.
+      if (_take && (detail.kind === 'note-on' || detail.kind === 'note-off')) {
+        _take.note({ trackId, pitch: detail.pitch, velocity: detail.velocity, on: detail.kind === 'note-on', time, source: `${detail.source ?? detail.device ?? 'keys'}:${detail.channel}` })
+      }
       const entry = liveEntryFor(track)
       if (!entry) continue
 
@@ -2335,7 +2442,7 @@ function initMidi() {
     updateMidiDeviceSelect(e.detail.inputs)
   })
 
-  // Listen for selected track changes to auto-arm MIDI record to it
+  // Selecting a MIDI track arms it
   document.addEventListener('track-selected', (e) => {
     const state = ProjectStore.getState()
     const track = state.tracks.find(t => t.id === e.detail.trackId)
@@ -2344,9 +2451,6 @@ function initMidi() {
       refreshHot()
       syncInstrumentUi()
       prewarmArmed()
-      if (recBtn && MidiController.isGranted() && deviceSel?.value) {
-        recBtn.disabled = false
-      }
     }
   })
 }
@@ -2460,7 +2564,7 @@ function initShortcuts() {
       if (!e.repeat) _padsView?.trigger((3 - r) * 4 + c, `key${key}`)
     })
   }))
-  ShortcutManager.setContext(_currentMode === 'synth' || _currentMode === 'tr909' || _currentMode === 'pads' ? _currentMode : 'global')
+  ShortcutManager.setContext(shortcutContext(_currentMode))
 
   // Mode switching. Blocked behind a modal: switchMode() rewrites the shortcut
   // context, which the dialog would then restore on top of when it closes.

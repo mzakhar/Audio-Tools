@@ -1,14 +1,10 @@
 /**
  * MidiController.js
  * Wraps the Web MIDI API: device enumeration, input selection,
- * live note routing (fires CustomEvents on document), and
- * punch-in recording to produce MidiClip note arrays.
+ * and live note routing (fires CustomEvents on document).
  */
 import { parseMidiMessage } from './midi-message.js'
 import { applyVelocityCurve, curveForDevice } from '../pads/velocity-curve.js'
-
-let _noteIdCounter = 0
-function genNoteId() { return `mn-${++_noteIdCounter}-${Date.now()}` }
 
 const MidiController = {
   _access: null,
@@ -18,11 +14,6 @@ const MidiController = {
   _noteMap: null,     // device note → played note (SMC-PAD user preset → kit pads)
   _mappedHeld: new Map(), // device note → pitch its note-on played, so a map swap cannot strand the note-off
   onSysex: null,      // (bytes) => void, for the selected input's SysEx replies
-  _recording: false,
-  _recordStartPerf: 0, // performance.now() when recording started
-  _bpm: 120,
-  _pendingNotes: {},   // pitch → { startBeat, velocity }
-  _recordedNotes: [],  // completed note objects
 
   // ── Access ──────────────────────────────────────────────────────────────────
 
@@ -91,44 +82,7 @@ const MidiController = {
   /** Translate device notes before anything sees them; null for none. */
   setNoteMap(map) { this._noteMap = map },
 
-  // ── Recording ────────────────────────────────────────────────────────────────
-
-  /** Begin capturing MIDI note events as beat-relative positions. */
-  startRecording(bpm) {
-    this._bpm = bpm
-    this._recordStartPerf = performance.now()
-    this._pendingNotes = {}
-    this._recordedNotes = []
-    this._recording = true
-  },
-
-  /**
-   * End recording. Any notes still held are closed at the current position.
-   * Returns notes[] sorted by startBeat, ready for a MidiClip.
-   */
-  stopRecording() {
-    this._recording = false
-    const nowBeat = this._perfToBeat(performance.now())
-    for (const pitch of Object.keys(this._pendingNotes)) {
-      const p = this._pendingNotes[pitch]
-      const duration = Math.max(0.0625, nowBeat - p.startBeat)
-      this._recordedNotes.push({
-        id: genNoteId(),
-        pitch: parseInt(pitch, 10),
-        startBeat: p.startBeat,
-        duration,
-        velocity: p.velocity
-      })
-    }
-    this._pendingNotes = {}
-    return this._recordedNotes.slice().sort((a, b) => a.startBeat - b.startBeat)
-  },
-
   // ── Internal ─────────────────────────────────────────────────────────────────
-
-  _perfToBeat(perfNow) {
-    return ((perfNow - this._recordStartPerf) / 1000) * (this._bpm / 60)
-  },
 
   _onMidiMessage(e) {
     if (e.data[0] === 0xf0) { this.onSysex?.(e.data); return }
@@ -155,28 +109,12 @@ const MidiController = {
     if (parsed.kind === 'note-on') {
       const { pitch, velocity } = parsed
       document.dispatchEvent(new CustomEvent('midi-note-on', { detail: { pitch, velocity } }))
-      if (this._recording) {
-        const startBeat = this._perfToBeat(performance.now())
-        this._pendingNotes[pitch] = { startBeat, velocity: velocity / 127 }
-      }
       return
     }
 
     if (parsed.kind === 'note-off') {
       const { pitch } = parsed
       document.dispatchEvent(new CustomEvent('midi-note-off', { detail: { pitch } }))
-      if (this._recording && this._pendingNotes[pitch]) {
-        const p = this._pendingNotes[pitch]
-        const duration = Math.max(0.0625, this._perfToBeat(performance.now()) - p.startBeat)
-        this._recordedNotes.push({
-          id: genNoteId(),
-          pitch,
-          startBeat: p.startBeat,
-          duration,
-          velocity: p.velocity
-        })
-        delete this._pendingNotes[pitch]
-      }
     }
   }
 }
