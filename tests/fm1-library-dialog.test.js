@@ -36,7 +36,8 @@ const seed = { catalogId: 'synth-seed', version: '1', entries: [
 ] }
 const fileOf = (bytes, name = 'x.fwsc') => ({ name, size: bytes.length, arrayBuffer: async () => new Uint8Array(bytes).buffer })
 const jsonFile = obj => { const t = JSON.stringify(obj); return { name: 'c.json', size: t.length, text: async () => t } }
-const tick = () => new Promise(r => setTimeout(r, 5))
+// Drain 50 event-loop turns: the fake IDB hops through setTimeout(0), so wall-clock waits flake under load.
+const tick = async () => { for (let i = 0; i < 50; i++) await new Promise(r => setTimeout(r, 0)) }
 
 let toast, picked, pickedCatalog, store, dlg
 const $ = s => document.querySelector(`#fm1-library-dialog ${s}`)
