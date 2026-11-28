@@ -1,6 +1,8 @@
 // Pure patch index: flattens packs/palettes/racks into rows and ranks a search query.
 // No DOM, no globals — see specs/instrument-browser.md phase 1.
 
+import { fm1InstrumentFor } from '../fm1/descriptor.js'
+
 const manifestOf = pack => pack?.manifest || pack
 
 function packRows(pack) {
@@ -46,6 +48,18 @@ function rackRow(rackId, rack) {
   }
 }
 
+/** One installed FM-1 firmware (a firmware-store record) as a pickable device. */
+function fm1Row(record) {
+  return {
+    key: `fm1:${record.id}`,
+    kind: 'fm1',
+    label: record.name,
+    sub: 'FM-1 firmware',
+    program: null,
+    instrument: fm1InstrumentFor(record),
+  }
+}
+
 function presetRow(preset) {
   return {
     key: `preset:${preset.id}`,
@@ -60,12 +74,13 @@ function presetRow(preset) {
   }
 }
 
-export function buildIndex({ packs = [], palettes = {}, racks = {}, presets = [] } = {}) {
+export function buildIndex({ packs = [], palettes = {}, racks = {}, presets = [], fm1 = [] } = {}) {
   const rows = []
   for (const pack of packs) rows.push(...packRows(pack))
   for (const [paletteKey, palette] of Object.entries(palettes)) rows.push(paletteRow(paletteKey, palette))
   for (const [rackId, rack] of Object.entries(racks)) rows.push(rackRow(rackId, rack))
   for (const preset of presets) rows.push(presetRow(preset))
+  for (const record of fm1) rows.push(fm1Row(record))
   return rows
 }
 

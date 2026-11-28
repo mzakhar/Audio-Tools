@@ -6,7 +6,7 @@
  * AudioContext timestamps, so a DOM event would lose the timing.
  */
 import AudioEngine from './audio-engine.js'
-import { LookaheadScheduler } from './rack/scheduler.js'
+import { LookaheadScheduler, LOOK_AHEAD_SEC } from './rack/scheduler.js'
 import { padBank, padToNote, noteToPad } from './instruments/pad-map.js'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -32,6 +32,8 @@ let bpm = 120
 let isPlaying = false
 let schedulerLoop = null
 let playNote = null
+let getLead = null   // () => seconds the armed instrument needs its notes ahead (FM-1)
+let onStop = null
 
 let tracks = []
 let containerEl = null
@@ -47,9 +49,11 @@ function defaultTracks() {
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────────
-function init(containerId, { playNote: player } = {}) {
+function init(containerId, { playNote: player, lead, onStop: stopped } = {}) {
   containerEl = document.getElementById(containerId)
   playNote = player || null
+  getLead = lead || null
+  onStop = stopped || null
   tracks = defaultTracks()
   renderAll()
 }
@@ -182,14 +186,18 @@ function play() {
   const ctx = AudioEngine.getContext()
   if (!ctx) return
   isPlaying = true
+  // An instrument that needs notes early (an FM-1 device) widens the window and
+  // pushes the first step out so no note reaches it late.
+  const lead = Math.max(0, getLead?.() || 0)
   schedulerLoop = new LookaheadScheduler({
     getCurrentTime: () => AudioEngine.getContext()?.currentTime,
     schedule: scheduleStep,
     advance: stepDuration,
-    steps: STEPS
+    steps: STEPS,
+    lookahead: Math.max(LOOK_AHEAD_SEC, lead)
   })
   schedulerLoop.stepTimes = new Array(STEPS).fill(-Infinity)
-  schedulerLoop.start({ time: ctx.currentTime + 0.05 })
+  schedulerLoop.start({ time: ctx.currentTime + Math.max(0.05, lead) })
   startPlayhead()
   document.getElementById('play-btn')?.classList.add('active-btn')
 }
@@ -198,6 +206,7 @@ function stop() {
   if (!isPlaying) return
   isPlaying = false
   schedulerLoop?.stop()
+  try { onStop?.() } catch (err) {}
   stopPlayhead()
   document.getElementById('play-btn')?.classList.remove('active-btn')
 }

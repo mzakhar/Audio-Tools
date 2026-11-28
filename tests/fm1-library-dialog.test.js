@@ -36,7 +36,8 @@ const seed = { catalogId: 'synth-seed', version: '1', entries: [
 ] }
 const fileOf = (bytes, name = 'x.fwsc') => ({ name, size: bytes.length, arrayBuffer: async () => new Uint8Array(bytes).buffer })
 const jsonFile = obj => { const t = JSON.stringify(obj); return { name: 'c.json', size: t.length, text: async () => t } }
-const tick = () => new Promise(r => setTimeout(r, 5))
+// Drain 50 event-loop turns: the fake IDB hops through setTimeout(0), so wall-clock waits flake under load.
+const tick = async () => { for (let i = 0; i < 50; i++) await new Promise(r => setTimeout(r, 0)) }
 
 let toast, picked, pickedCatalog, store, dlg
 const $ = s => document.querySelector(`#fm1-library-dialog ${s}`)
@@ -122,6 +123,19 @@ describe('fm1 library dialog', () => {
     pickedCatalog = { name: 'c.json', size: 3, text: async () => 'xyz' }
     $('.fm1-import-catalog').click(); await tick()
     expect(toast).toHaveBeenLastCalledWith('Not a valid catalog (json)')
+  })
+
+  it('calls onChange after a successful import and a remove, not after a failed import', async () => {
+    const onChange = vi.fn()
+    const d = createFm1LibraryDialog({ store, seedCatalog: seed, toast, onChange, pickFile: async () => picked, pickCatalogFile: async () => pickedCatalog })
+    await d.open()
+    picked = fileOf([5, 8]); $('.fm1-import').click(); await tick()
+    expect(onChange).not.toHaveBeenCalled()
+    picked = fileOf([5, 1, 1], 'Mine.fwsc'); $('.fm1-import').click(); await tick()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    document.querySelector('.fm1-remove').click()
+    document.querySelector('.fm1-remove').click()
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
   })
 
   it('remove is two-step, warns about projects, then removes', async () => {

@@ -43,7 +43,8 @@ function link(url, label = 'Source') {
   return a
 }
 
-export function createFm1LibraryDialog({ root = document, store, seedCatalog, toast = () => {}, pickFile, pickCatalogFile } = {}) {
+// onChange(): firmware was installed or removed (the app re-acquires the armed track's device).
+export function createFm1LibraryDialog({ root = document, store, seedCatalog, toast = () => {}, onChange = () => {}, pickFile, pickCatalogFile } = {}) {
   const $ = sel => root.querySelector(`#${FM1_LIBRARY_DIALOG_ID} ${sel}`)
   const search = $('.fm1-search'), list = $('.fm1-list'), detail = $('.fm1-detail')
   const importBtn = $('.fm1-import'), catalogBtn = $('.fm1-import-catalog')
@@ -101,6 +102,7 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
     confirming = null
     try { await store.remove(r.installedId); toast('Removed') } catch { toast('Could not remove the firmware') }
     await refresh()
+    onChange()
   }
 
   // One import at a time; both buttons stay disabled until it settles. Never an unhandled rejection.
@@ -115,8 +117,10 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
     const file = await pickFile()
     if (!file) return
     if (file.size > MAX_PACKAGE) return toast(importMessage({ ok: false, reason: 'too-large' }))
-    toast(importMessage(await store.install({ name: file.name, bytes: await file.arrayBuffer() })))
+    const result = await store.install({ name: file.name, bytes: await file.arrayBuffer() })
+    toast(importMessage(result))
     await refresh()
+    if (result.ok) onChange()
   }
 
   async function importCatalog() {

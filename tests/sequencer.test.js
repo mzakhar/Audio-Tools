@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
+const clock = vi.hoisted(() => ({ currentTime: 0 }))
 vi.mock('../src/renderer/js/audio-engine.js', () => ({
   default: {
-    getContext: () => ({ currentTime: 0 }),
+    getContext: () => clock,
     getMasterInput: () => null,
     init: vi.fn()
   }
@@ -84,6 +85,26 @@ describe('Sequencer', () => {
       expect(note).toBe(padToNote('A', 1))
       expect(velocity).toBeGreaterThan(0)
       expect(time).toBeGreaterThan(0)   // ctx.currentTime is 0 in the mock
+    })
+
+    it('an instrument lead widens the lookahead and delays the first step; stop calls onStop', () => {
+      vi.useFakeTimers()
+      const playNote = vi.fn()
+      const onStop = vi.fn()
+      const container = mount({ playNote, lead: () => 0.16, onStop })
+      rows(container)[0].querySelector('.seq-cell[data-step="0"]').click()
+      rows(container)[0].querySelector('.seq-cell[data-step="1"]').click()
+      Sequencer.setBPM(120)                       // 0.125 s per step
+      Sequencer.play()
+      expect(playNote).not.toHaveBeenCalled()     // first step at 0.16, not 0.05
+      clock.currentTime = 0.01
+      vi.advanceTimersByTime(25)
+      // sent 0.15 s ahead; the next step (0.285) waits for its own window
+      expect(playNote.mock.calls.map(call => call[2])).toEqual([0.16])
+      Sequencer.stop()
+      expect(onStop).toHaveBeenCalledOnce()
+      clock.currentTime = 0
+      vi.useRealTimers()
     })
 
     it('stays silent instead of throwing when no playNote is injected', () => {
