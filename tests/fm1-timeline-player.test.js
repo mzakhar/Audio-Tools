@@ -11,7 +11,7 @@ const { _ctx } = await import('../src/renderer/js/audio-engine.js')
 const { fm1Descriptor } = await import('../src/renderer/js/fm1/descriptor.js')
 
 function fakeSessions(status = { state: 'ready' }) {
-  const session = { leadSec: 0.08, status: () => status, noteOn: vi.fn(), noteOff: vi.fn(), panic: vi.fn() }
+  const session = { leadSec: 0.08, status: () => status, noteOn: vi.fn(), noteOff: vi.fn(), panic: vi.fn(), dropFrom: vi.fn() }
   return { session, sessions: { acquire: vi.fn(() => session), use: vi.fn(() => session), get: vi.fn(() => session) } }
 }
 const track = (extra = {}) => ({
@@ -34,8 +34,8 @@ describe('timeline player with an FM-1 track', () => {
     vi.advanceTimersByTime(999)
     expect(session.noteOn).not.toHaveBeenCalled()
     vi.advanceTimersByTime(2)
-    expect(session.noteOn).toHaveBeenCalledWith(60, 64, expect.closeTo(1.11, 9))
-    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9))
+    expect(session.noteOn).toHaveBeenCalledWith(60, 64, expect.closeTo(1.11, 9), 'timeline')
+    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9), 'timeline')
   })
 
   it('a note on beat 0 still reaches the device a full lead ahead (start offset follows the FM-1 lead)', () => {
@@ -43,7 +43,7 @@ describe('timeline player with an FM-1 track', () => {
     session.leadSec = 0.131
     play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [{ pitch: 62, velocity: 1, startBeat: 0, duration: 1 }] }] })], { fm1Sessions: sessions })
     vi.advanceTimersByTime(0)
-    expect(session.noteOn).toHaveBeenCalledWith(62, 127, expect.closeTo(0.161, 9))
+    expect(session.noteOn).toHaveBeenCalledWith(62, 127, expect.closeTo(0.161, 9), 'timeline')
     expect(fm1StartOffset()).toBe(0.05)
     expect(fm1StartOffset(0.01)).toBe(0.05)
     expect(fm1StartOffset(0.131)).toBeCloseTo(0.161, 9)
@@ -113,13 +113,38 @@ describe('timeline player: recording support', () => {
       { pitch: 60, velocity: 1, startBeat: 0, duration: 2 }, { pitch: 64, velocity: 1, startBeat: 3, duration: 1 }] }] })], { fm1Sessions: sessions })
     vi.advanceTimersByTime(0)
     expect(session.noteOn).toHaveBeenCalledOnce()
-    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9))   // its off is already queued
+    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9), 'timeline')   // its off is already queued
+    _ctx.currentTime = 0.5
     TimelinePlayer.stop({ panic: false })
     expect(session.panic).not.toHaveBeenCalled()
+    expect(session.dropFrom).toHaveBeenCalledWith(0.5)   // what the device queued to start later is dropped
     expect(TimelinePlayer.isPlaying()).toBe(false)
     vi.advanceTimersByTime(5000)
     expect(session.noteOn).toHaveBeenCalledOnce()
     TimelinePlayer.stop()
+  })
+
+  it('fm1Lookahead sends FM-1 notes that far ahead; those already inside it go synchronously (no timer)', () => {
+    const { session, sessions } = fakeSessions()
+    play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [
+      { pitch: 60, velocity: 1, startBeat: 0, duration: 1 }, { pitch: 62, velocity: 1, startBeat: 1, duration: 1 },
+      { pitch: 64, velocity: 1, startBeat: 3, duration: 1 }] }] })], { fm1Sessions: sessions, fm1Lookahead: 1.5 })
+    expect(session.noteOn.mock.calls.map(c => c[0])).toEqual([60, 62])   // beats 0 and 1 (0.11, 1.11 s) are within 1.5 s
+    vi.advanceTimersByTime(1590)
+    expect(session.noteOn).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(30)                                             // sent at 3.11 - 1.5 = 1.61 s
+    expect(session.noteOn).toHaveBeenCalledTimes(3)
+  })
+
+  it('endBeat: no note starting at or after it is scheduled; one that starts before keeps its full length', () => {
+    const { session, sessions } = fakeSessions()
+    play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [
+      { pitch: 60, velocity: 1, startBeat: 3, duration: 2 },     // starts before beat 4, ends after it
+      { pitch: 64, velocity: 1, startBeat: 4, duration: 1 },     // starts on the end beat: not played
+      { pitch: 67, velocity: 1, startBeat: 6, duration: 1 }] }] })], { fm1Sessions: sessions, endBeat: 4 })
+    vi.advanceTimersByTime(10000)
+    expect(session.noteOn.mock.calls.map(c => c[0])).toEqual([60])
+    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(0.11 + 5, 9), 'timeline')
   })
 
   it('notes recorded from a MIDI device onto an FM-1 track play back through the session', async () => {
@@ -145,10 +170,10 @@ describe('timeline player: recording support', () => {
     vi.advanceTimersByTime(1000)
     const frame = time => Math.round((time - 0.02) * 48000)   // anchor: block frame 0 plays at 0.02
     expect(w.sent.filter(m => m.type === 'midi')).toEqual([
-      { type: 'midi', bytes: [0x93, 60, 100], frame: frame(S + 0.25) },
-      { type: 'midi', bytes: [0x83, 60, 0], frame: frame(S + 0.375) },
-      { type: 'midi', bytes: [0x93, 67, 127], frame: frame(S + 0.5) },
-      { type: 'midi', bytes: [0x83, 67, 0], frame: frame(S + 0.53125) },
+      { type: 'midi', bytes: [0x93, 60, 100], frame: frame(S + 0.25), src: 'timeline' },
+      { type: 'midi', bytes: [0x83, 60, 0], frame: frame(S + 0.375), src: 'timeline' },
+      { type: 'midi', bytes: [0x93, 67, 127], frame: frame(S + 0.5), src: 'timeline' },
+      { type: 'midi', bytes: [0x83, 67, 0], frame: frame(S + 0.53125), src: 'timeline' },
     ])
     sessions.disposeAll()
   })

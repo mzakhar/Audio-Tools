@@ -6,7 +6,7 @@
 //    (anchor frame + block frame, so no drift); timed events carry an output frame mapped from
 //    AudioContext time through the same anchor.
 // Note and panel methods never throw; before ready they are dropped (no replay on ready).
-import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE, createNoteCounts, createTake } from './host-core.js'
+import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE, createTake } from './host-core.js'
 
 const START_PAD = 0.02           // first block (and after an underrun) starts this far ahead
 const REPORT_MS = 20             // how often the Worker hears how far playback has got
@@ -24,7 +24,6 @@ export function createFm1Session({
   let anchor = null, lastReport = -Infinity, lcdOn = false
   const counters = { rtf: null, underruns: 0, late: 0, starved: 0, dropped: 0 }
   const held = new Set()
-  const counts = createNoteCounts()  // live + timeline on one device: offs only when the last holder lets go
   let capture = null, capSeq = 0     // { id, take, done?() }
   const sources = new Set()
   const lcdCbs = new Set(), statusCbs = new Set()
@@ -173,14 +172,16 @@ export function createFm1Session({
   })()
 
   const ch = () => descriptor.deviceChannel & 15
-  function send(bytes, time) {
+  // src tags the sender ('live' | 'timeline'): the host drops a note-off only while the other
+  // source still holds that note when the off is due (createNoteCounts).
+  const frameOf = (time) => {
+    if (time == null || !Number.isFinite(time)) return undefined
+    if (path === 'worklet') return Math.round(time * ctx.sampleRate)
+    return anchor ? framesAt(time, anchor, ctx.sampleRate) : undefined
+  }
+  function send(bytes, time, src) {
     if (state !== 'ready') return
-    let frame
-    if (time != null && Number.isFinite(time)) {
-      if (path === 'worklet') frame = Math.round(time * ctx.sampleRate)
-      else if (anchor) frame = framesAt(time, anchor, ctx.sampleRate)
-    }
-    post({ type: 'midi', bytes, frame })
+    post({ type: 'midi', bytes, frame: frameOf(time), src })
   }
 
   return {
@@ -191,28 +192,29 @@ export function createFm1Session({
     get leadSec() { return leadSec() },
     ready,
     status,
-    noteOn(pitch, vel, time) {
+    noteOn(pitch, vel, time, src = 'live') {
       if (state !== 'ready') return
       held.add(pitch)
-      counts.on(ch(), pitch)
-      send(noteOnBytes(ch(), pitch, vel), time)
+      send(noteOnBytes(ch(), pitch, vel), time, src)
     },
-    noteOff(pitch, time) {
+    noteOff(pitch, time, src = 'live') {
       if (state !== 'ready') return
-      if (!counts.off(ch(), pitch)) return
       held.delete(pitch)
-      send(noteOffBytes(ch(), pitch), time)
+      send(noteOffBytes(ch(), pitch), time, src)
     },
-    sendMidi(bytes, time) { send(bytes.slice(), time) },
-    // all notes off on every channel plus offs for held notes; queued events are dropped
+    sendMidi(bytes, time, src = 'live') { send(bytes.slice(), time, src) },
+    // all notes off on every channel plus offs for held notes; queued events are dropped and the
+    // hosts forget who held what
     panic() {
-      counts.reset()
       if (state !== 'ready') { held.clear(); return }
       const bytes = allNotesOffBytes()
       for (const p of held) bytes.push(...noteOffBytes(ch(), p))
       held.clear()
       post({ type: 'panic', bytes })
     },
+    // Transport stop without panic: events queued for `time` on are dropped, except note-offs, so
+    // what sounds rings out and nothing new starts.
+    dropFrom(time) { if (state === 'ready') post({ type: 'drop', frame: frameOf(time) }) },
     key(id, down) { if (state === 'ready') post({ type: 'key', id, down: !!down }) },
     enc(id, clicks) { if (state === 'ready') post({ type: 'enc', id, clicks }) },
     pot(value) { if (state === 'ready') post({ type: 'pot', value }) },
@@ -239,7 +241,7 @@ export function createFm1Session({
       for (const src of sources) cap.take.add(src.buffer.getChannelData(0), src.buffer.getChannelData(1), src.fm1At)
       const end = () => { if (capture === cap) capture = null }
       return {
-        peak: () => cap.take.peak,
+        peak: () => cap.take.takeRecentPeak(),   // since the previous call: a meter window
         frames: () => cap.take.frames(),
         full: () => cap.take.full,
         // Worker blocks arrive ~leadSec ahead of audible time, so once currentTime passes the

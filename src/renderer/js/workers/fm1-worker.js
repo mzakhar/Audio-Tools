@@ -8,7 +8,7 @@
 // emulator frames: output frame 0 is the emulator frame at which `ready` was posted.
 //
 // in:  boot { module, package, mhz, leadFrames, sampleRate, blockFrames }   consumed { frame }
-//      midi { bytes, frame? }   panic { bytes }   key { id, down }   enc { id, clicks }
+//      midi { bytes, frame?, src? }   panic { bytes }   drop { frame? }   key { id, down }   enc { id, clicks }
 //      pot { value }   lcd { on }
 // out: ready { timedOut }   error { reason, message }   block { l, r, frame }   lcd { lcd|null, leds }
 //      status { rtf, starved, late, dropped }
@@ -69,8 +69,9 @@ self.onmessage = (e) => {
   if (m.type === 'boot') { boot(m); return }
   if (!run) return
   if (m.type === 'consumed') base = { frame: toEmu(m.frame), wall: now() }
-  else if (m.type === 'midi') run.midi(m.bytes, m.frame === undefined ? undefined : toEmu(m.frame))
+  else if (m.type === 'midi') run.midi(m.bytes, m.frame === undefined ? undefined : toEmu(m.frame), m.src)
   else if (m.type === 'panic') run.panic(m.bytes)
+  else if (m.type === 'drop') run.drop(m.frame === undefined ? undefined : toEmu(m.frame))
   else if (m.type === 'key') run.key(m.id, m.down)
   else if (m.type === 'enc') run.enc(m.id, m.clicks)
   else if (m.type === 'pot') run.pot(m.value)

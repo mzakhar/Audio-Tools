@@ -3,8 +3,8 @@
 // context's quantum, with timed MIDI applied at the first quantum whose start frame (context
 // frames) >= the event's frame. ONE self-contained file: an AudioWorklet does not import modules
 // everywhere, so the JIT host (fm1/jit.js, from fm1-emu web/jit.js, commit 69cb1ef, MIT,
-// Copyright (c) 2026 Joakim Eriksson) and the queue, key hold and resampler (fm1/host-core.js)
-// and createBootWatch (fm1/host-core.js) are inline copies. Keep them in step.
+// Copyright (c) 2026 Joakim Eriksson) and the queue, note counts, key hold and resampler
+// (fm1/host-core.js) and createBootWatch (fm1/host-core.js) are inline copies. Keep them in step.
 //
 // Boot runs inside process() at real time (each quantum gets only its own share of emulated
 // cycles), so a booting device never hogs the audio thread other nodes share. `ready` is posted
@@ -12,7 +12,7 @@
 // LCD) or after 8 s of
 // emulated time, flagged timedOut — the same rule as the Worker path.
 //
-// in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame? }   panic { bytes }
+// in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame?, src? }   panic { bytes }   drop { frame }
 //      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   capture { on, id }   dispose
 // out: ready { timedOut }   error { reason, message }   lcd { lcd|null, leds }   status { rtf, starved, late, dropped }
 //      cap { id, L, R, frame, last? } — copies of the output from context frame `frame`, contiguous
@@ -52,7 +52,7 @@ function jitImports(exports, stats) {
   }
 }
 
-function createEventQueue(limit = 4096) {
+function createEventQueue(limit = 4096, notes = null) {
   const items = []
   return {
     push(ev) {
@@ -65,10 +65,41 @@ function createEventQueue(limit = 4096) {
     takeUpTo(frame) {
       let n = 0
       while (n < items.length && items[n].frame <= frame) n++
-      return items.splice(0, n).map(e => e.bytes)
+      const out = []
+      for (const e of items.splice(0, n)) {
+        const bytes = notes && e.src ? notes.filter(e.bytes, e.src) : e.bytes
+        if (bytes) out.push(bytes)
+      }
+      return out
+    },
+    dropFrom(frame) {
+      for (let i = items.length - 1; i >= 0 && items[i].frame >= frame; i--) if (!isNoteOff(items[i].bytes)) items.splice(i, 1)
     },
     clear() { items.length = 0 },
     get size() { return items.length },
+  }
+}
+
+const isNoteOff = (b) => b.length === 3 && ((b[0] & 0xF0) === 0x80 || ((b[0] & 0xF0) === 0x90 && b[2] === 0))
+
+function createNoteCounts() {
+  const holders = new Map()
+  return {
+    filter(bytes, src) {
+      const kind = bytes[0] & 0xF0
+      if (bytes.length !== 3 || (kind !== 0x80 && kind !== 0x90)) return bytes
+      const key = (bytes[0] & 15) * 128 + (bytes[1] & 127)
+      let set = holders.get(key)
+      if (kind === 0x90 && bytes[2] > 0) {
+        if (!set) holders.set(key, set = new Set())
+        set.add(src)
+        return bytes
+      }
+      set?.delete(src)
+      if (set && !set.size) holders.delete(key)
+      return set?.size ? null : bytes
+    },
+    reset() { holders.clear() },
   }
 }
 
@@ -141,7 +172,8 @@ class Fm1Processor extends AudioWorkletProcessor {
     super()
     this.x = null
     this.done = false
-    this.queue = createEventQueue()
+    this.notes = createNoteCounts()
+    this.queue = createEventQueue(4096, this.notes)
     this.keys = createKeyHold()
     this.rs = createResampler(FM1_RATE, sampleRate)
     this.emu = 0                     // emulator frames rendered
@@ -201,8 +233,9 @@ class Fm1Processor extends AudioWorkletProcessor {
     if (m.type === 'midi') {
       let frame = m.frame
       if (frame === undefined || frame < currentFrame) { if (frame !== undefined) this.late++; frame = currentFrame }
-      if (!this.queue.push({ frame, bytes: m.bytes })) this.dropped++
-    } else if (m.type === 'panic') { this.queue.clear(); this.queue.push({ frame: currentFrame, bytes: m.bytes }) }
+      if (!this.queue.push({ frame, bytes: m.bytes, src: m.src })) this.dropped++
+    } else if (m.type === 'panic') { this.queue.clear(); this.notes.reset(); this.queue.push({ frame: currentFrame, bytes: m.bytes }) }
+    else if (m.type === 'drop') this.queue.dropFrom(Math.max(m.frame ?? currentFrame, currentFrame))
     else if (m.type === 'key') {
       if (m.down) { this.keys.down(m.id, this.emu); x.fm1_key(m.id, 1) } else this.keys.up(m.id, this.emu)
     } else if (m.type === 'enc') x.fm1_enc(m.id, m.clicks | 0)

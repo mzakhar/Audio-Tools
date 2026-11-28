@@ -3,14 +3,14 @@
 // record-flow.js is the shell that runs the effects.
 
 export const MAX_TAKE_SECONDS = 600
-export const BEATS_PER_BAR = 4
 
 const pad = n => String(n).padStart(2, '0')
 
-/** `fm1-<track>-<yyyymmdd-hhmmss>.wav`, always matching /^[\w.-]+\.wav$/i (what the Electron writer demands). */
+/** `fm1-<track>-<yyyymmdd-hhmmss-mmm>.wav`, always matching /^[\w.-]+\.wav$/i (what the Electron
+ *  writer demands). Milliseconds keep two takes in one second from overwriting each other. */
 export function takeFileName(trackName, date) {
   const slug = String(trackName ?? '').normalize('NFKD').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'track'
-  const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${String(date.getMilliseconds()).padStart(3, '0')}`
   return `fm1-${slug}-${stamp}.wav`
 }
 
@@ -19,9 +19,12 @@ export function clipFields({ startBeat, frames, rate, bpm }) {
   return { startBeat, duration: frames / rate * bpm / 60, offset: 0, fadeIn: 0, fadeOut: 0 }
 }
 
+/** Beats in `bars` at the project's time signature (beatsPerBar = its numerator); null = until Stop. */
+export const lengthBeats = (bars, beatsPerBar = 4) => (bars == null ? null : bars * beatsPerBar)
+
 /** Audible ctx time the recording ends by length, or null for "until Stop". */
-export function endTimeFor({ startTime, bars, bpm }) {
-  return bars == null ? null : startTime + bars * BEATS_PER_BAR * 60 / bpm
+export function endTimeFor({ startTime, bars, bpm, beatsPerBar = 4 }) {
+  return bars == null ? null : startTime + lengthBeats(bars, beatsPerBar) * 60 / bpm
 }
 
 /** Dialog strings -> { opts } or { error }. Start beat integer >= 0, bars blank or integer >= 1, tail 0..10 s. */

@@ -68,6 +68,8 @@ import { fm1Descriptor, failureText } from './fm1/descriptor.js'
 import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
 import { createFm1RecordDialog } from './components/fm1-record-dialog.js'
 import { createFm1RecordFlow } from './fm1/record-flow.js'
+import { isActive as fm1RecordActive } from './fm1/record-take.js'
+import { newId } from './utils/new-id.js'
 import { encodeWAV, interleaveToI16 } from './utils/wav-encoder.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
@@ -285,8 +287,9 @@ function fm1Record() {
         const state = ProjectStore.getState()
         await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
       },
-      play: ({ beat, bpm }) => {
-        const started = TimelinePlayer.play({ ...arrangePlayArgs(beat), bpm })
+      play: ({ beat, bpm, endBeat }) => {
+        // FM-1 notes go 1.5 s ahead: a background window holds timers ~1 s, which cut the first notes of a take
+        const started = TimelinePlayer.play({ ...arrangePlayArgs(beat), bpm, endBeat, fm1Lookahead: 1.5 })
         syncTransportPressed()
         return typeof started === 'number' ? started : TimelinePlayer.startAudioTime
       },
@@ -294,13 +297,14 @@ function fm1Record() {
     },
     store: ProjectStore,
     getTrack: id => _hot.byId.get(id) ?? null,
-    files: FileAdapter,
+    files: { saveRecording: (...args) => FileAdapter.saveRecording(...args), exportWav: exportWavOrDownload },
     audioStore: AudioStore,
     encode: (L, R, rate) => encodeWAV(interleaveToI16(L, R), rate, 2),
     time: () => AudioEngine.getContext().currentTime,
     now: () => new Date(),
     bpm: () => ProjectStore.getState().bpm,
-    newId: () => crypto.randomUUID(),
+    beatsPerBar: () => _hot.beatsPerBar,
+    newId,
     commands: { AddTrack, AddClip, SetMixerParam },
     notify: showToast
   })
@@ -310,6 +314,20 @@ function fm1Record() {
     armedId: () => _hot.armedId
   })
   return (_fm1Rec = { flow, dialog })
+}
+
+/** True while an FM-1 recording owns the transport (arming, recording, tail, saving). */
+const fm1Recording = () => !!_fm1Rec && fm1RecordActive(_fm1Rec.flow.state().phase)
+
+/** Save-as for a WAV: the native picker (Electron dialog / showSaveFilePicker), or a plain download
+ *  where neither exists (the LAN http route). Resolves null when the user cancelled. */
+async function exportWavOrDownload(bytes, name) {
+  if (window.electronFS || typeof window.showSaveFilePicker === 'function') return FileAdapter.exportWav(bytes, name)
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+  const link = Object.assign(document.createElement('a'), { href: url, download: name })
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+  return name
 }
 
 async function openFm1Record() {
@@ -338,8 +356,10 @@ function pruneFm1(state) {
 
 /** A project switch ends every device of the old project. */
 function disposeFm1() {
+  _fm1Rec?.flow.abort('The project changed, so the recording was cancelled.')
   _fm1.sessions?.disposeAll()
   _fm1.tracked.clear()
+  _prewarmSig = null   // the same track ids may come back (re-Open): their devices must boot again
 }
 // Leaving the page ends every device too: Workers and worklet nodes must not outlive it.
 // (Pagehide, not beforeunload: it also fires on bfcache entry and mobile tab discard.)
@@ -1514,6 +1534,7 @@ function initCommandBar() {
 
   // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
   document.getElementById('global-play-btn')?.addEventListener('click', async () => {
+    if (fm1Recording()) return   // the recording owns the transport
     await ensureAudio()
     if (_currentMode === 'arrange') {
       const state = ProjectStore.getState()
@@ -1528,6 +1549,7 @@ function initCommandBar() {
     syncTransportPressed()
   })
   document.getElementById('global-stop-btn')?.addEventListener('click', () => {
+    if (fm1Recording()) { _fm1Rec.flow.stop(); return }   // = the record dialog's Stop (keeps the take)
     if (_currentMode === 'arrange') {
       TimelinePlayer.stop()
     } else if (_currentMode === 'pads') {
@@ -2567,6 +2589,7 @@ function boot() {
     const prevPads = _hot.pads
     refreshHot(state)
     _fm1.dialog?.refresh()   // track gone or no longer FM-1 -> close; new device -> re-bind
+    if (_fm1Rec?.dialog?.isOpen()) _fm1Rec.dialog.refresh()   // FM-1 tracks added/renamed/removed
     if (_lessons?.active() && prevPads !== _hot.pads) _lessons.padsChanged(prevPads, _hot.pads, _loopPlayer?.isPlaying() ? _loopPlayer.currentBeat() : -1)
     syncMixerStrips(state)
     syncInstrumentUi()

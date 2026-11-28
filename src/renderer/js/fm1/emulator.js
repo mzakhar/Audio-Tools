@@ -3,7 +3,7 @@
 // (workers/fm1-worker.js) and by the node integration test; the AudioWorklet carries its own copy
 // of this logic (public/worklets/fm1-worklet.js).
 import { jitImports, newJitStats } from './jit.js'
-import { createEventQueue, createKeyHold, createBootWatch, FM1_RATE } from './host-core.js'
+import { createEventQueue, createKeyHold, createBootWatch, createNoteCounts, FM1_RATE } from './host-core.js'
 
 export const CHUNK = 128
 const LCD_PIXELS = 240 * 240
@@ -30,7 +30,8 @@ export async function bootEmulator({ module, pkg, mhz, jit = true }) {
 
 // The render loop's state over booted exports. frame = start frame of the next chunk.
 export function createRunner(x, { mhz, keyHoldFrames = 4410 } = {}) {
-  const queue = createEventQueue()
+  const notes = createNoteCounts()
+  const queue = createEventQueue(4096, notes)
   const keys = createKeyHold(keyHoldFrames)
   const bootBudget = mhz * 1e6 * 0.02
   const playBudget = mhz * 1e6 * 1.5 * CHUNK / FM1_RATE
@@ -52,13 +53,16 @@ export function createRunner(x, { mhz, keyHoldFrames = 4410 } = {}) {
     get playing() { return playing },
     // Timed MIDI: applied at the first chunk whose start >= target; a past target applies at the
     // next chunk and counts as late. Returns false when the queue is full (event dropped).
-    midi(bytes, target) {
+    // src ('live' | 'timeline') tags notes for the shared-note rule (createNoteCounts).
+    midi(bytes, target, src) {
       if (target === undefined || target < frame) { if (target !== undefined) late++; target = frame }
-      if (!queue.push({ frame: target, bytes })) { dropped++; return false }
+      if (!queue.push({ frame: target, bytes, src })) { dropped++; return false }
       return true
     },
     // Drop every queued event, then send these bytes at the next chunk.
-    panic(bytes) { queue.clear(); queue.push({ frame, bytes }) },
+    panic(bytes) { queue.clear(); notes.reset(); queue.push({ frame, bytes }) },
+    // Stop without panic: nothing queued from target on starts; note-offs stay.
+    drop(target) { queue.dropFrom(Math.max(target ?? frame, frame)) },
     key(id, down) {
       if (down) { keys.down(id, frame); x.fm1_key(id, 1) } else keys.up(id, frame)
     },

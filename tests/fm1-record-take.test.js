@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { takeFileName, clipFields, endTimeFor, parseOptions, nextPhase, isActive } from '../src/renderer/js/fm1/record-take.js'
+import { takeFileName, clipFields, endTimeFor, lengthBeats, parseOptions, nextPhase, isActive } from '../src/renderer/js/fm1/record-take.js'
 
 describe('takeFileName', () => {
   const d = new Date(2026, 10, 28, 9, 5, 7)
   it('stamps and sanitises to the Electron writer pattern', () => {
-    expect(takeFileName('Lead', d)).toBe('fm1-Lead-20261128-090507.wav')
+    expect(takeFileName('Lead', d)).toBe('fm1-Lead-20261128-090507-000.wav')
+    // two takes in one second get different names
+    expect(takeFileName('Lead', new Date(2026, 10, 28, 9, 5, 7, 42))).toBe('fm1-Lead-20261128-090507-042.wav')
     for (const name of ['../../etc/passwd', 'a b/c\\d:e*?"<>|', 'Süß ünï', '', '   ', null, 'x'.repeat(200)]) {
       expect(takeFileName(name, d)).toMatch(/^[\w.-]+\.wav$/i)
     }
@@ -29,6 +31,11 @@ describe('endTimeFor', () => {
     expect(endTimeFor({ startTime: 5, bars: null, bpm: 120 })).toBeNull()
     expect(endTimeFor({ startTime: 5, bars: 2, bpm: 120 })).toBe(9)
     expect(endTimeFor({ startTime: 1, bars: 1, bpm: 97.5 })).toBeCloseTo(1 + 4 * 60 / 97.5, 9)
+  })
+  it('uses the project time signature: 2 bars of 3/4 at 120 bpm = 6 beats = 3 s', () => {
+    expect(lengthBeats(2, 3)).toBe(6)
+    expect(lengthBeats(null, 3)).toBeNull()
+    expect(endTimeFor({ startTime: 5, bars: 2, bpm: 120, beatsPerBar: 3 })).toBe(8)
   })
 })
 

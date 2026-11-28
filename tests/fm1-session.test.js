@@ -152,10 +152,10 @@ describe('fm1 session (Worker path)', () => {
     s.noteOn(60, 100, 1.12)
     s.noteOff(60, 1.22)
     const midi = w.sent.filter(m => m.type === 'midi')
-    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1024 + 4800 })
-    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1024 + 9600 })
+    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1024 + 4800, src: 'live' })
+    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1024 + 9600, src: 'live' })
     s.sendMidi([0xB2, 1, 64])
-    expect(w.sent.at(-1)).toEqual({ type: 'midi', bytes: [0xB2, 1, 64], frame: undefined })
+    expect(w.sent.at(-1)).toEqual({ type: 'midi', bytes: [0xB2, 1, 64], frame: undefined, src: 'live' })
   })
 
   it('takes late / starved counts from worker status', async () => {
@@ -252,7 +252,9 @@ describe('fm1 session (worklet path)', () => {
     port.emit({ type: 'ready' })
     expect(s.leadSec).toBeCloseTo(0.02)
     s.noteOn(60, 100, 2)
-    expect(port.sent.at(-1)).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 96000 })
+    expect(port.sent.at(-1)).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 96000, src: 'live' })
+    s.dropFrom(2.5)
+    expect(port.sent.at(-1)).toEqual({ type: 'drop', frame: 120000 })
     s.dispose()
     expect(port.sent.at(-1)).toEqual({ type: 'dispose' })
     expect(nodes[0].gone).toBe(true)
@@ -283,6 +285,20 @@ describe('fm1 session (worklet path)', () => {
       createWorkletNode: () => { throw new Error('no') }, createWorker: () => { throw new Error('no') } })
     const t = bad.sessions.acquire('t1', desc, out)
     await expect(t.ready).rejects.toThrow('wasm-failed')
+  })
+
+  // Two worklet devices on the one audio thread overloaded it in Electron (context clock at 65%,
+  // both devices silent): only one device runs in the worklet, the others on Workers.
+  it('runs ONE device in the worklet; a second runs on the Worker path, the worklet is reused once free', async () => {
+    const { sessions, nodes, workers } = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8) })
+    const a = sessions.acquire('t1', desc, out)
+    const b = sessions.acquire('t2', desc, out)
+    expect([a.path, b.path]).toEqual(['worklet', 'worker'])
+    await flush()
+    expect([nodes.length, workers.length]).toEqual([1, 1])
+    expect(sessions.acquire('t1', { ...desc, mhz: 160 }, out).path).toBe('worklet')   // the replaced one freed it
+    sessions.release('t1')
+    expect(sessions.acquire('t3', desc, out).path).toBe('worklet')
   })
 
   it('falls back to the Worker path when addModule fails', async () => {
@@ -369,22 +385,20 @@ describe('fm1 session manager', () => {
 })
 
 describe('fm1 session: one device, live and timeline notes', () => {
-  it('sends every on, holds back offs until the last holder lets go; panic resets', async () => {
+  // The session forwards everything, tagged by source; the host decides at the frame the off is
+  // due (createNoteCounts in the queue), so call order cannot release another source's note.
+  it('tags every note with its source and forwards all of them; panic offs the held notes', async () => {
     const { s, w } = await readySession()
     w.emit(block(0))
-    const bytes = () => w.sent.filter(m => m.type === 'midi').map(m => m.bytes)
-    s.noteOn(60, 100)            // live
-    s.noteOn(60, 90, 1.1)        // timeline
-    s.noteOff(60, 1.2)           // timeline off: live still holds it
-    expect(bytes()).toEqual([[0x92, 60, 100], [0x92, 60, 90]])
-    s.noteOff(60)                // live off: now it goes
-    expect(bytes().at(-1)).toEqual([0x82, 60, 0])
-    s.noteOn(62, 100); s.noteOn(62, 100)
-    s.panic()
-    expect(w.sent.at(-1).bytes).toEqual([...allNotesOffBytes(), 0x82, 62, 0])
+    const midi = () => w.sent.filter(m => m.type === 'midi').map(m => [m.bytes, m.src])
+    s.noteOn(60, 100)                       // live
+    s.noteOn(60, 90, 1.1, 'timeline')
+    s.noteOff(60, 1.2, 'timeline')
+    s.noteOff(60)
+    expect(midi()).toEqual([[[0x92, 60, 100], 'live'], [[0x92, 60, 90], 'timeline'], [[0x82, 60, 0], 'timeline'], [[0x82, 60, 0], 'live']])
     s.noteOn(62, 100)
-    s.noteOff(62)                // counts were reset: one on, one off
-    expect(bytes().slice(-2)).toEqual([[0x92, 62, 100], [0x82, 62, 0]])
+    s.panic()
+    expect(w.sent.at(-1)).toEqual({ type: 'panic', bytes: [...allNotesOffBytes(), 0x82, 62, 0] })
   })
 })
 

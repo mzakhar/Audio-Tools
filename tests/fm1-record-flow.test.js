@@ -3,8 +3,8 @@ import { createFm1RecordFlow } from '../src/renderer/js/fm1/record-flow.js'
 import { AddTrack, AddClip, SetMixerParam } from '../src/renderer/js/store/ProjectStore.js'
 
 const RATE = 48000
-const FILE = 'fm1-Lead-20261128-090507.wav'
-let clock, calls, deps, session, cap, files, audioStore, store, take, projectDir
+const FILE = 'fm1-Lead-20261128-090507-000.wav'
+let clock, calls, deps, session, sessionState, cap, files, audioStore, store, take, projectDir
 
 function setup() {
   clock = 100
@@ -16,7 +16,8 @@ function setup() {
     finish: vi.fn(async end => { calls.push(['finish', end]); return take }),
     cancel: vi.fn(() => calls.push(['cap.cancel']))
   }
-  session = { ready: Promise.resolve(), startCapture: vi.fn(o => { calls.push(['startCapture', o]); return cap }), panic: vi.fn(() => calls.push(['panic'])) }
+  sessionState = 'ready'
+  session = { ready: Promise.resolve(), status: () => ({ state: sessionState }), startCapture: vi.fn(o => { calls.push(['startCapture', o]); return cap }), panic: vi.fn(() => calls.push(['panic'])) }
   files = { saveRecording: vi.fn(async () => {}), exportWav: vi.fn(async () => {}) }
   audioStore = { getProjectDir: () => projectDir, loadBuffer: vi.fn(async () => {}) }
   store = { dispatchBatch: vi.fn() }
@@ -226,6 +227,131 @@ describe('record flow', () => {
   it('missing track refuses', async () => {
     const flow = setup()
     expect(await flow.start({ trackId: 'nope' })).toBe(false)
+    expect(flow.state().phase).toBe('idle')
+  })
+})
+
+describe('record flow fixes (phase 3 smoke + review)', () => {
+  it('S3: a throw anywhere in the commit (e.g. no crypto.randomUUID on http) keeps the take pending with the reason', async () => {
+    setup()
+    const flow = createFm1RecordFlow({ ...deps, newId: () => { throw new TypeError('crypto.randomUUID is not a function') } })
+    await flow.start({ trackId: 't1', tail: 0 })
+    await stopAndSettle(flow)
+    expect(flow.state().phase).toBe('pending')
+    expect(flow.state().error).toMatch(/randomUUID/)
+    expect(store.dispatchBatch).not.toHaveBeenCalled()
+  })
+
+  it('R1: Save as WAV cancelled (Electron null, browser AbortError) keeps the take pending; success says so, adds no track', async () => {
+    const flow = setup()
+    projectDir = null
+    await flow.start({ trackId: 't1', tail: 0 })
+    await stopAndSettle(flow)
+    files.exportWav.mockResolvedValueOnce(null)
+    await flow.saveAs()
+    expect(flow.state().phase).toBe('pending')
+    files.exportWav.mockRejectedValueOnce(Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' }))
+    await flow.saveAs()
+    expect(flow.state().phase).toBe('pending')
+    expect(flow.state().error).toBe("Couldn't save the take: No project folder is open.")
+    files.exportWav.mockResolvedValueOnce('C:/x/take.wav')
+    await flow.saveAs()
+    expect(flow.state().phase).toBe('done')
+    expect(flow.state().notice).toMatch(/^Saved as WAV/)
+    expect(store.dispatchBatch).not.toHaveBeenCalled()
+  })
+
+  it('R3 + R4: length uses the time signature and the timeline gets an end beat', async () => {
+    const flow = setup()
+    deps.beatsPerBar = () => 3
+    const f = createFm1RecordFlow(deps)
+    await f.start({ trackId: 't1', startBeat: 2, bars: 2, tail: 0 })   // 6 beats @120 = 3 s; S = 100.2
+    expect(calls[0]).toEqual(['play', { beat: 2, bpm: 120, endBeat: 8 }])
+    await advance(2900)
+    expect(f.state().phase).toBe('recording')
+    await advance(400)
+    expect(cap.finish).toHaveBeenCalledWith(100.2 + 3)
+    expect(flow.state().phase).toBe('idle')
+  })
+
+  it('R4: a length take keeps the timeline running through the tail (no timer cuts the last note), stops it then', async () => {
+    const flow = setup()
+    await flow.start({ trackId: 't1', bars: 1, tail: 1 })   // S = 100.2, end 102.2, tail end 103.2
+    await advance(2300)
+    expect(flow.state().phase).toBe('tail')
+    expect(deps.timeline.stop).not.toHaveBeenCalled()
+    await advance(1000)
+    expect(calls.map(c => c[0]).slice(-3)).toEqual(['stop', 'panic', 'finish'])
+    expect(calls.find(c => c[0] === 'stop')[1]).toEqual({ panic: false })
+    expect(cap.finish).toHaveBeenCalledWith(100.2 + 3)
+  })
+
+  it('R5: a start cancelled while the device boots does not play when the boot finishes; a second start while arming is refused', async () => {
+    const flow = setup()
+    let boot
+    session.ready = new Promise(r => { boot = r })
+    const first = flow.start({ trackId: 't1' })
+    expect(await flow.start({ trackId: 't1' })).toBe(false)   // still arming
+    flow.cancel()
+    session.ready = Promise.resolve()
+    const second = flow.start({ trackId: 't1', tail: 0 })
+    boot()
+    expect(await first).toBe(false)
+    expect(await second).toBe(true)
+    expect(deps.timeline.play).toHaveBeenCalledTimes(1)
+    expect(session.startCapture).toHaveBeenCalledTimes(1)
+  })
+
+  it('R6: the device going away mid-take (track deleted, instrument changed, project switch) cancels with a message', async () => {
+    const flow = setup()
+    await flow.start({ trackId: 't1' })
+    sessionState = 'disposed'
+    await advance(100)
+    expect(flow.state().phase).toBe('idle')
+    expect(flow.state().error).toMatch(/cancelled/)
+    expect(deps.notify).toHaveBeenCalledWith(flow.state().error)
+    expect(cap.cancel).toHaveBeenCalled()
+    await advance(5000)
+    expect(files.saveRecording).not.toHaveBeenCalled()
+  })
+
+  it('R6: abort while saving keeps the take pending (Save as WAV only) instead of adding it to another project', async () => {
+    const flow = setup()
+    let release
+    files.saveRecording.mockImplementationOnce(() => new Promise(r => { release = r }))
+    await flow.start({ trackId: 't1', tail: 0 })
+    flow.stop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(flow.state().phase).toBe('saving')
+    flow.abort('The project changed.')
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(flow.state().phase).toBe('pending')
+    expect(flow.state().canRetry).toBe(false)
+    expect(store.dispatchBatch).not.toHaveBeenCalled()
+  })
+
+  it('R6: a source track gone by commit time adds the take without the mute', async () => {
+    setup()
+    let gone = false
+    const flow = createFm1RecordFlow({ ...deps, getTrack: id => (gone ? null : deps.getTrack(id)) })
+    await flow.start({ trackId: 't1', tail: 0, mute: true })
+    gone = true
+    await stopAndSettle(flow)
+    expect(store.dispatchBatch.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('R8: the 10-minute cap stops by audible time early enough for the tail', async () => {
+    const flow = setup()
+    const f = createFm1RecordFlow({ ...deps, maxSeconds: 10 })
+    await f.start({ trackId: 't1', tail: 2 })   // S = 100.2
+    await advance(7700)                          // t = 107.7 < S + 8
+    expect(f.state().phase).toBe('recording')
+    await advance(600)                           // t >= S + 10 - 2
+    expect(f.state().phase).not.toBe('recording')
+    expect(f.state().notice).toMatch(/minutes/)
+    await advance(2500)
+    expect(cap.finish.mock.calls[0][0]).toBeLessThanOrEqual(100.2 + 10)
     expect(flow.state().phase).toBe('idle')
   })
 })

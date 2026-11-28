@@ -23,6 +23,7 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
   if (!dlg || !body) return null
 
   let confirming = false
+  let cancelArmed = false   // Escape / ✕ pressed once while recording
 
   // ── setup view ───────────────────────────────────────────────────────────
   const field = (label, input) => {
@@ -51,7 +52,7 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
   // ── recording view ───────────────────────────────────────────────────────
   const phaseEl = make('output', 'fm1r-phase lcd', { 'aria-live': 'off' })
   const elapsedEl = make('output', 'fm1r-elapsed lcd')
-  const meter = make('meter', 'fm1r-meter', { min: '0', max: '1', value: '0', 'aria-label': 'Input level' })
+  const meter = make('meter', 'fm1r-meter', { min: '0', max: '1', value: '0', 'aria-label': 'Take level' })
   const stopBtn = make('button', 'btn fm1r-stop', { type: 'button' })
   stopBtn.textContent = 'Stop'
   const cancelBtn = make('button', 'btn fm1r-cancel', { type: 'button' })
@@ -116,15 +117,22 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
     stopBtn.disabled = phase !== 'recording'
     cancelBtn.disabled = phase === 'saving'
     retryBtn.disabled = !s.canRetry
-    const note = s.error ?? s.notice ?? (phase === 'done' ? 'Take added as a new audio track.' : n === 0 ? 'Add an FM-1 track first.' : '')
+    if (!busy) cancelArmed = false
+    const note = busy && cancelArmed ? 'Press Escape again to discard the take. Stop keeps it.'
+      : s.error ?? s.notice ?? (phase === 'done' ? 'Take added as a new audio track.' : n === 0 ? 'Add an FM-1 track first.' : '')
     msg.textContent = note
   }
 
-  // Escape / ✕: cancel a recording; a pending take needs a second yes.
+  // Escape / ✕ while recording: the first press only warns, the second discards (Stop is the
+  // safe way out). A pending take needs a second yes too.
   function requestClose() {
     const phase = flow.state().phase
     if (phase === 'saving') return
-    if (isActive(phase)) { flow.cancel(); return closeDialog(RECORD_DIALOG_ID) }
+    if (isActive(phase)) {
+      if (!cancelArmed) { cancelArmed = true; return render() }
+      flow.cancel()
+      return closeDialog(RECORD_DIALOG_ID)
+    }
     if (phase === 'pending') {
       if (confirming) { confirming = false; return render() }   // second Escape = keep
       confirming = true
@@ -135,6 +143,9 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
   }
 
   dlg.addEventListener('cancel', event => { event.preventDefault(); requestClose() })
+  // Chrome closes a modal anyway on a repeated Escape without user activation in between (the
+  // cancel event is then not cancelable): a recording must not run on with no dialog.
+  dlg.addEventListener('close', () => { if (isActive(flow.state().phase) && flow.state().phase !== 'saving') flow.cancel() })
   dlg.querySelector('.dlg-close-btn')?.addEventListener('click', requestClose)
   startBtn.addEventListener('click', () => {
     const parsed = parseOptions({ startBeat: startBeat.value, bars: bars.value, tail: tail.value, mute: mute.checked })
@@ -143,7 +154,7 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
     flow.start({ trackId: select.value, ...parsed.opts })
   })
   stopBtn.addEventListener('click', () => flow.stop())
-  cancelBtn.addEventListener('click', requestClose)
+  cancelBtn.addEventListener('click', () => { flow.cancel(); closeDialog(RECORD_DIALOG_ID) })
   retryBtn.addEventListener('click', () => flow.retry())
   saveAsBtn.addEventListener('click', () => flow.saveAs())
   discardBtn.addEventListener('click', () => { confirming = true; render() })
@@ -154,6 +165,7 @@ export function createFm1RecordDialog({ flow, getTracks, armedId }) {
   return {
     open() {
       confirming = false
+      cancelArmed = false
       if (flow.state().phase === 'done') flow.reset()
       fillSources()
       render()

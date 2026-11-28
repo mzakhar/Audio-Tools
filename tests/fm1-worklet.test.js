@@ -104,6 +104,37 @@ describe('fm1-worklet', () => {
     expect(x.midi[0].at).toBe(2)
   })
 
+  it('note gate (inline copy): a live release before a queued timeline note is not swallowed; panic resets', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame, src) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src } })
+    send([0x90, 60, 100], 0, 'live')
+    send([0x90, 60, 90], 1000, 'timeline')
+    send([0x80, 60, 0], 2000, 'timeline')
+    send([0x80, 60, 0], 500, 'live')
+    for (let q = 0; q < 20; q++) quantum(p, q * 128)
+    const bytes = () => { const b = x.midi.map(m => m.b); const out = []; for (let i = 0; i < b.length; i += 3) out.push(b.slice(i, i + 3)); return out }
+    expect(bytes()).toEqual([[0x90, 60, 100], [0x80, 60, 0], [0x90, 60, 90], [0x80, 60, 0]])
+    x.midi.length = 0
+    send([0x90, 62, 100], 2560, 'live')
+    send([0x90, 62, 100], 2560, 'timeline')
+    quantum(p, 2560)
+    p.port.onmessage({ data: { type: 'panic', bytes: [0xB0, 123, 0] } })
+    send([0x80, 62, 0], 2688, 'timeline')               // nobody holds it after the panic
+    quantum(p, 2688)
+    expect(bytes().slice(-2)).toEqual([[0xB0, 123, 0], [0x80, 62, 0]])
+  })
+
+  it('drop removes queued note-ons from its frame on and keeps the offs', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src: 'timeline' } })
+    send([0x90, 60, 100], 100); send([0x80, 60, 0], 900); send([0x90, 64, 100], 700); send([0x80, 64, 0], 1000)
+    p.port.onmessage({ data: { type: 'drop', frame: 500 } })
+    for (let q = 0; q < 10; q++) quantum(p, q * 128)
+    expect(x.midi.map(m => m.b)).toEqual([0x90, 60, 100, 0x80, 60, 0, 0x80, 64, 0])
+  })
+
   it('renders need(128) frames at 44.1 kHz per 48 kHz quantum and fills the quantum', async () => {
     const { p, x } = await booted()
     let o

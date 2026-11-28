@@ -1,7 +1,8 @@
 /* FM-1 record dialog. Modal; stacks to one column and never exceeds the viewport (390 px safe). */
 #fm1-record-dialog[open] { width: min(420px, 96vw); max-height: calc(100vh - 16px); overflow-y: auto; }
 .fm1r-view { display: flex; flex-direction: column; gap: 8px; }
-.fm1r-view[hidden], .fm1r-confirm[hidden] { display: none; }
+/* [hidden] must win over .dlg-row / .fm1r-view display rules (the confirm row showed in the pending view) */
+#fm1-record-dialog [hidden] { display: none !important; }
 .fm1r-field { flex-wrap: wrap; align-items: center; }
 .fm1r-field .dlg-label { flex: 1 1 140px; }
 .fm1r-field input[type="number"], .fm1r-field select { flex: 1 1 120px; min-width: 0; max-width: 100%; }

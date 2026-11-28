@@ -43,9 +43,15 @@ export function createFm1Sessions({
         }
         s.dispose()
       }
+      // ONE device per worklet: every AudioWorkletNode renders on the context's single audio
+      // thread, and one device at 120 MHz already takes ~75% of it (rtf ~1.3); a second one
+      // overloads the thread, the context clock slows and every device goes silent. Further
+      // devices run on the Worker path, a thread each.
+      // ponytail: a fixed limit of one; budget by mhz/measured rtf if light firmware needs two.
+      const workletBusy = [...sessions.values()].some(other => other.path === 'worklet' && !['failed', 'disposed'].includes(other.status().state))
       const session = createFm1Session({
         ctx, key, descriptor: d, output, getModule, getWasmBytes, readFirmware, now, leadMs,
-        useWorklet: !!(preferWorklet() && ctx.audioWorklet && workletUrl),
+        useWorklet: !!(preferWorklet() && ctx.audioWorklet && workletUrl && !workletBusy),
         loadWorklet, createWorker, createWorkletNode,
       })
       sessions.set(key, session)

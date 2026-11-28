@@ -75,12 +75,13 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
     const session = () => fm1Sessions.use(key, descriptor, output)
     const play = (note, time, stopTime) => {
       const s = session()
-      s.noteOn(note.pitch, Math.round((note.velocity ?? 0.8) * 127), time)
-      s.noteOff(note.pitch, stopTime)
+      s.noteOn(note.pitch, Math.round((note.velocity ?? 0.8) * 127), time, 'timeline')
+      s.noteOff(note.pitch, stopTime, 'timeline')
     }
     Object.defineProperty(play, 'session', { get: session })
     play.lead = () => session().leadSec + FM1_SLACK
     play.panic = () => fm1Sessions.get(key)?.panic()
+    play.dropFrom = time => fm1Sessions.get(key)?.dropFrom?.(time)
     return play
   }
   if (instrument.type !== 'palette') return null
@@ -114,7 +115,12 @@ const TimelinePlayer = {
   _packInstruments: [],
   _fm1Players: [],        // FM-1 note players this playback drives; stop() silences, never disposes
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
+  /** endBeat (optional): no MIDI note starting at or after it is scheduled; notes that start
+   *  before it keep their full length (an FM-1 recording's length).
+   *  fm1Lookahead (seconds, optional): send FM-1 notes at least this far ahead. Timers in a
+   *  hidden or occluded window fire up to ~1 s late; the device queues timed notes, so a
+   *  recording sends them early enough that throttling cannot make them late. */
+  play({ beat = 0, endBeat = Infinity, fm1Lookahead = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -175,7 +181,7 @@ const TimelinePlayer = {
           if (playNote) this._fm1Players.push(playNote)
         }
         if (!playNote) return
-        const lead = playNote.lead?.() ?? 0
+        const lead = playNote.lead ? Math.max(playNote.lead(), fm1Lookahead) : 0
 
         track.clips.forEach(clip => {
           if (clip.type !== 'midi') return
@@ -183,19 +189,21 @@ const TimelinePlayer = {
           notes.forEach(note => {
             const noteBeat = clip.startBeat + note.startBeat
             if (noteBeat + note.duration <= beat) return   // already past
+            if (noteBeat >= endBeat) return
 
             const noteAudioTime = this._startAudioTime + beatsToSeconds(noteBeat - beat, bpm)
             const stopAudioTime = noteAudioTime + beatsToSeconds(note.duration, bpm)
             const msUntilNote   = Math.max(0, (noteAudioTime - ctx.currentTime - lead) * 1000)
-
-            const handle = setTimeout(() => {
+            const send = () => {
               if (!this._isPlaying) return
               try {
                 playNote(note, noteAudioTime, stopAudioTime)
               } catch (err) { /* voice creation errors are non-fatal */ }
-            }, msUntilNote)
-
-            this._midiTimeouts.push(handle)
+            }
+            // A note already inside its lead goes now: even a 0 ms timer can be held ~1 s in a
+            // background window.
+            if (msUntilNote === 0 && lead > 0) { send(); return }
+            this._midiTimeouts.push(setTimeout(send, msUntilNote))
           })
         })
         return
@@ -251,7 +259,8 @@ const TimelinePlayer = {
   /** Audible context time of the beat the last play() started from. */
   get startAudioTime() { return this._startAudioTime },
 
-  /** panic:false lets notes the FM-1 devices already have play out (a recording's tail). */
+  /** panic:false lets notes the FM-1 devices are sounding play out (a recording's tail); notes
+   *  already queued to start later are dropped (their offs stay). */
   stop({ panic = true } = {}) {
     this._isPlaying = false
     if (this._rackClockTimer !== null) clearInterval(this._rackClockTimer)
@@ -262,7 +271,8 @@ const TimelinePlayer = {
     this._instrumentRackHandles = []
     this._packInstruments.forEach(instrument => instrument.dispose())
     this._packInstruments = []
-    if (panic) this._fm1Players.forEach(player => { try { player.panic() } catch (e) {} })
+    const now = AudioEngine.getContext()?.currentTime
+    this._fm1Players.forEach(player => { try { panic ? player.panic() : player.dropFrom?.(now) } catch (e) {} })
     this._fm1Players = []
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []

@@ -67,12 +67,61 @@ describe('fm1 record dialog', () => {
     expect(flow.stop).toHaveBeenCalled()
   })
 
-  it('Escape while recording cancels and closes', () => {
+  it('Escape while recording: the first press only warns, the second discards and closes', () => {
     dialog.open()
     emit({ phase: 'recording' })
     escape()
-    expect(flow.cancel).toHaveBeenCalled()
+    expect(flow.cancel).not.toHaveBeenCalled()
+    expect(el.open).toBe(true)
+    expect($('.fm1r-msg').textContent).toMatch(/Press Escape again/)
+    emit({ elapsed: 1 })                                // ticks keep the warning
+    expect($('.fm1r-msg').textContent).toMatch(/Press Escape again/)
+    $('.dlg-close-btn').click()                         // ✕ counts as the second press
+    expect(flow.cancel).toHaveBeenCalledOnce()
     expect(el.open).toBe(false)
+  })
+
+  it('the Cancel button discards at once; a dialog closed by the browser mid-take cancels it', () => {
+    dialog.open()
+    emit({ phase: 'recording' })
+    $('.fm1r-cancel').click()
+    expect(flow.cancel).toHaveBeenCalledOnce()
+    expect(el.open).toBe(false)
+    dialog.open()
+    emit({ phase: 'tail' })
+    el.close()                                          // e.g. Chrome closing on a repeated Escape
+    expect(flow.cancel).toHaveBeenCalledTimes(2)
+  })
+
+  it('meter is labelled "Take level"', () => {
+    dialog.open()
+    expect($('.fm1r-meter').getAttribute('aria-label')).toBe('Take level')
+  })
+
+  it('refresh() follows FM-1 tracks being added and removed', () => {
+    dialog.open()
+    tracks = [{ id: 'c', name: 'Bass' }]
+    dialog.refresh()
+    expect([...$('.fm1r-source').options].map(o => o.textContent)).toEqual(['Bass'])
+    expect($('.fm1r-source').value).toBe('c')
+  })
+
+  it('[hidden] rows stay hidden against .dlg-row display (the pending view showed Keep/Discard)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/renderer/styles/fm1-record.css', 'utf8')
+    const style = document.createElement('style')
+    style.textContent = `.dlg-row { display: flex; }\n${css}`
+    document.head.append(style)
+    dialog.open()
+    emit({ phase: 'pending', canRetry: true })
+    const confirmRow = $('.fm1r-keep').parentElement
+    expect(confirmRow.hidden).toBe(true)
+    expect(confirmRow.classList.contains('dlg-row')).toBe(true)
+    // jsdom's cascade lets [hidden] win regardless, so assert the rule Chrome needs: one that
+    // matches the hidden row and forces display none over .dlg-row
+    const rules = [...style.sheet.cssRules].filter(rule => rule.selectorText && confirmRow.matches(rule.selectorText))
+    expect(rules.some(rule => rule.style.getPropertyValue('display') === 'none' && rule.style.getPropertyPriority('display') === 'important')).toBe(true)
+    style.remove()
   })
 
   it('Escape in setup just closes', () => {

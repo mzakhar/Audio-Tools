@@ -11,8 +11,10 @@ export function framesAt(time, anchor, rate = FM1_RATE) {
 }
 
 // Timed events in frame order; equal frames keep push order. Bounded: a full queue refuses the
-// push (returns false) so a stalled emulator cannot grow memory without limit.
-export function createEventQueue(limit = 4096) {
+// push (returns false) so a stalled emulator cannot grow memory without limit. An event may carry
+// a source tag (`src`); with a `notes` gate (createNoteCounts) tagged events pass through it as
+// they are taken, so note holders are counted in audible (frame) order, not call order.
+export function createEventQueue(limit = 4096, notes = null) {
   const items = []
   return {
     push(ev) {
@@ -25,12 +27,24 @@ export function createEventQueue(limit = 4096) {
     takeUpTo(frame) {
       let n = 0
       while (n < items.length && items[n].frame <= frame) n++
-      return items.splice(0, n).map(e => e.bytes)
+      const out = []
+      for (const e of items.splice(0, n)) {
+        const bytes = notes && e.src ? notes.filter(e.bytes, e.src) : e.bytes
+        if (bytes) out.push(bytes)
+      }
+      return out
+    },
+    // Transport stop without panic: drop what was queued for `frame` on, except note-offs, so
+    // sounding notes still end and nothing new starts.
+    dropFrom(frame) {
+      for (let i = items.length - 1; i >= 0 && items[i].frame >= frame; i--) if (!isNoteOff(items[i].bytes)) items.splice(i, 1)
     },
     clear() { items.length = 0 },
     get size() { return items.length },
   }
 }
+
+const isNoteOff = (b) => b.length === 3 && ((b[0] & 0xF0) === 0x80 || ((b[0] & 0xF0) === 0x90 && b[2] === 0))
 
 // The firmware polls its key matrix: a press shorter than ~100 ms of emulated time can be missed.
 // up() returns the frame the release may be applied at; due(frame) hands back ids to release.
@@ -168,21 +182,30 @@ export function createBootWatch({ timeoutMs = 8000, settleMs = 100 } = {}) {
   }
 }
 
-// One FM-1 session hears the same note from live play and the timeline. Per (channel, pitch)
-// count: every note-on is sent (the firmware retriggers), a note-off only when the last holder
-// lets go. An off with nothing counted is sent (harmless, and it releases anything stray).
+// One FM-1 device hears the same note from live play and the timeline. The hosts run each tagged
+// event through filter() when it is due, in frame order: a note-on always passes (the firmware
+// retriggers) and marks its source as holding the note; a note-off releases its source and is
+// dropped only while ANOTHER source still holds that note at that frame. Untagged and non-note
+// bytes pass; an off nobody holds passes (it releases anything stray). Panic calls reset().
+// The worklet carries an inline copy.
 export function createNoteCounts() {
-  const counts = new Map()
-  const k = (ch, pitch) => (ch & 15) * 128 + byte7(pitch)
+  const holders = new Map()   // ch * 128 + pitch -> Set of sources holding it
   return {
-    on(ch, pitch) { const key = k(ch, pitch); counts.set(key, (counts.get(key) ?? 0) + 1); return true },
-    off(ch, pitch) {
-      const key = k(ch, pitch), n = counts.get(key) ?? 0
-      if (n > 1) { counts.set(key, n - 1); return false }
-      counts.delete(key)
-      return true
+    filter(bytes, src) {
+      const kind = bytes[0] & 0xF0
+      if (bytes.length !== 3 || (kind !== 0x80 && kind !== 0x90)) return bytes
+      const key = (bytes[0] & 15) * 128 + (bytes[1] & 127)
+      let set = holders.get(key)
+      if (kind === 0x90 && bytes[2] > 0) {
+        if (!set) holders.set(key, set = new Set())
+        set.add(src)
+        return bytes
+      }
+      set?.delete(src)
+      if (set && !set.size) holders.delete(key)
+      return set?.size ? null : bytes
     },
-    reset() { counts.clear() },
+    reset() { holders.clear() },
   }
 }
 
@@ -190,7 +213,7 @@ export function createNoteCounts() {
 // round((t - startTime) * rate); gaps (underruns) stay silent, samples before startTime are
 // dropped, past maxFrames are ignored and set `full`.
 export function createTake({ rate, startTime, maxFrames }) {
-  let L = new Float32Array(0), R = new Float32Array(0), hi = 0, peak = 0, full = false
+  let L = new Float32Array(0), R = new Float32Array(0), hi = 0, peak = 0, recent = 0, full = false
   function grow(n) {
     if (n <= L.length) return
     const cap = Math.min(maxFrames, Math.max(n, L.length * 2, rate))
@@ -198,9 +221,12 @@ export function createTake({ rate, startTime, maxFrames }) {
     nl.set(L.subarray(0, hi)); nr.set(R.subarray(0, hi))
     L = nl; R = nr
   }
+  // Views when the buffers already hold n frames (past hi they are still zero), else a
+  // zero-extended copy.
   const exact = (n) => {
+    if (n <= L.length) return { L: L.subarray(0, n), R: R.subarray(0, n), rate, frames: n }
     const l = new Float32Array(n), r = new Float32Array(n)
-    l.set(L.subarray(0, Math.min(n, hi))); r.set(R.subarray(0, Math.min(n, hi)))
+    l.set(L.subarray(0, hi)); r.set(R.subarray(0, hi))
     return { L: l, R: r, rate, frames: n }
   }
   return {
@@ -214,13 +240,16 @@ export function createTake({ rate, startTime, maxFrames }) {
         const a = l[k], b = r[k]
         L[i0 + k] = a; R[i0 + k] = b
         const m = Math.max(Math.abs(a), Math.abs(b))
-        if (m > peak) peak = m
+        if (m > recent) recent = m
       }
+      if (recent > peak) peak = recent
       hi = Math.max(hi, i0 + to)
     },
     frames: () => hi,
     get full() { return full },
     get peak() { return peak },
+    // peak since the previous call: a level meter's window
+    takeRecentPeak() { const p = recent; recent = 0; return p },
     finish(endTime) {
       const n = endTime == null ? hi : Math.max(0, Math.min(maxFrames, Math.round((endTime - startTime) * rate)))
       return exact(n)

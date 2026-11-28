@@ -183,17 +183,65 @@ describe('createBootWatch', () => {
 })
 
 describe('createNoteCounts', () => {
-  it('every on is sent; an off only when the last holder lets go; reset clears', () => {
+  const on = (p, ch = 2) => [0x90 | ch, p, 100], off = (p, ch = 2) => [0x80 | ch, p, 0]
+  it('every on passes; an off is dropped only while ANOTHER source holds the note; reset clears', () => {
     const c = createNoteCounts()
-    expect(c.on(2, 60)).toBe(true)
-    expect(c.on(2, 60)).toBe(true)
-    expect(c.on(3, 60)).toBe(true)          // another channel is another key
-    expect(c.off(2, 60)).toBe(false)
-    expect(c.off(2, 60)).toBe(true)
-    expect(c.off(3, 60)).toBe(true)
-    expect(c.off(2, 60)).toBe(true)          // nothing counted: send (harmless)
-    c.on(2, 61); c.on(2, 61); c.reset()
-    expect(c.off(2, 61)).toBe(true)
+    expect(c.filter(on(60), 'live')).toEqual(on(60))
+    expect(c.filter(on(60), 'timeline')).toEqual(on(60))
+    expect(c.filter(on(60, 3), 'timeline')).toEqual(on(60, 3))   // another channel is another note
+    expect(c.filter(off(60), 'timeline')).toBeNull()              // live still holds it
+    expect(c.filter(off(60), 'live')).toEqual(off(60))
+    expect(c.filter(off(60, 3), 'timeline')).toEqual(off(60, 3))
+    expect(c.filter(off(60), 'live')).toEqual(off(60))           // nobody holds it: passes (harmless)
+    expect(c.filter([0x92, 61, 0], 'live')).toEqual([0x92, 61, 0])   // velocity 0 = an off
+    c.filter(on(61), 'live'); c.reset()
+    expect(c.filter(off(61), 'timeline')).toEqual(off(61))
+    expect(c.filter([0xB2, 1, 64], 'live')).toEqual([0xB2, 1, 64])  // not a note
+  })
+  it('plain repeated notes from one source: every on and every off passes', () => {
+    const c = createNoteCounts()
+    for (let i = 0; i < 3; i++) {
+      expect(c.filter(on(64), 'live')).toEqual(on(64))
+      expect(c.filter(on(64), 'live')).toEqual(on(64))     // a retrigger without an off
+      expect(c.filter(off(64), 'live')).toEqual(off(64))   // the source's own off is never held back
+    }
+  })
+})
+
+describe('event queue dropFrom (transport stop without panic)', () => {
+  it('drops what was queued to start from the frame on, keeps note-offs (also velocity-0 ons)', () => {
+    const q = createEventQueue()
+    q.push({ frame: 100, bytes: [0x90, 60, 100] })
+    q.push({ frame: 300, bytes: [0x80, 60, 0] })
+    q.push({ frame: 400, bytes: [0x90, 62, 100] })
+    q.push({ frame: 500, bytes: [0x90, 62, 0] })
+    q.push({ frame: 450, bytes: [0xB0, 1, 64] })
+    q.dropFrom(200)
+    expect(q.takeUpTo(1e9)).toEqual([[0x90, 60, 100], [0x80, 60, 0], [0x90, 62, 0]])
+  })
+})
+
+describe('event queue with the note gate (frame order, not call order)', () => {
+  const on = [0x92, 60, 100], off = [0x82, 60, 0]
+  it("reviewer's case: live holds P, the timeline queues P later, live lets go first -> no stuck note", () => {
+    const q = createEventQueue(4096, createNoteCounts())
+    q.push({ frame: 0, bytes: on, src: 'live' })          // live press
+    q.push({ frame: 1000, bytes: on, src: 'timeline' })   // timeline note, queued (sent a lead early)
+    q.push({ frame: 2000, bytes: off, src: 'timeline' })  //   with its off
+    q.push({ frame: 500, bytes: off, src: 'live' })       // live release, before the timeline note sounds
+    expect(q.takeUpTo(0)).toEqual([on])
+    expect(q.takeUpTo(500)).toEqual([off])                // nobody else holds it at frame 500
+    expect(q.takeUpTo(1000)).toEqual([on])
+    expect(q.takeUpTo(2000)).toEqual([off])               // the timeline's own off releases it
+  })
+  it('live still held when the timeline note ends: the timeline off is held back until the live off', () => {
+    const q = createEventQueue(4096, createNoteCounts())
+    q.push({ frame: 0, bytes: on, src: 'live' })
+    q.push({ frame: 100, bytes: on, src: 'timeline' })
+    q.push({ frame: 200, bytes: off, src: 'timeline' })
+    q.push({ frame: 900, bytes: off, src: 'live' })
+    expect(q.takeUpTo(899)).toEqual([on, on])
+    expect(q.takeUpTo(900)).toEqual([off])
   })
 })
 
@@ -243,5 +291,21 @@ describe('createTake', () => {
     const { L } = t.finish()
     expect(L.length).toBe(300 * 64)
     expect(L[0]).toBe(0); expect(L[64 * 150]).toBeCloseTo(0.15); expect(L.at(-1)).toBeCloseTo(0.299)
+  })
+  it('finish returns views (no copy) when the buffers already hold the length', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 5000 })
+    t.add(ramp(10), ramp(10), 0)
+    const a = t.finish(0.005), b = t.finish()
+    expect(a.L.buffer).toBe(b.L.buffer)               // same storage
+    expect([a.frames, b.frames]).toEqual([5, 10])
+  })
+  it('takeRecentPeak is the peak since the previous call (meter window); peak stays the take peak', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 100 })
+    t.add(new Float32Array([0.5]), new Float32Array([0]), 0)
+    expect(t.takeRecentPeak()).toBe(0.5)
+    expect(t.takeRecentPeak()).toBe(0)
+    t.add(new Float32Array([0.1]), new Float32Array([-0.2]), 0.001)
+    expect(t.takeRecentPeak()).toBeCloseTo(0.2)
+    expect(t.peak).toBe(0.5)
   })
 })
