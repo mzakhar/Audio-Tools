@@ -184,26 +184,30 @@ export function createBootWatch({ timeoutMs = 8000, settleMs = 100 } = {}) {
 
 // One FM-1 device hears the same note from live play and the timeline. The hosts run each tagged
 // event through filter() when it is due, in frame order: a note-on always passes (the firmware
-// retriggers) and marks its source as holding the note; a note-off releases its source and is
-// dropped only while ANOTHER source still holds that note at that frame. Untagged and non-note
-// bytes pass; an off nobody holds passes (it releases anything stray). Panic calls reset().
+// retriggers) and counts one more hold for its source (live holds at most one, so one live off
+// releases it as on a keyboard; timeline overlaps count); a note-off releases one hold of its
+// source and is sent only when no hold is left on that note from ANY source (overlapping notes
+// of one pitch from one source, or two tracks on one device channel, end with the last off).
+// Untagged and non-note bytes pass; an off nobody holds passes (it releases anything stray). Panic calls reset().
 // The worklet carries an inline copy.
 export function createNoteCounts() {
-  const holders = new Map()   // ch * 128 + pitch -> Set of sources holding it
+  const holders = new Map()   // ch * 128 + pitch -> Map(source -> notes on it holds)
   return {
     filter(bytes, src) {
       const kind = bytes[0] & 0xF0
       if (bytes.length !== 3 || (kind !== 0x80 && kind !== 0x90)) return bytes
       const key = (bytes[0] & 15) * 128 + (bytes[1] & 127)
-      let set = holders.get(key)
+      let counts = holders.get(key)
       if (kind === 0x90 && bytes[2] > 0) {
-        if (!set) holders.set(key, set = new Set())
-        set.add(src)
+        if (!counts) holders.set(key, counts = new Map())
+        counts.set(src, src === 'live' ? 1 : (counts.get(src) ?? 0) + 1)   // live: one off releases, like a keyboard
         return bytes
       }
-      set?.delete(src)
-      if (set && !set.size) holders.delete(key)
-      return set?.size ? null : bytes
+      const n = counts?.get(src) ?? 0
+      if (n > 1) counts.set(src, n - 1)
+      else counts?.delete(src)
+      if (counts && !counts.size) holders.delete(key)
+      return counts?.size ? null : bytes
     },
     reset() { holders.clear() },
   }

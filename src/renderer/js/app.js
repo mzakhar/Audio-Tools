@@ -100,7 +100,7 @@ function webDiscovery() {
     available: async () => true,
     onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) },
     run(brief) {
-      const runId = crypto.randomUUID()
+      const runId = newId()
       const controller = new AbortController()
       requests.set(runId, controller)
       queueMicrotask(async () => {
@@ -328,6 +328,47 @@ async function exportWavOrDownload(bytes, name) {
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 60000)
   return name
+}
+
+// Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode. An FM-1
+// recording owns the transport: Play is ignored (checked again after every await, a recording may
+// have started meanwhile), Stop is the record dialog's Stop.
+async function transportPlay() {
+  if (fm1Recording()) return
+  await ensureAudio()
+  if (fm1Recording()) return
+  if (_currentMode === 'arrange') {
+    const state = ProjectStore.getState()
+    // Decode every kit track's samples first: otherwise each one's first hit is silent.
+    await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
+    if (fm1Recording()) return
+    TimelinePlayer.play(arrangePlayArgs(0))
+  } else if (_currentMode === 'pads') {
+    startPadsLoop()
+  } else {
+    Sequencer.play()
+  }
+  syncTransportPressed()
+}
+
+function transportStop() {
+  if (fm1Recording()) return fm1RecordStop()
+  if (_currentMode === 'arrange') {
+    TimelinePlayer.stop()
+  } else if (_currentMode === 'pads') {
+    stopPadsLoop()
+  } else {
+    Sequencer.stop()
+  }
+  syncTransportPressed()
+}
+
+/** Transport Stop during an FM-1 recording: recording -> the dialog's Stop (keeps the take);
+ *  arming -> cancel with a message; tail/saving -> nothing to stop, the dialog shows where it is. */
+function fm1RecordStop() {
+  const { flow, dialog } = _fm1Rec
+  flow.transportStop()
+  if (dialog && !dialog.isOpen()) dialog.open()
 }
 
 async function openFm1Record() {
@@ -1532,33 +1573,9 @@ function initCommandBar() {
     if (_projectOpen && !_projectDirty) { _projectDirty = true; renderCommands() }
   })
 
-  // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
-  document.getElementById('global-play-btn')?.addEventListener('click', async () => {
-    if (fm1Recording()) return   // the recording owns the transport
-    await ensureAudio()
-    if (_currentMode === 'arrange') {
-      const state = ProjectStore.getState()
-      // Decode every kit track's samples first: otherwise each one's first hit is silent.
-      await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
-      TimelinePlayer.play(arrangePlayArgs(0))
-    } else if (_currentMode === 'pads') {
-      startPadsLoop()
-    } else {
-      Sequencer.play()
-    }
-    syncTransportPressed()
-  })
-  document.getElementById('global-stop-btn')?.addEventListener('click', () => {
-    if (fm1Recording()) { _fm1Rec.flow.stop(); return }   // = the record dialog's Stop (keeps the take)
-    if (_currentMode === 'arrange') {
-      TimelinePlayer.stop()
-    } else if (_currentMode === 'pads') {
-      stopPadsLoop()
-    } else {
-      Sequencer.stop()
-    }
-    syncTransportPressed()
-  })
+  // Transport — every Play/Stop (buttons, Space, Shift+Space, the pad controller) clicks these.
+  document.getElementById('global-play-btn')?.addEventListener('click', transportPlay)
+  document.getElementById('global-stop-btn')?.addEventListener('click', transportStop)
 
   // Everything that is not live lives in the ⋯ menu or a dialog.
   buildAppMenu()

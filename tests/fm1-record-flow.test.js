@@ -355,3 +355,73 @@ describe('record flow fixes (phase 3 smoke + review)', () => {
     expect(flow.state().phase).toBe('idle')
   })
 })
+
+describe('record flow re-review fixes', () => {
+  it('a throwing state listener after the dispatch does not turn the save into a failure (no retry = no duplicate)', async () => {
+    const flow = setup()
+    flow.onChange(state => { if (state.phase === 'done') throw new Error('listener') })
+    await flow.start({ trackId: 't1', tail: 0 })
+    flow.stop()
+    await vi.advanceTimersByTimeAsync(0).catch(() => {})
+    await vi.advanceTimersByTimeAsync(0).catch(() => {})
+    expect(store.dispatchBatch).toHaveBeenCalledTimes(1)
+    expect(flow.state().phase).toBe('done')
+    expect(flow.state().error).toBeNull()
+  })
+
+  it('Save as WAV: a take discarded while the dialog is open stays discarded; a second click is ignored', async () => {
+    const flow = setup()
+    projectDir = null
+    await flow.start({ trackId: 't1', tail: 0 })
+    await stopAndSettle(flow)
+    let resolve
+    files.exportWav.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const first = flow.saveAs()
+    await flow.saveAs()
+    expect(files.exportWav).toHaveBeenCalledTimes(1)
+    flow.cancel()                       // Discard while the save dialog is up
+    resolve('C:/x/take.wav')
+    await first
+    expect(flow.state().phase).toBe('idle')
+    expect(flow.state().notice).toBeNull()
+  })
+
+  it('a capture whose finish rejects is cancelled, so the session can capture the next take', async () => {
+    const flow = setup()
+    let busy = false
+    session.startCapture = vi.fn(() => {
+      if (busy) throw new Error('fm1: a capture is already running')
+      busy = true
+      return { ...cap, finish: vi.fn(async () => { throw new Error('flush failed') }), cancel: vi.fn(() => { busy = false }) }
+    })
+    await flow.start({ trackId: 't1', tail: 0 })
+    await stopAndSettle(flow)
+    expect(flow.state().error).toMatch(/flush failed/)
+    expect(await flow.start({ trackId: 't1', tail: 0 })).toBe(true)
+    expect(session.startCapture).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('record flow: transport Stop while a recording owns the transport', () => {
+  it('arming -> cancelled with a message; recording -> Stop keeps the take; tail/saving -> ignored', async () => {
+    const flow = setup()
+    let boot
+    session.ready = new Promise(r => { boot = r })
+    const starting = flow.start({ trackId: 't1' })
+    flow.transportStop()
+    boot()
+    expect(await starting).toBe(false)
+    expect(flow.state().phase).toBe('idle')
+    expect(flow.state().error).toMatch(/Stopped before the recording started/)
+    expect(deps.timeline.play).not.toHaveBeenCalled()
+
+    session.ready = Promise.resolve()
+    await flow.start({ trackId: 't1', tail: 1 })
+    flow.transportStop()
+    expect(flow.state().phase).toBe('tail')
+    flow.transportStop()
+    expect(flow.state().phase).toBe('tail')
+    await advance(1100)
+    expect(store.dispatchBatch).toHaveBeenCalledTimes(1)
+  })
+})

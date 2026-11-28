@@ -89,15 +89,17 @@ function createNoteCounts() {
       const kind = bytes[0] & 0xF0
       if (bytes.length !== 3 || (kind !== 0x80 && kind !== 0x90)) return bytes
       const key = (bytes[0] & 15) * 128 + (bytes[1] & 127)
-      let set = holders.get(key)
+      let counts = holders.get(key)
       if (kind === 0x90 && bytes[2] > 0) {
-        if (!set) holders.set(key, set = new Set())
-        set.add(src)
+        if (!counts) holders.set(key, counts = new Map())
+        counts.set(src, src === 'live' ? 1 : (counts.get(src) ?? 0) + 1)   // live: one off releases, like a keyboard
         return bytes
       }
-      set?.delete(src)
-      if (set && !set.size) holders.delete(key)
-      return set?.size ? null : bytes
+      const n = counts?.get(src) ?? 0
+      if (n > 1) counts.set(src, n - 1)
+      else counts?.delete(src)
+      if (counts && !counts.size) holders.delete(key)
+      return counts?.size ? null : bytes
     },
     reset() { holders.clear() },
   }

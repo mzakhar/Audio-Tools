@@ -32,9 +32,11 @@ export function createFm1RecordFlow(deps) {
   let pending = null    // { wav, frames, rate, name, run } (the samples are dropped once encoded)
   let ticker = null
   let gen = 0           // bumped by cancel/abort: a start() still awaiting checks it
+  let exporting = false // a Save as WAV dialog is open
   let stale = null      // set by abort() while saving: the commit must not land in another project
 
-  const emit = patch => { st = { ...st, ...patch }; for (const cb of listeners) cb(st) }
+  // a listener (the dialog) that throws must not derail the recording or the save
+  const emit = patch => { st = { ...st, ...patch }; for (const cb of listeners) { try { cb(st) } catch (e) { console.error(e) } } }
   const go = (event, patch = {}) => emit({ ...patch, phase: nextPhase(st.phase, event) })
   const stopTicker = () => { clearInterval(ticker); ticker = null }
 
@@ -111,7 +113,10 @@ export function createFm1RecordFlow(deps) {
     r.session.panic()
     go('finish')
     let take
-    try { take = await r.cap.finish(r.tailEnd) } catch (e) { return empty(`Recording failed: ${reasonOf(e)}`) }
+    try { take = await r.cap.finish(r.tailEnd) } catch (e) {
+      try { r.cap.cancel() } catch {}   // free the session's capture slot for the next take
+      return empty(`Recording failed: ${reasonOf(e)}`)
+    }
     r.cap = null   // the capture holds the take's buffers; only the encoded WAV is kept from here
     if (!take || take.frames === 0) return empty('Nothing was captured.')
     let wav
@@ -147,9 +152,11 @@ export function createFm1RecordFlow(deps) {
       const source = getTrack(r.track.id)   // the source may be gone by now: then there is nothing to mute
       if (r.opts.mute && source?.mixerChannelId) batch.push(commands.SetMixerParam(source.mixerChannelId, 'mute', true))
       store.dispatchBatch(batch, LABEL)
-      pending = null
-      go('saved', { error: null, canRetry: false })
-    } catch (e) { hold(reasonOf(e), true) }
+    } catch (e) { return hold(reasonOf(e), true) }
+    // Outside the try: the take is in the project now, so a throwing state listener must not
+    // turn this into a failed save (and a retry would add it twice).
+    pending = null
+    go('saved', { error: null, canRetry: false })
   }
 
   function hold(reason, canRetry) {
@@ -163,16 +170,17 @@ export function createFm1RecordFlow(deps) {
   }
 
   async function saveAs() {
-    if (st.phase !== 'pending') return
+    if (st.phase !== 'pending' || exporting) return
+    const take = pending
+    exporting = true
     let saved
-    try { saved = await files.exportWav(pending.wav, pending.name) } catch (e) {
-      if (isAbort(e)) return   // the user closed the save dialog: still pending
+    try { saved = await files.exportWav(take.wav, take.name) } catch (e) {
+      if (isAbort(e) || pending !== take) return   // save dialog closed, or the take was discarded meanwhile
       return emit({ error: `Couldn't save the take: ${reasonOf(e)}` })
-    }
-    if (saved === null) return  // Electron: the save dialog was cancelled
-    const name = pending.name
+    } finally { exporting = false }
+    if (saved === null || pending !== take) return  // Electron: dialog cancelled; or discarded meanwhile
     pending = null
-    go('saved', { error: null, canRetry: false, notice: `Saved as WAV (${name}). No track was added.` })
+    go('saved', { error: null, canRetry: false, notice: `Saved as WAV (${take.name}). No track was added.` })
   }
 
   // Active: stop + panic, discard. Pending: discard the take. Saving: not interruptible.
@@ -202,6 +210,12 @@ export function createFm1RecordFlow(deps) {
 
   return {
     start, stop: () => stop('user'), cancel: () => cancel(), abort, retry, saveAs,
+    // The app's transport Stop while a recording owns it: recording = Stop (keeps the take),
+    // arming = cancel with a message, tail/saving = nothing to stop.
+    transportStop() {
+      if (st.phase === 'recording') stop('user')
+      else if (st.phase === 'arming') abort('Stopped before the recording started.')
+    },
     state: () => st,
     reset() { go('reset', { error: null, notice: null }) },
     onChange(cb) { listeners.add(cb); return () => listeners.delete(cb) },

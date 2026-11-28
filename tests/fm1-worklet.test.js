@@ -125,6 +125,16 @@ describe('fm1-worklet', () => {
     expect(bytes().slice(-2)).toEqual([[0xB0, 123, 0], [0x80, 62, 0]])
   })
 
+  it('note gate (inline copy): overlapping same-pitch notes from one source end with the last off', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src: 'timeline' } })
+    send([0x90, 60, 100], 0); send([0x90, 60, 100], 200); send([0x80, 60, 0], 400); send([0x80, 60, 0], 900)
+    for (let q = 0; q < 10; q++) quantum(p, q * 128)
+    expect(x.midi.map(m => m.b)).toEqual([0x90, 60, 100, 0x90, 60, 100, 0x80, 60, 0])
+    expect(x.midi.at(-1).at).toBe(Math.ceil(900 / 128))   // the off at frame 900, not the one at 400
+  })
+
   it('drop removes queued note-ons from its frame on and keeps the offs', async () => {
     const { p, x } = await booted()
     globalThis.currentFrame = 0

@@ -183,6 +183,13 @@ describe('createBootWatch', () => {
 })
 
 describe('createNoteCounts', () => {
+  it('a live retrigger (on, on) is released by one live off, like a keyboard', () => {
+    const c = createNoteCounts()
+    expect(c.filter([0x90, 60, 100], 'live')).not.toBeNull()
+    expect(c.filter([0x90, 60, 100], 'live')).not.toBeNull()
+    expect(c.filter([0x80, 60, 0], 'live')).toEqual([0x80, 60, 0])
+  })
+
   const on = (p, ch = 2) => [0x90 | ch, p, 100], off = (p, ch = 2) => [0x80 | ch, p, 0]
   it('every on passes; an off is dropped only while ANOTHER source holds the note; reset clears', () => {
     const c = createNoteCounts()
@@ -198,13 +205,20 @@ describe('createNoteCounts', () => {
     expect(c.filter(off(61), 'timeline')).toEqual(off(61))
     expect(c.filter([0xB2, 1, 64], 'live')).toEqual([0xB2, 1, 64])  // not a note
   })
-  it('plain repeated notes from one source: every on and every off passes', () => {
+  it('plain repeated notes from one source: each on/off pair passes', () => {
     const c = createNoteCounts()
     for (let i = 0; i < 3; i++) {
       expect(c.filter(on(64), 'live')).toEqual(on(64))
-      expect(c.filter(on(64), 'live')).toEqual(on(64))     // a retrigger without an off
-      expect(c.filter(off(64), 'live')).toEqual(off(64))   // the source's own off is never held back
+      expect(c.filter(off(64), 'live')).toEqual(off(64))
     }
+  })
+  it('overlapping notes of one pitch from ONE source (two clips / tracks on one channel): only the last off is sent', () => {
+    const c = createNoteCounts()
+    expect(c.filter(on(64), 'timeline')).toEqual(on(64))
+    expect(c.filter(on(64), 'timeline')).toEqual(on(64))   // second note starts while the first sounds
+    expect(c.filter(off(64), 'timeline')).toBeNull()        // the first note's off must not cut the second
+    expect(c.filter(off(64), 'timeline')).toEqual(off(64))
+    expect(c.filter(off(64), 'timeline')).toEqual(off(64))  // a stray extra off still passes
   })
 })
 
