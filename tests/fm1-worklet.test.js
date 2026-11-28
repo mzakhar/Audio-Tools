@@ -179,3 +179,41 @@ describe('fm1-worklet', () => {
     expect(q.port.sent.find(m => m.type === 'error')).toMatchObject({ reason: 'halted' })
   })
 })
+
+describe('fm1-worklet capture', () => {
+  const caps = p => p.port.sent.filter(m => m.type === 'cap')
+
+  it('posts 4096-frame batches of its output stamped with the first context frame, flushes on off', async () => {
+    const { p } = await booted()
+    quantum(p, 0)
+    expect(caps(p)).toHaveLength(0)
+    p.port.onmessage({ data: { type: 'capture', on: true, id: 7 } })
+    const outs = []
+    for (let q = 0; q < 40; q++) outs.push(quantum(p, 1280 + q * 128))
+    const sent = caps(p)
+    expect(sent.map(m => [m.frame, m.L.length])).toEqual([[1280, 4096]])
+    expect(sent[0].id).toBe(7)
+    expect(sent[0].last).toBeUndefined()
+    expect(sent[0].L.every(v => Math.abs(v - 0.5) < 1e-6)).toBe(true)
+    expect(sent[0].R.every(v => Math.abs(v + 0.5) < 1e-6)).toBe(true)
+    expect(sent[0].L.subarray(128, 256)).toEqual(outs[1][0][0])
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 7 } })
+    const last = caps(p).at(-1)
+    expect(last).toMatchObject({ id: 7, frame: 1280 + 4096, last: true })
+    expect(last.L).toHaveLength(8 * 128)
+    quantum(p, 1280 + 40 * 128)
+    expect(caps(p)).toHaveLength(2)
+  })
+
+  it('a gap in context frames starts a new batch; off with nothing captured answers empty', async () => {
+    const { p } = await booted()
+    p.port.onmessage({ data: { type: 'capture', on: true, id: 1 } })
+    quantum(p, 0); quantum(p, 128)
+    quantum(p, 1024)                                  // frames 256..1023 never rendered
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 1 } })
+    expect(caps(p).map(m => [m.frame, m.L.length, !!m.last])).toEqual([[0, 256, false], [1024, 128, true]])
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 2 } })
+    expect(caps(p).at(-1)).toMatchObject({ id: 2, last: true })
+    expect(caps(p).at(-1).L).toHaveLength(0)
+  })
+})

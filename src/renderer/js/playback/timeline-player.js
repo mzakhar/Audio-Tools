@@ -105,7 +105,7 @@ export const preloadKitSamples = (store, tracks, kits) =>
 const TimelinePlayer = {
   _sources: [],           // active AudioBufferSourceNode[]
   _midiTimeouts: [],      // setTimeout handles for MIDI note scheduling
-  _startAudioTime: 0,     // AudioContext.currentTime when play() was called
+  _startAudioTime: 0,     // audible AudioContext time of _startBeat (FM-1 start offset included)
   _startBeat: 0,          // beat at which playback started
   _isPlaying: false,
   _rackClock: null,
@@ -245,9 +245,14 @@ const TimelinePlayer = {
       })
     })
     if (fm1Problems.length) notify?.(`FM-1 ${fm1Problems.join('; ')}`)
+    return this._startAudioTime
   },
 
-  stop() {
+  /** Audible context time of the beat the last play() started from. */
+  get startAudioTime() { return this._startAudioTime },
+
+  /** panic:false lets notes the FM-1 devices already have play out (a recording's tail). */
+  stop({ panic = true } = {}) {
     this._isPlaying = false
     if (this._rackClockTimer !== null) clearInterval(this._rackClockTimer)
     this._rackClockTimer = null
@@ -257,7 +262,7 @@ const TimelinePlayer = {
     this._instrumentRackHandles = []
     this._packInstruments.forEach(instrument => instrument.dispose())
     this._packInstruments = []
-    this._fm1Players.forEach(player => { try { player.panic() } catch (e) {} })
+    if (panic) this._fm1Players.forEach(player => { try { player.panic() } catch (e) {} })
     this._fm1Players = []
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []

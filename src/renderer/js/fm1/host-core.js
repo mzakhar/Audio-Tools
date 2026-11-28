@@ -167,3 +167,63 @@ export function createBootWatch({ timeoutMs = 8000, settleMs = 100 } = {}) {
     return ms >= timeoutMs ? 'timeout' : null
   }
 }
+
+// One FM-1 session hears the same note from live play and the timeline. Per (channel, pitch)
+// count: every note-on is sent (the firmware retriggers), a note-off only when the last holder
+// lets go. An off with nothing counted is sent (harmless, and it releases anything stray).
+export function createNoteCounts() {
+  const counts = new Map()
+  const k = (ch, pitch) => (ch & 15) * 128 + byte7(pitch)
+  return {
+    on(ch, pitch) { const key = k(ch, pitch); counts.set(key, (counts.get(key) ?? 0) + 1); return true },
+    off(ch, pitch) {
+      const key = k(ch, pitch), n = counts.get(key) ?? 0
+      if (n > 1) { counts.set(key, n - 1); return false }
+      counts.delete(key)
+      return true
+    },
+    reset() { counts.clear() },
+  }
+}
+
+// A capture take: stereo blocks placed by their audible time. Sample index of time t is
+// round((t - startTime) * rate); gaps (underruns) stay silent, samples before startTime are
+// dropped, past maxFrames are ignored and set `full`.
+export function createTake({ rate, startTime, maxFrames }) {
+  let L = new Float32Array(0), R = new Float32Array(0), hi = 0, peak = 0, full = false
+  function grow(n) {
+    if (n <= L.length) return
+    const cap = Math.min(maxFrames, Math.max(n, L.length * 2, rate))
+    const nl = new Float32Array(cap), nr = new Float32Array(cap)
+    nl.set(L.subarray(0, hi)); nr.set(R.subarray(0, hi))
+    L = nl; R = nr
+  }
+  const exact = (n) => {
+    const l = new Float32Array(n), r = new Float32Array(n)
+    l.set(L.subarray(0, Math.min(n, hi))); r.set(R.subarray(0, Math.min(n, hi)))
+    return { L: l, R: r, rate, frames: n }
+  }
+  return {
+    add(l, r, atTime) {
+      const i0 = Math.round((atTime - startTime) * rate)
+      let from = Math.max(0, -i0), to = l.length
+      if (i0 + to > maxFrames) { full = true; to = Math.max(from, maxFrames - i0) }
+      if (to <= from) return
+      grow(i0 + to)
+      for (let k = from; k < to; k++) {
+        const a = l[k], b = r[k]
+        L[i0 + k] = a; R[i0 + k] = b
+        const m = Math.max(Math.abs(a), Math.abs(b))
+        if (m > peak) peak = m
+      }
+      hi = Math.max(hi, i0 + to)
+    },
+    frames: () => hi,
+    get full() { return full },
+    get peak() { return peak },
+    finish(endTime) {
+      const n = endTime == null ? hi : Math.max(0, Math.min(maxFrames, Math.round((endTime - startTime) * rate)))
+      return exact(n)
+    },
+  }
+}

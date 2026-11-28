@@ -8,6 +8,7 @@ vi.mock('../src/renderer/js/utils/wav-encoder.js', () => ({ audioBufferToWAV: vi
 
 const { default: TimelinePlayer, fm1StartOffset } = await import('../src/renderer/js/playback/timeline-player.js')
 const { _ctx } = await import('../src/renderer/js/audio-engine.js')
+const { fm1Descriptor } = await import('../src/renderer/js/fm1/descriptor.js')
 
 function fakeSessions(status = { state: 'ready' }) {
   const session = { leadSec: 0.08, status: () => status, noteOn: vi.fn(), noteOff: vi.fn(), panic: vi.fn() }
@@ -90,5 +91,65 @@ describe('timeline player with an FM-1 track', () => {
   it('bounce refuses FM-1 tracks, naming them, before rendering', async () => {
     await expect(TimelinePlayer.bounce({ bpm: 120, durationBeats: 4, tracks: [track(), track({ id: 't2', name: 'Pad' })] }))
       .rejects.toThrow('FM-1 tracks cannot be bounced yet: Pluck, Pad')
+  })
+})
+
+describe('timeline player: recording support', () => {
+  beforeEach(() => { vi.useFakeTimers(); _ctx.currentTime = 0 })
+  afterEach(() => { TimelinePlayer.stop(); vi.useRealTimers() })
+
+  it('play() returns the audible time of its start beat, also as startAudioTime', () => {
+    const { sessions } = fakeSessions()
+    _ctx.currentTime = 3
+    const S = TimelinePlayer.play({ beat: 8, bpm: 60, tracks: [track()], mixerEngine: { getOutput: () => ({}) }, fm1Sessions: sessions })
+    expect(S).toBeCloseTo(3 + 0.08 + 0.03, 9)
+    expect(TimelinePlayer.startAudioTime).toBe(S)
+    expect(TimelinePlayer.getCurrentBeat(60)).toBeCloseTo(8 - 0.11, 9)
+  })
+
+  it('stop({ panic: false }) lets the device play out what it has, cancels the rest', () => {
+    const { session, sessions } = fakeSessions()
+    play([track({ clips: [{ type: 'midi', startBeat: 0, notes: [
+      { pitch: 60, velocity: 1, startBeat: 0, duration: 2 }, { pitch: 64, velocity: 1, startBeat: 3, duration: 1 }] }] })], { fm1Sessions: sessions })
+    vi.advanceTimersByTime(0)
+    expect(session.noteOn).toHaveBeenCalledOnce()
+    expect(session.noteOff).toHaveBeenCalledWith(60, expect.closeTo(2.11, 9))   // its off is already queued
+    TimelinePlayer.stop({ panic: false })
+    expect(session.panic).not.toHaveBeenCalled()
+    expect(TimelinePlayer.isPlaying()).toBe(false)
+    vi.advanceTimersByTime(5000)
+    expect(session.noteOn).toHaveBeenCalledOnce()
+    TimelinePlayer.stop()
+  })
+
+  it('notes recorded from a MIDI device onto an FM-1 track play back through the session', async () => {
+    const { createFm1Sessions } = await import('../src/renderer/js/fm1/session-manager.js')
+    const node = () => ({ connect() {}, disconnect() {} })
+    Object.assign(_ctx, { sampleRate: 48000, createGain: node,
+      createBuffer: (ch, n) => { const d = [new Float32Array(n), new Float32Array(n)]; return { getChannelData: i => d[i] } },
+      createBufferSource: () => ({ ...node(), start() {} }) })
+    const workers = []
+    const sessions = createFm1Sessions({ ctx: _ctx, getModule: async () => ({}), readFirmware: async () => new ArrayBuffer(8),
+      preferWorklet: () => false, createWorker: () => { const w = { sent: [], postMessage(m) { this.sent.push(m) }, terminate() {} }; workers.push(w); return w } })
+    const t = track({ instrument: { type: 'fm1', firmwareHash: 'sha256:a', deviceChannel: 3 } })
+    sessions.acquire('t1', fm1Descriptor(t.instrument), {})
+    vi.useRealTimers(); await new Promise(r => setTimeout(r, 0)); vi.useFakeTimers()
+    const w = workers[0]
+    w.onmessage({ data: { type: 'ready' } })
+    w.onmessage({ data: { type: 'block', frame: 0, l: new Float32Array(1024), r: new Float32Array(1024) } })
+    // MidiController.stopRecording() shape, as app.js stores it in the 'Rec' clip
+    t.clips = [{ id: 'midi-clip-1', type: 'midi', name: 'Rec', startBeat: 0, duration: 4, notes: [
+      { id: 'n1', pitch: 60, startBeat: 0.5, duration: 0.25, velocity: 100 / 127 },
+      { id: 'n2', pitch: 67, startBeat: 1, duration: 0.0625, velocity: 1 }] }]
+    const S = TimelinePlayer.play({ beat: 0, bpm: 120, tracks: [t], mixerEngine: { getOutput: () => ({}) }, fm1Sessions: sessions })
+    vi.advanceTimersByTime(1000)
+    const frame = time => Math.round((time - 0.02) * 48000)   // anchor: block frame 0 plays at 0.02
+    expect(w.sent.filter(m => m.type === 'midi')).toEqual([
+      { type: 'midi', bytes: [0x93, 60, 100], frame: frame(S + 0.25) },
+      { type: 'midi', bytes: [0x83, 60, 0], frame: frame(S + 0.375) },
+      { type: 'midi', bytes: [0x93, 67, 127], frame: frame(S + 0.5) },
+      { type: 'midi', bytes: [0x83, 67, 0], frame: frame(S + 0.53125) },
+    ])
+    sessions.disposeAll()
   })
 })

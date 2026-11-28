@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   framesAt, createEventQueue, createKeyHold, createResampler, rgb565ToRgba,
-  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, createBootWatch,
+  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, createBootWatch, createNoteCounts, createTake,
 } from '../src/renderer/js/fm1/host-core.js'
 
 describe('framesAt', () => {
@@ -179,5 +179,69 @@ describe('createBootWatch', () => {
     expect(w({ have: 128, lcdRev: 1, ms: 300 })).toBeNull()
     expect(w({ have: 128, lcdRev: 1, ms: 8000 })).toBe('timeout')
     expect(createBootWatch()({ have: 0, lcdRev: 1, ms: 8000 })).toBe('timeout')
+  })
+})
+
+describe('createNoteCounts', () => {
+  it('every on is sent; an off only when the last holder lets go; reset clears', () => {
+    const c = createNoteCounts()
+    expect(c.on(2, 60)).toBe(true)
+    expect(c.on(2, 60)).toBe(true)
+    expect(c.on(3, 60)).toBe(true)          // another channel is another key
+    expect(c.off(2, 60)).toBe(false)
+    expect(c.off(2, 60)).toBe(true)
+    expect(c.off(3, 60)).toBe(true)
+    expect(c.off(2, 60)).toBe(true)          // nothing counted: send (harmless)
+    c.on(2, 61); c.on(2, 61); c.reset()
+    expect(c.off(2, 61)).toBe(true)
+  })
+})
+
+describe('createTake', () => {
+  const ramp = (n, from = 1) => Float32Array.from({ length: n }, (_, i) => (from + i) / 1000)
+  it('places blocks by audible time and leaves an underrun gap silent', () => {
+    const t = createTake({ rate: 1000, startTime: 2, maxFrames: 100 })
+    t.add(ramp(10), ramp(10).map(v => -v), 2)
+    t.add(ramp(5, 50), ramp(5, 50), 2.02)          // 10 frames late: 10..19 stay 0
+    expect(t.frames()).toBe(25)
+    const { L, R, rate, frames } = t.finish()
+    expect([rate, frames, L.length]).toEqual([1000, 25, 25])
+    expect(L[0]).toBeCloseTo(0.001); expect(R[9]).toBeCloseTo(-0.010)
+    expect([...L.subarray(10, 20)].every(v => v === 0)).toBe(true)
+    expect(L[20]).toBeCloseTo(0.050)
+    expect(t.peak).toBeCloseTo(0.054)
+  })
+  it('rounds the start index, drops samples before startTime', () => {
+    const t = createTake({ rate: 1000, startTime: 1, maxFrames: 100 })
+    t.add(ramp(10), ramp(10), 0.9954)               // index round(-4.6) = -5: first 5 dropped
+    const { L } = t.finish()
+    expect(L.length).toBe(5)
+    expect(L[0]).toBeCloseTo(0.006)
+    t.add(ramp(3), ramp(3), 0.5)                    // wholly before: ignored
+    expect(t.frames()).toBe(5)
+  })
+  it('stops at maxFrames and says full; finish truncates or extends to an end time', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 8 })
+    t.add(ramp(6), ramp(6), 0)
+    expect(t.full).toBe(false)
+    t.add(ramp(6, 100), ramp(6, 100), 0.006)
+    expect(t.full).toBe(true)
+    expect(t.frames()).toBe(8)
+    expect(t.finish(0.003).L).toEqual(ramp(3))
+    const long = t.finish(0.02)                      // capped at maxFrames
+    expect(long.frames).toBe(8)
+    const u = createTake({ rate: 1000, startTime: 0, maxFrames: 100 })
+    u.add(ramp(4), ramp(4), 0)
+    const ext = u.finish(0.01)
+    expect(ext.frames).toBe(10)
+    expect([...ext.R.subarray(4)].every(v => v === 0)).toBe(true)
+    expect(createTake({ rate: 1000, startTime: 0, maxFrames: 10 }).finish()).toMatchObject({ frames: 0 })
+  })
+  it('grows across many blocks without losing earlier samples', () => {
+    const t = createTake({ rate: 100, startTime: 0, maxFrames: 1e6 })
+    for (let i = 0; i < 300; i++) t.add(new Float32Array(64).fill(i / 1000), new Float32Array(64), i * 0.64)
+    const { L } = t.finish()
+    expect(L.length).toBe(300 * 64)
+    expect(L[0]).toBe(0); expect(L[64 * 150]).toBeCloseTo(0.15); expect(L.at(-1)).toBeCloseTo(0.299)
   })
 })

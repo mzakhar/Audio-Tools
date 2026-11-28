@@ -5,7 +5,8 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { bootEmulator, bootToReady, createRunner, CHUNK } from '../src/renderer/js/fm1/emulator.js'
-import { noteOnBytes, createBlockWriter, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
+import { noteOnBytes, createBlockWriter, createTake, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
+import { createFm1Session } from '../src/renderer/js/fm1/session.js'
 
 const fw = process.env.FM1_FW_DIR && join(process.env.FM1_FW_DIR, 'felucca-1.8.4.fwsc')
 const run = fw && existsSync(fw) ? describe : describe.skip
@@ -125,5 +126,121 @@ run('FM-1 real firmware through the worklet host', () => {
     } finally {
       for (const [k, v] of saved) globalThis[k] = v
     }
+  }, 120000)
+})
+
+// Capture latency proof: what a take holds at index i is exactly what was audible at context time
+// S + i / rate (latency compensation 0). Onset = first sample above a threshold set from the idle
+// floor; the take's onset index must equal round((audibleOnset - S) * rate) within one frame.
+const onsetOf = (a, from, thr) => { for (let i = Math.max(0, from); i < a.length; i++) if (Math.abs(a[i]) > thr) return i; return -1 }
+const ab = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)
+
+run('FM-1 real firmware: capture lands at audible time (latency 0)', () => {
+  it('worklet host: the take is the audible output from S on, note onset at round((t-S)*rate)', async () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/renderer/public/worklets/fm1-worklet.js'), 'utf8')
+    const saved = ['registerProcessor', 'AudioWorkletProcessor', 'sampleRate', 'currentFrame'].map(k => [k, globalThis[k]])
+    let Processor
+    globalThis.AudioWorkletProcessor = class { constructor() { this.port = { sent: [], postMessage(m) { this.sent.push(m) } } } }
+    globalThis.registerProcessor = (_, cls) => { Processor = cls }
+    globalThis.sampleRate = 48000
+    globalThis.currentFrame = 0
+    try {
+      new Function(src)()
+      const p = new Processor()
+      const wasm = readFileSync(resolve(process.cwd(), 'src/renderer/public/fm1/fm1_web.wasm'))
+      p.port.onmessage({ data: { type: 'boot', wasm: ab(wasm), package: ab(readFileSync(fw)), mhz: 120 } })
+      while (!p.x) await new Promise(r => setTimeout(r, 5))
+      const send = data => p.port.onmessage({ data })
+      const audible = []                               // [frame, L] per quantum
+      const quanta = (n) => {
+        for (let i = 0; i < n; i++) {
+          const o = [[new Float32Array(128), new Float32Array(128)]]
+          p.process([], o)
+          audible.push([globalThis.currentFrame, o[0][0]])
+          globalThis.currentFrame += 128
+        }
+      }
+      while (!p.port.sent.some(m => m.type === 'ready')) quanta(1)
+      quanta(375)                                     // settle 1 s
+      const rate = 48000
+      const S = (globalThis.currentFrame + 2400) / rate + 0.37 / rate   // 50 ms ahead, off-grid
+      const s0 = Math.round(S * rate)
+      send({ type: 'capture', on: true, id: 1 })
+      const idleFrom = audible.length
+      quanta(40)
+      const noteFrame = globalThis.currentFrame + 4800 // 100 ms later
+      send({ type: 'midi', bytes: noteOnBytes(0, 60, 110), frame: noteFrame })
+      quanta(300)
+      send({ type: 'capture', on: false, id: 1 })
+      const take = createTake({ rate, startTime: S, maxFrames: rate * 10 })
+      for (const m of p.port.sent.filter(m => m.type === 'cap')) take.add(m.L, m.R, m.frame / rate)
+      const { L } = take.finish()
+      const first = audible[0][0], flat = new Float32Array(globalThis.currentFrame - first)
+      for (const [f, l] of audible) flat.set(l, f - first)
+      let floor = 0
+      for (const [, l] of audible.slice(idleFrom, idleFrom + 35)) for (const v of l) floor = Math.max(floor, Math.abs(v))
+      const thr = Math.max(1e-3, floor * 4)
+      const heard = onsetOf(flat, noteFrame - first, thr) + first
+      const got = onsetOf(L, noteFrame - s0, thr)
+      expect(heard).toBeGreaterThan(noteFrame - 1)
+      expect(Math.abs(got - (heard - s0))).toBeLessThanOrEqual(1)
+      let mismatched = 0
+      for (let i = 0; i < L.length; i++) if (L[i] !== flat[s0 + i - first]) mismatched++
+      expect(mismatched).toBe(0)
+      console.log(`fm1-real capture (worklet): take onset ${got} vs audible ${heard - s0} (delta ${got - (heard - s0)} frames); ` +
+        `note->sound ${((heard - noteFrame) / rate * 1000).toFixed(1)} ms (firmware, not compensated); idle floor ${floor.toExponential(2)}, ${L.length} frames`)
+    } finally {
+      for (const [k, v] of saved) globalThis[k] = v
+    }
+  }, 120000)
+
+  it('Worker path: the take is what the scheduled blocks play from S on, an underrun gap included', async () => {
+    const wasm = readFileSync(resolve(process.cwd(), 'src/renderer/public/fm1/fm1_web.wasm'))
+    const module = await WebAssembly.compile(wasm)
+    const { x } = await bootEmulator({ module, pkg: ab(readFileSync(fw)), mhz: 120 })
+    const r = createRunner(x, { mhz: 120 })
+    expect(bootToReady(r, x)).toBe('up')
+    for (let i = 0; i < 345; i++) r.render()
+    const rate = 48000
+    const node = () => ({ connect() {}, disconnect() {} })
+    const ctx = { currentTime: 10, sampleRate: rate, sources: [], createGain: node,
+      createBuffer: (ch, n) => { const d = [new Float32Array(n), new Float32Array(n)]; return { getChannelData: i => d[i] } },
+      createBufferSource() { const s = { ...node(), start(t) { this.startAt = t } }; ctx.sources.push(s); return s } }
+    let w
+    const s = createFm1Session({ ctx, key: 'k', descriptor: { firmwareHash: 'h', deviceChannel: 0, mhz: 120 }, output: {},
+      getModule: async () => ({}), readFirmware: async () => new ArrayBuffer(8),
+      createWorker: () => (w = { postMessage() {}, terminate() {} }), now: () => 0 })
+    await new Promise(res => setTimeout(res, 0))
+    w.onmessage({ data: { type: 'ready' } })
+    const writer = createBlockWriter(FM1_RATE, rate, 1024)
+    const pump = (chunks) => { for (let i = 0; i < chunks; i++) { const { l, r: rr } = r.render(); for (const b of writer.push(l, rr)) w.onmessage({ data: { type: 'block', ...b } }) } }
+    pump(40)                                          // ~0.1 s scheduled ahead
+    const S = ctx.currentTime + 0.05 + 0.29 / rate     // a recording starts after play(), S ahead
+    const cap = s.startCapture({ startTime: S })
+    r.midi(noteOnBytes(0, 60, 110), r.frame + 2000)
+    for (let k = 0; k < 20; k++) { ctx.currentTime += 0.02; pump(8) }
+    ctx.currentTime += 0.5                             // the tab stalled: next block re-anchors later
+    for (let k = 0; k < 10; k++) { pump(8); ctx.currentTime += 0.02 }
+    expect(s.status().underruns).toBe(1)
+    const { L } = await cap.finish()
+    // audible timeline from what was scheduled
+    const s0 = Math.round(S * rate)
+    const last = ctx.sources.at(-1)
+    const flat = new Float32Array(Math.round(last.startAt * rate) + 1024 - s0)
+    for (const src of ctx.sources) {
+      const at = Math.round(src.startAt * rate) - s0, d = src.buffer.getChannelData(0)
+      for (let i = 0; i < d.length; i++) if (at + i >= 0) flat[at + i] = d[i]
+    }
+    expect(L.length).toBe(flat.length)
+    let mismatched = 0
+    for (let i = 0; i < L.length; i++) if (L[i] !== flat[i]) mismatched++
+    expect(mismatched).toBe(0)
+    let floor = 0
+    for (let i = 0; i < 1000; i++) floor = Math.max(floor, Math.abs(L[i]))
+    const thr = Math.max(1e-3, floor * 4), got = onsetOf(L, 0, thr), heard = onsetOf(flat, 0, thr)
+    expect(got).toBeGreaterThan(0)
+    expect(Math.abs(got - heard)).toBeLessThanOrEqual(1)
+    console.log(`fm1-real capture (worker): take onset ${got} vs audible ${heard}; ${L.length} frames incl. underrun gap`)
+    s.dispose()
   }, 120000)
 })

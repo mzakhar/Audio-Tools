@@ -6,10 +6,11 @@
 //    (anchor frame + block frame, so no drift); timed events carry an output frame mapped from
 //    AudioContext time through the same anchor.
 // Note and panel methods never throw; before ready they are dropped (no replay on ready).
-import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE } from './host-core.js'
+import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE, createNoteCounts, createTake } from './host-core.js'
 
 const START_PAD = 0.02           // first block (and after an underrun) starts this far ahead
 const REPORT_MS = 20             // how often the Worker hears how far playback has got
+const CAP_FLUSH_MS = 1000        // finish() stops waiting for the worklet's last capture batch
 export const BLOCK_FRAMES = 1024 // Worker path block, in output (context-rate) frames
 
 export function createFm1Session({
@@ -23,6 +24,8 @@ export function createFm1Session({
   let anchor = null, lastReport = -Infinity, lcdOn = false
   const counters = { rtf: null, underruns: 0, late: 0, starved: 0, dropped: 0 }
   const held = new Set()
+  const counts = createNoteCounts()  // live + timeline on one device: offs only when the last holder lets go
+  let capture = null, capSeq = 0     // { id, take, done?() }
   const sources = new Set()
   const lcdCbs = new Set(), statusCbs = new Set()
   const rgba = new Uint8ClampedArray(240 * 240 * 4)
@@ -50,6 +53,7 @@ export function createFm1Session({
     for (const src of sources) { try { src.stop() } catch {} src.disconnect() }
     sources.clear()
     anchor = null
+    capture?.done?.()
   }
 
   function fail(why) {
@@ -86,7 +90,9 @@ export function createFm1Session({
     src.connect(gain)
     src.onended = () => { sources.delete(src); src.disconnect() }
     src.start(at)
+    src.fm1At = at
     sources.add(src)
+    capture?.take.add(l, r, at)  // placed by audible time, so an underrun gap is in the take too
     const ms = now()
     if (ms - lastReport >= REPORT_MS) {
       lastReport = ms
@@ -97,7 +103,13 @@ export function createFm1Session({
   function onMessage(m) {
     if (state === 'disposed' || state === 'failed') return
     if (m.type === 'block') onBlock(m)
-    else if (m.type === 'ready') {
+    else if (m.type === 'cap') {
+      // worklet path: a context frame is its audible time
+      if (capture && m.id === capture.id) {
+        capture.take.add(m.L, m.R, m.frame / ctx.sampleRate)
+        if (m.last) capture.done?.()
+      }
+    } else if (m.type === 'ready') {
       state = 'ready'
       bootTimeout = !!m.timedOut
       pkg = null
@@ -148,6 +160,7 @@ export function createFm1Session({
       const copy = pkg.slice(0)
       port.postMessage({ type: 'boot', wasm, module, package: copy, mhz: descriptor.mhz }, [copy])
       if (lcdOn) port.postMessage({ type: 'lcd', on: true })
+      if (capture) port.postMessage({ type: 'capture', on: true, id: capture.id })
     } catch { fail('wasm-failed') }
   }
 
@@ -181,16 +194,19 @@ export function createFm1Session({
     noteOn(pitch, vel, time) {
       if (state !== 'ready') return
       held.add(pitch)
+      counts.on(ch(), pitch)
       send(noteOnBytes(ch(), pitch, vel), time)
     },
     noteOff(pitch, time) {
       if (state !== 'ready') return
+      if (!counts.off(ch(), pitch)) return
       held.delete(pitch)
       send(noteOffBytes(ch(), pitch), time)
     },
     sendMidi(bytes, time) { send(bytes.slice(), time) },
     // all notes off on every channel plus offs for held notes; queued events are dropped
     panic() {
+      counts.reset()
       if (state !== 'ready') { held.clear(); return }
       const bytes = allNotesOffBytes()
       for (const p of held) bytes.push(...noteOffBytes(ch(), p))
@@ -207,6 +223,42 @@ export function createFm1Session({
       return () => {
         lcdCbs.delete(cb)
         if (!lcdCbs.size && lcdOn) { lcdOn = false; post({ type: 'lcd', on: false }) }
+      }
+    },
+    // Records this device's output from audible time startTime on, at ctx.sampleRate, before the
+    // session gain (so pre-fader). Path A takes the blocks as they are scheduled; Path B streams
+    // batches from the worklet. One capture at a time.
+    startCapture({ startTime, maxSeconds = 600 }) {
+      if (capture) throw new Error('fm1: a capture is already running')
+      const rate = ctx.sampleRate
+      const cap = { id: ++capSeq, take: createTake({ rate, startTime, maxFrames: Math.round(maxSeconds * rate) }) }
+      capture = cap
+      if (node) post({ type: 'capture', on: true, id: cap.id })
+      // Worker blocks arrive ahead of time: those already scheduled may reach past startTime
+      // (a recording usually starts in the same tick as play(), S a little in the future)
+      for (const src of sources) cap.take.add(src.buffer.getChannelData(0), src.buffer.getChannelData(1), src.fm1At)
+      const end = () => { if (capture === cap) capture = null }
+      return {
+        peak: () => cap.take.peak,
+        frames: () => cap.take.frames(),
+        full: () => cap.take.full,
+        // Worker blocks arrive ~leadSec ahead of audible time, so once currentTime passes the
+        // end nothing is outstanding; the worklet is asked to flush its last batch.
+        async finish(endTime) {
+          if (capture === cap && node) {
+            await new Promise((res) => {
+              const t = setTimeout(res, CAP_FLUSH_MS)
+              cap.done = () => { clearTimeout(t); res() }
+              post({ type: 'capture', on: false, id: cap.id })
+            })
+          }
+          end()
+          return cap.take.finish(endTime)
+        },
+        cancel() {
+          if (capture === cap && node) post({ type: 'capture', on: false, id: cap.id })
+          end()
+        },
       }
     },
     onStatus(cb) { statusCbs.add(cb); return () => statusCbs.delete(cb) },
