@@ -162,7 +162,7 @@ describe('timeline player: recording support', () => {
     const w = workers[0]
     w.onmessage({ data: { type: 'ready' } })
     w.onmessage({ data: { type: 'block', frame: 0, l: new Float32Array(1024), r: new Float32Array(1024) } })
-    // MidiController.stopRecording() shape, as app.js stores it in the 'Rec' clip
+    // A recorded take's clip shape (midi/take-recorder.js)
     t.clips = [{ id: 'midi-clip-1', type: 'midi', name: 'Rec', startBeat: 0, duration: 4, notes: [
       { id: 'n1', pitch: 60, startBeat: 0.5, duration: 0.25, velocity: 100 / 127 },
       { id: 'n2', pitch: 67, startBeat: 1, duration: 0.0625, velocity: 1 }] }]

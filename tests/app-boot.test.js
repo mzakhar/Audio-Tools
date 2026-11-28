@@ -130,4 +130,86 @@ describe('app boots', () => {
     document.querySelector('.tool-btn[data-tool="synth"]').click()
     expect(errors).toEqual([])
   })
+
+  describe('Arrange MIDI recording', () => {
+    const until = async cond => { for (let i = 0; i < 200 && !cond(); i++) await new Promise(done => setTimeout(done, 5)) }
+    const rec = () => document.getElementById('rec-btn')
+
+    it('● is disabled outside arrange, with the reason', () => {
+      document.querySelector('.tool-btn[data-tool="synth"]').click()
+      expect(rec().disabled).toBe(true)
+      expect(rec().title).toBe('MIDI recording works in Arrange')
+      expect(rec().getAttribute('aria-label')).toBe('Record MIDI')
+      expect(document.getElementById('midi-record-btn')).toBeNull()
+    })
+
+    it('keyboard notes during a take become one clip in ONE Record MIDI batch; FM-1 record refuses meanwhile', async () => {
+      const { default: ProjectStore } = await import('../src/renderer/js/store/ProjectStore.js')
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      document.querySelector('.tool-btn[data-tool="arrange"]').click()
+      expect(rec().disabled).toBe(false)
+      const batch = vi.spyOn(ProjectStore, 'dispatchBatch')
+      rec().click()
+      await until(() => rec().getAttribute('aria-pressed') === 'true' && document.getElementById('global-play-btn').getAttribute('aria-pressed') === 'true')
+      expect(rec().getAttribute('aria-pressed')).toBe('true')
+
+      const ctx = AudioEngine.getContext()
+      ctx.currentTime = 1
+      document.dispatchEvent(new CustomEvent('note-on', { detail: { note: 60 } }))
+      ctx.currentTime = 1.5
+      document.dispatchEvent(new CustomEvent('note-off', { detail: { note: 60 } }))
+
+      // Only one recording owns the transport.
+      const fm1 = document.querySelector('#app-menu [data-cmd="fm1-record"]')
+      fm1.disabled = false
+      fm1.click()
+      await until(() => document.getElementById('toast').textContent === 'STOP MIDI RECORDING FIRST')
+      expect(document.getElementById('toast').textContent).toBe('STOP MIDI RECORDING FIRST')
+
+      ctx.currentTime = 2
+      rec().click()
+      expect(rec().getAttribute('aria-pressed')).toBe('false')
+      expect(batch).toHaveBeenCalledTimes(1)
+      const [commands, label] = batch.mock.calls[0]
+      expect(label).toBe('Record MIDI')
+      expect(commands).toHaveLength(1)
+      const clips = ProjectStore.getState().tracks.flatMap(track => track.clips).filter(clip => clip.name?.startsWith('Take '))
+      expect(clips).toHaveLength(1)
+      expect(clips[0]).toMatchObject({ type: 'midi', startBeat: 0, duration: 4 })
+      expect(clips[0].notes).toHaveLength(1)
+      expect(clips[0].notes[0].pitch).toBe(60)
+      batch.mockRestore()
+      expect(errors).toEqual([])
+    })
+
+    it('record-master (⋯ menu) toggles the master Recorder and its label', async () => {
+      const { default: AudioEngine } = await import('../src/renderer/js/audio-engine.js')
+      const { default: Recorder } = await import('../src/renderer/js/recorder.js')
+      vi.spyOn(AudioEngine, 'hasRecorder').mockReturnValue(true)
+      const start = vi.spyOn(Recorder, 'start').mockImplementation(() => {})
+      const stop = vi.spyOn(Recorder, 'stop').mockResolvedValue('take.wav')
+      const item = document.querySelector('#app-menu [data-cmd="record-master"]')
+      expect(item.textContent).toContain('Record master to WAV…')
+      item.click()
+      await until(() => start.mock.calls.length > 0)
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(item.textContent).toContain('Stop master recording')
+      expect(document.getElementById('rec-timer').hidden).toBe(false)
+      item.click()
+      await until(() => stop.mock.calls.length > 0)
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(item.textContent).toContain('Record master to WAV…')
+      vi.restoreAllMocks()
+      expect(errors).toEqual([])
+    })
+
+    it('offers the count-in preference in the ⋯ menu, off by default', () => {
+      const box = document.getElementById('count-in-toggle')
+      expect(box.checked).toBe(false)
+      box.click()
+      expect(localStorage.getItem('synth_count_in')).toBe('1')
+      box.click()
+      expect(localStorage.getItem('synth_count_in')).toBe('0')
+    })
+  })
 })

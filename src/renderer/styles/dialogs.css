@@ -6,7 +6,7 @@
 }
 .midi-status.granted { color: var(--accent3); }
 
-.midi-btn, .midi-rec-btn, .dlg-close-btn { flex-shrink: 0; font-size: 12px; }
+.midi-btn, .dlg-close-btn { flex-shrink: 0; font-size: 12px; }
 .midi-btn { min-height: 28px; }
 /* Primary actions take the .btn--toggle "on" look. */
 #asst-apply-btn:not(:disabled),
@@ -32,8 +32,6 @@
   text-overflow: ellipsis;
 }
 .midi-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-
-.midi-rec-btn.recording { color: var(--danger-on); background: var(--state-record); border-color: var(--state-record); }
 
 /* --- Dialogs (native <dialog>) ------------------------------------------ */
 /* A modal <dialog> is centred by the UA's `margin: auto`, which the reset at
@@ -241,7 +239,7 @@ dialog.ib-dialog[open] { width: min(640px, 94vw); }
 
 .ib-chip:focus-visible, .is-tab:focus-visible, .ib-fav:focus-visible,
 .track-instrument-chip:focus-visible, .track-instrument-gear:focus-visible,
-.midi-btn:focus-visible, .midi-rec-btn:focus-visible, .dlg-close-btn:focus-visible {
+.midi-btn:focus-visible, .dlg-close-btn:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
