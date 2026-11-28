@@ -66,6 +66,11 @@ describe('fm1 device dialog', () => {
     expect(byName('Key C4')).not.toBeNull()
     expect(document.querySelector('canvas[aria-label="FM-1 display"]')).not.toBeNull()
     expect(document.getElementById('fm1d-title').textContent).toBe('FM-1 · Lead')
+    // two tracks may share a name: the position tells them apart
+    dialog.close()
+    const numbered = createFm1DeviceDialog({ getSession: () => session, getTrack: id => id === 't1' ? track : null, trackNumber: () => 2, compatFor: () => null })
+    numbered.open('t1')
+    expect(document.getElementById('fm1d-title').textContent).toBe('FM-1 · Lead · track 2')
   })
 
   it('encoder arrows send +-1, Page keys +-5, other keys nothing', () => {

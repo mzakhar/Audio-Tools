@@ -93,5 +93,9 @@ self.onmessage = (e) => {
   else if (m.type === 'enc') run.enc(m.id, m.clicks)
   else if (m.type === 'pot') run.pot(m.value)
   else if (m.type === 'lcd') { lcdOn = !!m.on; lcdForce = lcdOn }
-  else if (m.type === 'snapshot') gate.request({ request: m.request, since: m.since }, now())
+  else if (m.type === 'snapshot') {
+    // run exists before gate: a boot that halted in bootToReady has no gate, and no device to snapshot
+    if (gate) gate.request({ request: m.request, since: m.since }, now())
+    else post({ type: 'snapshot', request: m.request, reason: 'not-ready' })
+  }
 }

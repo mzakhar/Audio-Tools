@@ -35,7 +35,7 @@ export function liveInstrumentFor(track, deps) {
   return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
 }
 
-export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, getKits, mountRack, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, onStatus, fm1Sessions, trackId } = {}) {
+export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, getKits, mountRack, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, onStatus, fm1Sessions, trackId, currentInstrument } = {}) {
   if (!instrument) return null
   const bendRange = instrument.bendRange ?? DEFAULT_BEND_RANGE
   const modOff = instrument.modDest === 'off'
@@ -131,17 +131,24 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, 
     // timeline and the panel share it; only an audition owns (and ends) its own,
     // under a key unique to this play so a late dispose cannot end the next one.
     const key = trackId || `audition:${++auditionSeq}`
-    const descriptor = fm1Descriptor(instrument)
+    const built = fm1Descriptor(instrument)
+    // A project save moves flashAssetId without rebuilding this adapter (it is not identity), so a
+    // (re)boot from here must use the track's current one, never the id baked at build time.
+    const descriptor = () => {
+      const now = currentInstrument?.()
+      return now?.type === 'fm1' && now.flashAssetId !== built.flashAssetId ? fm1Descriptor(now) : built
+    }
     // The manager may replace the session (failed, disposed), so every call
     // resolves the current one; prewarm/preload go through acquire, which also
     // retries a failed device.
     // A disposed audition adapter stays silent rather than booting a new device.
     let gone = false
-    const session = () => gone ? null : fm1Sessions.use(key, descriptor, output)
-    const acquired = () => fm1Sessions.acquire(key, descriptor, output).ready
-    fm1Sessions.acquire(key, descriptor, output)
+    const session = () => gone ? null : fm1Sessions.use(key, descriptor(), output)
+    // re-reads the session's `ready` getter per call: an import or reboot replaces it
+    const acquired = () => fm1Sessions.acquire(key, descriptor(), output).ready
+    fm1Sessions.acquire(key, built, output)
     const at = time => Math.max(time ?? 0, ctx.currentTime)
-    const ch = descriptor.deviceChannel
+    const ch = built.deviceChannel
     return {
       get session() { return session() },
       prewarm: acquired,

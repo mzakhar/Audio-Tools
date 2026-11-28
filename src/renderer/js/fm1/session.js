@@ -32,6 +32,7 @@ export function createFm1Session({
   let importing = false              // the boot in progress restores imported records: dirty once ready
   const snaps = new Map()            // request id -> resolve
   let snapSeq = 0, bootGen = 0      // bootGen: a re-boot (importFlash) orphans an older boot still loading
+  let trial = null                   // { worker, reject }: an import booting beside the running device
   let anchor = null, lastReport = -Infinity, lcdOn = false
   const counters = { rtf: null, underruns: 0, late: 0, starved: 0, dropped: 0 }
   const held = new Set()
@@ -72,8 +73,17 @@ export function createFm1Session({
     snaps.clear()
   }
 
+  function killTrial(why) {
+    if (!trial) return
+    const t = trial
+    trial = null
+    t.worker?.terminate()
+    t.reject(new Error(why))
+  }
+
   function fail(why) {
     if (state === 'disposed' || state === 'failed') return
+    killTrial('not-ready')
     if (path === 'worklet' && state === 'booting' && why === 'wasm-failed') {
       teardownHost()
       path = 'worker'
@@ -197,7 +207,10 @@ export function createFm1Session({
 
   // -> packed restore records, or a failure reason. Never boots clean over a referenced asset.
   async function loadFlash() {
-    if (!descriptor.flashAssetId) return { sectors: null }
+    const id = descriptor.flashAssetId
+    if (id == null) return { sectors: null }
+    // an id that cannot name a file is a damaged project, not "no saved state"
+    if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) return { reason: 'flash-corrupt' }
     // readFlash throws Error('flash-…') to name its reason (missing file, no project folder)
     let bytes = null
     try { bytes = await readFlash(descriptor) } catch (err) {
@@ -229,6 +242,46 @@ export function createFm1Session({
     else { path = 'worker'; startWorker() }
   }
   boot()
+
+  // Import over a running device: the imported state boots on a second Worker and is swapped in
+  // only once it is ready, so a failed import leaves the running device (and `ready`) untouched.
+  async function trialImport(restore) {
+    if (trial) throw new Error('busy')
+    const t = trial = { worker: null, reject: null }
+    const settled = new Promise((res, rej) => { t.resolve = res; t.reject = rej })
+    try {
+      const [fw, module] = await Promise.all([Promise.resolve().then(() => readFirmware(descriptor.firmwareHash)), getModule()])
+      if (trial !== t) return settled
+      if (!fw) throw new Error('missing-firmware')
+      const w = t.worker = createWorker()
+      w.onerror = () => { if (trial === t) killTrial('wasm-failed') }
+      w.onmessage = (e) => {
+        const m = e.data
+        if (trial !== t) return
+        if (m.type === 'error') return killTrial(m.reason || 'boot-failed')
+        if (m.type !== 'ready') return
+        // swap, synchronously, so the new Worker's first block already lands on the session
+        trial = null
+        teardownHost()
+        held.clear()
+        path = 'worker'
+        worker = port = w
+        w.onmessage = (ev) => onMessage(ev.data)
+        w.onerror = () => fail('wasm-failed')
+        if (lcdOn) post({ type: 'lcd', on: true })
+        importing = true
+        onMessage(m)
+        t.resolve(ready)
+      }
+      const copy = fw.slice(0)
+      w.postMessage({ type: 'boot', module, package: copy, mhz: descriptor.mhz, sampleRate: ctx.sampleRate,
+        blockFrames: BLOCK_FRAMES, leadFrames: Math.round(horizonSec() * FM1_RATE), sectors: restore },
+      [copy, restore.buffer])
+    } catch (err) {
+      if (trial === t) killTrial(/^[\w-]+$/.test(err?.message) ? err.message : 'wasm-failed')
+    }
+    return settled
+  }
 
   const ch = () => descriptor.deviceChannel & 15
   // src tags the sender ('live' | 'timeline'): the host drops a note-off only while the other
@@ -270,9 +323,13 @@ export function createFm1Session({
       emit()
     },
     // Re-boots this device from imported records (Import device state). Resolves when ready.
+    // A running device keeps running until the imported state has booted (trialImport); a
+    // failed or booting one is simply re-booted.
     importFlash(records) {
       if (state === 'disposed') return Promise.reject(new Error('disposed'))
-      packRestore(records)          // throws on invalid records, before tearing anything down
+      const restore = packRestore(records)   // throws on invalid records, before tearing anything down
+      if (state === 'ready') return trialImport(restore)
+      killTrial('re-booting')
       teardownHost()
       if (state !== 'failed') rejectReady(new Error('re-booting'))
       newReady()
@@ -365,6 +422,7 @@ export function createFm1Session({
     dispose() {
       if (state === 'disposed') return
       const wasFailed = state === 'failed'
+      killTrial('disposed')
       teardownHost()
       gain.disconnect()
       state = 'disposed'

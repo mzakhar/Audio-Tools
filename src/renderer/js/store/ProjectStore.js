@@ -186,21 +186,37 @@ export function SetTrackInstrument(trackId, instrument) {
 
 const fm1Matches = (track, firmwareHash) => track?.instrument?.type === 'fm1' && track.instrument.firmwareHash === firmwareHash
 
+const flashIdIn = (state, trackId) => state.tracks.find(t => t.id === trackId)?.instrument?.flashAssetId
+
 /**
- * Point FM-1 tracks at the flash assets a save just wrote: [{ trackId, assetId, firmwareHash }].
- * Not an edit, a fact about files on disk: `noUndo` makes dispatch apply it to the history
- * snapshots too (where the track has the same firmware), so an undo never points a track
- * back at an older save. No undo entry, no label.
+ * Point FM-1 tracks at the flash assets a save just wrote: [{ trackId, assetId, firmwareHash, from? }]
+ * (assetId undefined clears; `from`, when present, applies only where the track's id is still
+ * `from` — a save's rollback uses it). Not an edit, a fact about files on disk: `noUndo` makes
+ * dispatch carry it into the history too (walker), so an undo never points a track back at an
+ * older save. No undo entry, no label.
  */
 export function SetTrackFlashAssets(assignments) {
+  const hits = (state, list) => list.filter(a =>
+    fm1Matches(state.tracks.find(t => t.id === a.trackId), a.firmwareHash) && (!('from' in a) || flashIdIn(state, a.trackId) === a.from))
+  const apply = (state, list) => {
+    if (!list.length) return state
+    const next = JSON.parse(JSON.stringify(state))
+    for (const a of list) {
+      const instrument = next.tracks.find(t => t.id === a.trackId).instrument
+      if (a.assetId == null) delete instrument.flashAssetId
+      else instrument.flashAssetId = a.assetId
+    }
+    return next
+  }
   return {
     noUndo: true,
-    execute(state) {
-      const hits = assignments.filter(a => fm1Matches(state.tracks.find(t => t.id === a.trackId), a.firmwareHash))
-      if (!hits.length) return state
-      const next = JSON.parse(JSON.stringify(state))
-      for (const a of hits) next.tracks.find(t => t.id === a.trackId).instrument.flashAssetId = a.assetId
-      return next
+    execute: state => apply(state, hits(state, assignments)),
+    // History snapshots, fed in order walking away from the present (one walk back, one forward).
+    // A track is carried along only while its id equals the present one: the first entry where
+    // it differs changed it on purpose (Start from firmware defaults, its undo) and keeps its own.
+    walker(present) {
+      let live = hits(present, assignments).map(a => ({ ...a, from: flashIdIn(present, a.trackId) }))
+      return state => { live = hits(state, live); return apply(state, live) }
     }
   }
 }
@@ -1107,9 +1123,13 @@ const ProjectStore = {
 
   dispatch(command) {
     if (command.noUndo) {
+      // history is carried along only by a command that says how (walker); stacks are newest-last
+      const back = command.walker?.(_state), forward = command.walker?.(_state)
       _state = command.execute(_state)
-      _undoStack = _undoStack.map(entry => ({ ...entry, prev: command.execute(entry.prev) }))
-      _redoStack = _redoStack.map(entry => ({ ...entry, next: command.execute(entry.next) }))
+      if (back) {
+        _undoStack = _undoStack.reverse().map(entry => ({ ...entry, prev: back(entry.prev) })).reverse()
+        _redoStack = _redoStack.reverse().map(entry => ({ ...entry, next: forward(entry.next) })).reverse()
+      }
       notify()
       return
     }

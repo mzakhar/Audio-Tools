@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,10 +15,11 @@ vi.mock('../src/renderer/js/fm1/flash-asset.js', () => ({
   }
 }))
 
-import { fm1FlashPath, writeFm1Flash, readFm1Flash } from '../src/main/fm1-flash-files.js'
+import { fm1FlashPath, writeFm1Flash, readFm1Flash, createProjectDirs, MAX_FM1_FLASH_BYTES } from '../src/main/fm1-flash-files.js'
 import { BrowserAdapter, ElectronAdapter } from '../src/renderer/js/io/FileAdapter.js'
 import ProjectStore, { AddTrack, SetTrackInstrument, SetTrackFlashAssets, SetBpm } from '../src/renderer/js/store/ProjectStore.js'
-import { saveProject, flashReader, anyFlashDirty, exportDeviceState, importDeviceState, resetDeviceState } from '../src/renderer/js/fm1/project-flash.js'
+import { saveProject, flashReader, anyFlashDirty, exportDeviceState, importDeviceState, resetDeviceState, deviceChanges, trackedFm1 } from '../src/renderer/js/fm1/project-flash.js'
+import { ClearTrackFlashAsset } from '../src/renderer/js/store/ProjectStore.js'
 import { decodeFlashAsset } from '../src/renderer/js/fm1/flash-asset.js'
 import { fm1Descriptor, fm1Sig } from '../src/renderer/js/fm1/descriptor.js'
 
@@ -45,6 +46,74 @@ describe('main: fm1 flash files', () => {
     expect([...await readFm1Flash(dir, 'one.flash')]).toEqual([1, 2, 3])
     expect(await readFm1Flash(dir, 'nope.flash')).toBeNull()
     await expect(writeFm1Flash(dir, '../escape.flash', new Uint8Array(1))).rejects.toThrow(/Invalid/)
+  })
+
+  it('refuses Windows device names as the stem, any case', () => {
+    for (const stem of ['con', 'PRN', 'Aux', 'nul', 'com1', 'COM9', 'lpt3']) {
+      expect(() => fm1FlashPath(dir, `${stem}.flash`), stem).toThrow(/Invalid/)
+    }
+    expect(fm1FlashPath(dir, 'console.flash').file).toBe(join(dir, 'fm1', 'console.flash'))
+  })
+
+  it('write: bytes must be a Uint8Array / ArrayBuffer / Buffer of at most 2 MiB', async () => {
+    for (const bad of ['abc', [1, 2], { length: 3 }, null, 42]) {
+      await expect(writeFm1Flash(dir, 'a.flash', bad), String(bad)).rejects.toThrow(/data/)
+    }
+    await expect(writeFm1Flash(dir, 'a.flash', new Uint8Array(MAX_FM1_FLASH_BYTES + 1))).rejects.toThrow(/too large/)
+    await writeFm1Flash(dir, 'b.flash', new Uint8Array([4, 5]).buffer)
+    await writeFm1Flash(dir, 'c.flash', Buffer.from([6]))
+    expect([...await readFm1Flash(dir, 'b.flash')]).toEqual([4, 5])
+    expect([...await readFm1Flash(dir, 'c.flash')]).toEqual([6])
+  })
+
+  it('read: refuses a file over 2 MiB and anything that is not a regular file', async () => {
+    await mkdir(join(dir, 'fm1', 'dir.flash'), { recursive: true })
+    await writeFile(join(dir, 'fm1', 'big.flash'), new Uint8Array(MAX_FM1_FLASH_BYTES + 1))
+    await expect(readFm1Flash(dir, 'big.flash')).rejects.toThrow(/refused/)
+    await expect(readFm1Flash(dir, 'dir.flash')).rejects.toThrow(/Invalid/)
+    await expect(writeFm1Flash(dir, 'dir.flash', new Uint8Array(1))).rejects.toThrow(/Invalid/)
+  })
+
+  it('refuses a linked fm1/ folder (junction / symlink)', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'fm1out-'))
+    try {
+      await writeFile(join(outside, 'x.flash'), new Uint8Array([1]))
+      await symlink(outside, join(dir, 'fm1'), 'junction')
+      await expect(readFm1Flash(dir, 'x.flash')).rejects.toThrow(/Invalid/)
+      await expect(writeFm1Flash(dir, 'y.flash', new Uint8Array(1))).rejects.toThrow(/Invalid/)
+      expect(await readdir(outside)).toEqual(['x.flash'])
+    } finally { await rm(outside, { recursive: true, force: true }) }
+  })
+
+  it('refuses a symlinked asset file (where the OS lets the test make one)', async () => {
+    await mkdir(join(dir, 'fm1'))
+    await writeFile(join(dir, 'target.bin'), new Uint8Array([9]))
+    try { await symlink(join(dir, 'target.bin'), join(dir, 'fm1', 'l.flash'), 'file') } catch (e) {
+      if (e.code === 'EPERM') return   // Windows without developer mode: no file symlinks to plant
+      throw e
+    }
+    await expect(readFm1Flash(dir, 'l.flash')).rejects.toThrow(/Invalid/)
+    await expect(writeFm1Flash(dir, 'l.flash', new Uint8Array(1))).rejects.toThrow(/Invalid/)
+  })
+
+  it('a failed rename leaves no temp file behind', async () => {
+    const fsRename = async () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) }
+    await expect(writeFm1Flash(dir, 'r.flash', new Uint8Array([1]), { fsRename })).rejects.toThrow('busy')
+    expect(await readdir(join(dir, 'fm1'))).toEqual([])
+  })
+
+  it('project folders: only those a main open dialog returned for a directory', () => {
+    const dirs = createProjectDirs({ caseInsensitive: true })
+    expect(() => dirs.check(dir)).toThrow(/Unknown project folder/)
+    dirs.allowFromDialog({ properties: ['openFile'] }, { canceled: false, filePaths: [dir] })
+    dirs.allowFromDialog({ properties: ['openDirectory'] }, { canceled: true, filePaths: [dir] })
+    expect(() => dirs.check(dir)).toThrow(/Unknown/)
+    dirs.allowFromDialog({ properties: ['openDirectory', 'createDirectory'] }, { canceled: false, filePaths: [dir] })
+    expect(dirs.check(dir)).toBe(dir)
+    expect(dirs.check(dir.toUpperCase())).toBe(dir.toUpperCase())
+    expect(() => dirs.check(join(dir, 'sub'))).toThrow(/Unknown/)
+    expect(() => dirs.check(join(dir, '..'))).toThrow(/Unknown/)
+    for (const bad of [null, '', 42, {}]) expect(() => dirs.check(bad)).toThrow(/Unknown/)
   })
 })
 
@@ -105,7 +174,8 @@ describe('FileAdapter fm1 flash', () => {
 describe('descriptor: flashAssetId is kept but is not identity', () => {
   it('fm1Descriptor keeps a valid id, drops a bad one; fm1Sig ignores it', () => {
     expect(fm1Descriptor(fm1({ flashAssetId: 'abc-1' })).flashAssetId).toBe('abc-1')
-    expect(fm1Descriptor(fm1({ flashAssetId: '../x' }))).not.toHaveProperty('flashAssetId')
+    expect(fm1Descriptor(fm1({ flashAssetId: '../x' })).flashAssetId).toBe('../x')   // kept: the session fails flash-corrupt
+    expect(fm1Descriptor(fm1())).not.toHaveProperty('flashAssetId')
     expect(fm1Sig(fm1({ flashAssetId: 'one' }))).toBe(fm1Sig(fm1({ flashAssetId: 'two' })))
     expect(fm1Sig(fm1())).toBe(fm1Sig(fm1({ flashAssetId: 'two' })))
     expect(fm1Sig(fm1({ mhz: 200 }))).not.toBe(fm1Sig(fm1()))
@@ -138,6 +208,47 @@ describe('store: flash asset commands', () => {
     expect(idOf(a)).toBe('new-a')
     ProjectStore.redo()
     expect(idOf(a)).toBe('new-a')
+  })
+
+  it('history: a save is carried back and forward only until an entry that changed the id on purpose', () => {
+    const { a, b } = project()
+    ProjectStore.dispatch(ClearTrackFlashAsset(a))            // Start from firmware defaults: old-a -> none
+    ProjectStore.dispatch(SetBpm(150))
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'save-1', firmwareHash: HASH }, { trackId: b, assetId: 'save-b', firmwareHash: HASH }]))
+    expect(idOf(a)).toBe('save-1')
+    ProjectStore.undo()                                         // bpm: carried
+    expect(idOf(a)).toBe('save-1')
+    ProjectStore.undo()                                         // the reset itself: back to the bad id
+    expect(idOf(a)).toBe('old-a')
+    expect(idOf(b)).toBe('save-b')                              // b never changed on purpose: carried all the way
+    ProjectStore.redo()                                         // the post-reset timeline: the save made after it
+    expect(idOf(a)).toBe('save-1')
+  })
+
+  it('history: a save while the reset sits on the redo stack does not undo the reset on redo', () => {
+    const { a } = project()
+    ProjectStore.dispatch(ClearTrackFlashAsset(a))
+    ProjectStore.undo()                                         // back on old-a; the reset is redoable
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'save-2', firmwareHash: HASH }]))
+    expect(idOf(a)).toBe('save-2')
+    ProjectStore.redo()
+    expect(idOf(a)).toBeUndefined()
+    ProjectStore.undo()
+    expect(idOf(a)).toBe('save-2')
+  })
+
+  it('from: applies only where the id is still the expected one (a save rollback)', () => {
+    const { a } = project()
+    ProjectStore.dispatch(SetBpm(141))
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'new', firmwareHash: HASH }]))
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'other', firmwareHash: HASH, from: 'nope' }]))
+    expect(idOf(a)).toBe('new')
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'old-a', firmwareHash: HASH, from: 'new' }]))
+    expect(idOf(a)).toBe('old-a')
+    ProjectStore.undo()
+    expect(idOf(a)).toBe('old-a')                               // history rolled back with it
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: undefined, firmwareHash: HASH, from: 'old-a' }]))
+    expect(idOf(a)).toBeUndefined()
   })
 
   it('SetTrackFlashAssets ignores a track whose firmware differs', () => {
@@ -222,6 +333,50 @@ describe('save flow', () => {
     expect(fm1Sig(ProjectStore.getState().tracks.find(t => t.id === a).instrument)).toBe(before)
   })
 
+  it('project.json fails: store ids roll back to the disk, devices stay dirty, the error is rethrown', async () => {
+    const { a, b } = project()
+    ProjectStore.dispatch(SetBpm(133))
+    const log = []
+    const session = { markFlashSaved: vi.fn() }
+    const p = saveProject({
+      getState: () => ProjectStore.getState(),
+      snapshotAll: async () => new Map([[a, { ok: true, changed: true, records: [rec(1)], revision: 4, session }]]),
+      writeFlash: async name => log.push(name),
+      commit: assignments => ProjectStore.dispatch(SetTrackFlashAssets(assignments)),
+      writeProject: async () => { expect(idOf(a)).toBe('n1'); throw new Error('EACCES') },
+      getSession: () => session,
+      newId: () => 'n1'
+    })
+    await expect(p).rejects.toThrow('EACCES')
+    expect(log).toEqual(['n1.flash'])
+    expect(idOf(a)).toBe('old-a')
+    expect(idOf(b)).toBe('old-b')
+    ProjectStore.undo()
+    expect(idOf(a)).toBe('old-a')                               // history matches too
+    expect(session.markFlashSaved).not.toHaveBeenCalled()
+  })
+
+  it('marks saved only the device that was snapshotted, not one that replaced it meanwhile', async () => {
+    const { a, b } = project()
+    const snapA = { markFlashSaved: vi.fn() }, nowA = { markFlashSaved: vi.fn() }
+    const snapB = { markFlashSaved: vi.fn() }
+    let n = 0
+    await saveProject({
+      getState: () => ProjectStore.getState(),
+      snapshotAll: async () => new Map([
+        [a, { ok: true, changed: true, records: [rec(1)], revision: 4, session: snapA }],
+        [b, { ok: true, changed: true, records: [rec(2)], revision: 6, session: snapB }]]),
+      writeFlash: async () => {},
+      commit: assignments => ProjectStore.dispatch(SetTrackFlashAssets(assignments)),
+      writeProject: async () => {},
+      getSession: id => (id === a ? nowA : snapB),
+      newId: () => `n${++n}`
+    })
+    expect(snapA.markFlashSaved).not.toHaveBeenCalled()
+    expect(nowA.markFlashSaved).not.toHaveBeenCalled()
+    expect(snapB.markFlashSaved).toHaveBeenCalledWith(6)
+  })
+
   it('no sessions at all: just project.json', async () => {
     project()
     const { log, promise } = run([])
@@ -242,12 +397,39 @@ describe('open: readFlash', () => {
     await expect(flashReader({ getDir: () => '/p', readFm1Flash: async () => { throw new Error('EACCES') } })(fm1({ flashAssetId: 'x' }))).rejects.toThrow('flash-missing')
   })
 
+  it('reads the project folder after the synchronous caller finished (Open sets it around the store load)', async () => {
+    let dir = null
+    const readFm1Flash = vi.fn(async () => new Uint8Array([7]))
+    const pending = flashReader({ getDir: () => dir, readFm1Flash })(fm1({ flashAssetId: 'x' }))
+    dir = '/opened'
+    expect([...await pending]).toEqual([7])
+    expect(readFm1Flash).toHaveBeenCalledWith('/opened', 'x.flash')
+  })
+
   it('anyFlashDirty reads session status().flash.dirty', () => {
     const sessions = new Map([['a', { status: () => ({ flash: { dirty: false } }) }], ['b', { status: () => ({ flash: { dirty: true } }) }]])
     expect(anyFlashDirty(sessions, ['a'])).toBe(false)
     expect(anyFlashDirty(sessions, ['a', 'b'])).toBe(true)
     expect(anyFlashDirty(sessions, ['missing'])).toBe(false)
     expect(anyFlashDirty(null, ['a'])).toBe(false)
+  })
+})
+
+describe('device changes on a store update', () => {
+  it('identity change releases; a flash id moved by undo / redo / reset reboots; a save commit does neither', () => {
+    const { a, b } = project()
+    const before = trackedFm1(ProjectStore.getState())
+    ProjectStore.dispatch(SetTrackFlashAssets([{ trackId: a, assetId: 'saved', firmwareHash: HASH }]))
+    const saved = trackedFm1(ProjectStore.getState())
+    expect(deviceChanges(before, saved, { saveCommit: true })).toEqual({ release: [], reboot: [] })
+    ProjectStore.dispatch(ClearTrackFlashAsset(a))
+    const cleared = trackedFm1(ProjectStore.getState())
+    expect(deviceChanges(saved, cleared)).toEqual({ release: [], reboot: [a] })
+    ProjectStore.undo()
+    expect(deviceChanges(cleared, trackedFm1(ProjectStore.getState()))).toEqual({ release: [], reboot: [a] })
+    ProjectStore.dispatch(SetTrackInstrument(b, fm1({ mhz: 200, flashAssetId: 'old-b' })))
+    expect(deviceChanges(saved, trackedFm1(ProjectStore.getState()))).toEqual({ release: [b], reboot: [] })
+    expect(deviceChanges(saved, new Map())).toEqual({ release: [a, b], reboot: [] })
   })
 })
 

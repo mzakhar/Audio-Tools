@@ -40,9 +40,10 @@ const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value))
 /**
  * deps: getSession(trackId) → session | null (acquires it if needed),
  *       getTrack(trackId) → track | null, compatFor(firmwareHash) → catalog compat | null,
+ *       trackNumber (optional): trackId → 1-based position, so two tracks with one name stay apart,
  *       flash (optional): { hasFolder() → bool, reset(trackId), exportState(trackId), importState(trackId) }
  */
-export function createFm1DeviceDialog({ getSession, getTrack, compatFor, flash }) {
+export function createFm1DeviceDialog({ getSession, getTrack, trackNumber, compatFor, flash }) {
   const dlg = document.getElementById(DEVICE_DIALOG_ID)
   const body = dlg?.querySelector('#fm1d-body')
   if (!dlg || !body) return null
@@ -242,7 +243,8 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor, flash }
     const track = getTrack(id)
     const descriptor = fm1Descriptor(track?.instrument)
     boundSig = track ? sigOf(track) : null
-    title.textContent = `FM-1 · ${track?.name || 'MIDI'}`
+    const n = trackNumber?.(id)
+    title.textContent = `FM-1 · ${track?.name || 'MIDI'}${n ? ` · track ${n}` : ''}`
     session = getSession(id)
     strained = false
     const first = session?.status?.()

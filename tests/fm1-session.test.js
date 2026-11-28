@@ -36,7 +36,7 @@ function fakeWorker() {
   }
 }
 
-function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () => worklet, getWasmBytes, createWorker, createWorkletNode, readFlash } = {}) {
+function setup({ readFirmware, firmware = new ArrayBuffer(32), worklet = false, prefer = () => worklet, getWasmBytes, createWorker, createWorkletNode, readFlash } = {}) {
   const ctx = fakeCtx({ worklet })
   const workers = []
   const nodes = []
@@ -45,7 +45,7 @@ function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () =>
     ctx,
     getModule: vi.fn(async () => module),
     getWasmBytes,
-    readFirmware: vi.fn(async () => firmware),
+    readFirmware: readFirmware || vi.fn(async () => firmware),
     readFlash,
     ...(prefer ? { preferWorklet: prefer } : {}),
     workletUrl: 'worklets/fm1-worklet.js',
@@ -577,6 +577,16 @@ describe('fm1 session flash', () => {
     }
   })
 
+  it('an id that cannot name a file fails flash-corrupt without reading anything', async () => {
+    for (const id of ['../x', 'a/b', '', 42, { x: 1 }]) {
+      const readFlash = vi.fn(async () => asset())
+      const { s, workers } = await boot(readFlash, { ...fdesc, flashAssetId: id })
+      expect(s.status(), String(id)).toMatchObject({ state: 'failed', reason: 'flash-corrupt' })
+      expect(readFlash).not.toHaveBeenCalled()
+      expect(workers).toHaveLength(0)
+    }
+  })
+
   it('a worker restore rejection surfaces as flash-corrupt', async () => {
     const { s, w } = await boot(async () => asset())
     w.emit({ type: 'error', reason: 'flash-corrupt' })
@@ -645,12 +655,63 @@ describe('fm1 session flash', () => {
     workers[0].emit({ type: 'ready', flashRevision: 1 })
     await done
     expect(s.status()).toMatchObject({ state: 'ready', flash: { revision: 1, savedRevision: null, dirty: true } })
-    // a second import tears the running worker down
-    s.importFlash([])
-    expect(workers[0].terminated).toBe(true)
-    await flush()
-    expect(workers[1].sent[0].sectors).toBeUndefined()
     expect(() => s.importFlash([{ offset: 1, bytes: new Uint8Array(4096) }])).toThrow()
+  })
+
+  it('import over a running device: trial boot first, swap only when ready; ready stays settled', async () => {
+    const { s, workers } = await boot(async () => asset())
+    workers[0].emit({ type: 'ready', flashRevision: 2 })
+    const oldReady = s.ready
+    const rejected = vi.fn()
+    oldReady.catch(rejected)
+    const done = s.importFlash([rec])
+    await flush()
+    expect(workers).toHaveLength(2)                        // the trial, beside the running device
+    expect(workers[0].terminated).toBe(false)
+    expect(s.status().state).toBe('ready')
+    expect(unpackRestore(workers[1].sent[0].sectors)).toEqual([rec])
+    workers[0].emit(block(0))                              // the old device still plays meanwhile
+    workers[1].emit({ type: 'ready', flashRevision: 1 })
+    await done
+    expect(workers[0].terminated).toBe(true)
+    expect(s.status()).toMatchObject({ state: 'ready', path: 'worker', flash: { revision: 1, savedRevision: null, dirty: true } })
+    s.noteOn(60, 100)
+    expect(workers[1].sent.at(-1)).toMatchObject({ type: 'midi' })
+    expect(s.ready).toBe(oldReady)
+    await flush()
+    expect(rejected).not.toHaveBeenCalled()
+  })
+
+  it('a failed import keeps the running device and rejects with the reason', async () => {
+    const { s, workers } = await boot(async () => asset())
+    workers[0].emit({ type: 'ready', flashRevision: 2 })
+    const p = s.importFlash([rec])
+    await flush()
+    workers[1].emit({ type: 'error', reason: 'flash-corrupt' })
+    await expect(p).rejects.toThrow('flash-corrupt')
+    expect(workers[1].terminated).toBe(true)
+    expect(workers[0].terminated).toBe(false)
+    expect(s.status()).toMatchObject({ state: 'ready', flash: { revision: 2, savedRevision: 2 } })
+    s.noteOn(60, 100)
+    expect(workers[0].sent.at(-1)).toMatchObject({ type: 'midi' })
+    // a second import while one is booting is refused; dispose ends a trial
+    const q = s.importFlash([rec])
+    await expect(s.importFlash([rec])).rejects.toThrow('busy')
+    await flush()
+    s.dispose()
+    await expect(q).rejects.toThrow('disposed')
+    expect(workers[2].terminated).toBe(true)
+  })
+
+  it('import with the firmware gone: rejects missing-firmware, device untouched', async () => {
+    const readFirmware = vi.fn().mockResolvedValueOnce(new ArrayBuffer(32)).mockResolvedValue(null)
+    const env = setup({ readFirmware })
+    const s = env.sessions.acquire('t1', fdesc, out)
+    await flush()
+    env.workers[0].emit({ type: 'ready', flashRevision: 0 })
+    await expect(s.importFlash([rec])).rejects.toThrow('missing-firmware')
+    expect(env.workers).toHaveLength(1)
+    expect(s.status().state).toBe('ready')
   })
 })
 
@@ -681,6 +742,6 @@ describe('fm1 session manager flash', () => {
     workers[0].emit({ type: 'snapshot', request: req.request, revision: 2, changed: false })
     const got = await p
     expect([...got.keys()]).toEqual(['t1'])
-    expect(got.get('t1')).toEqual({ ok: true, changed: false, records: [], revision: 2 })
+    expect(got.get('t1')).toEqual({ ok: true, changed: false, records: [], revision: 2, session: sessions.get('t1') })
   })
 })

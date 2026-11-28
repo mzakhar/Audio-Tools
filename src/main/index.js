@@ -11,7 +11,7 @@ import { linkLead, listLeads, saveLead } from './music-discovery/leads.js'
 import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
 import { freesoundPreviewUrl } from './music-discovery/freesound.js'
-import { readFm1Flash, writeFm1Flash } from './fm1-flash-files.js'
+import { readFm1Flash, writeFm1Flash, createProjectDirs } from './fm1-flash-files.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -171,7 +171,13 @@ ipcMain.handle('fs:exportWav', async (event, buffer, defaultName) => {
   return filePath
 })
 
+// Project folders this process's own open dialog returned (New / Open both pick one there); the
+// handlers that write into a renderer-named project folder accept only those.
+// ponytail: readProject / writeProject / importAudio / readAudioBytes still take any folder; extend projectDirs.check to them when touched
+const projectDirs = createProjectDirs()
+
 ipcMain.handle('fs:saveRecording', async (_event, projectDir, buffer, filename) => {
+  projectDirs.check(projectDir)
   if (typeof projectDir !== 'string' || !/^[\w.-]+\.wav$/i.test(filename)) throw new Error('Invalid recording destination')
   const recordingsDir = assertPathWithin(join(resolve(projectDir), 'recordings'), projectDir)
   const filePath = assertPathWithin(join(recordingsDir, filename), recordingsDir)
@@ -180,8 +186,8 @@ ipcMain.handle('fs:saveRecording', async (_event, projectDir, buffer, filename) 
   return filePath
 })
 
-ipcMain.handle('fs:writeFm1Flash', (_event, projectDir, name, bytes) => writeFm1Flash(projectDir, name, bytes))
-ipcMain.handle('fs:readFm1Flash', (_event, projectDir, name) => readFm1Flash(projectDir, name))
+ipcMain.handle('fs:writeFm1Flash', (_event, projectDir, name, bytes) => writeFm1Flash(projectDirs.check(projectDir), name, bytes))
+ipcMain.handle('fs:readFm1Flash', (_event, projectDir, name) => readFm1Flash(projectDirs.check(projectDir), name))
 
 ipcMain.handle('fs:importRackPatch', async () => {
   const { filePaths, canceled } = await dialog.showOpenDialog({ filters: [{ name: 'Synth Rack Patch', extensions: ['synthrack'] }], properties: ['openFile'] })
@@ -196,7 +202,9 @@ ipcMain.handle('fs:exportRackPatch', async (_event, json, defaultName) => {
 })
 
 ipcMain.handle('dialog:showOpen', async (_event, options) => {
-  return dialog.showOpenDialog(options)
+  const result = await dialog.showOpenDialog(options)
+  projectDirs.allowFromDialog(options, result)
+  return result
 })
 
 ipcMain.handle('dialog:showSave', async (_event, options) => {

@@ -65,8 +65,8 @@ import { createAuditioner } from './instruments/auditioner.js'
 import { createFm1Sessions } from './fm1/session-manager.js'
 import { createFirmwareStore } from './fm1/firmware-store.js'
 import { libraryRows } from './fm1/catalog.js'
-import { fm1Descriptor, fm1Sig, failureText } from './fm1/descriptor.js'
-import { saveProject, flashReader, anyFlashDirty, exportDeviceState, importDeviceState, resetDeviceState, flashReasonText } from './fm1/project-flash.js'
+import { fm1Descriptor, failureText } from './fm1/descriptor.js'
+import { saveProject, flashReader, anyFlashDirty, exportDeviceState, importDeviceState, resetDeviceState, flashReasonText, deviceChanges, trackedFm1 } from './fm1/project-flash.js'
 import { EXPORT_EXT } from './fm1/flash-asset.js'
 import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
 import { createFm1RecordDialog } from './components/fm1-record-dialog.js'
@@ -211,7 +211,7 @@ async function warmPack(pack, patch) {
 // One emulated device per track, owned by the session manager (created on first
 // use, once the AudioContext exists) so live play, the timeline and the device
 // panel share it. The firmware store is shared with the library dialog.
-const _fm1 = { store: null, sessions: null, module: null, dialog: null, installed: [], compat: new Map(), tracked: new Map(), loaded: false, seed: null }
+const _fm1 = { store: null, sessions: null, module: null, dialog: null, installed: [], compat: new Map(), tracked: new Map(), loaded: false, seed: null, saveCommit: false }
 
 function fm1Store() { return _fm1.store ??= createFirmwareStore() }
 
@@ -395,6 +395,7 @@ async function openFm1Device(trackId) {
   _fm1.dialog ??= createFm1DeviceDialog({
     getSession: id => { const track = _hot.byId.get(id); if (track) liveEntryFor(track); return _fm1.sessions?.get(id) ?? null },
     getTrack: id => _hot.byId.get(id) ?? null,
+    trackNumber: id => ProjectStore.getState().tracks.findIndex(t => t.id === id) + 1 || null,
     compatFor: hash => _fm1.compat.get(hash) ?? null,
     flash: fm1FlashActions()
   })
@@ -430,6 +431,7 @@ function fm1FlashActions() {
       setTimeout(() => URL.revokeObjectURL(url), 60000)
     },
     async importState(id) {
+      if (fm1Recording()) return showToast('Import failed: stop the FM-1 recording first')
       const file = await pickFile(EXPORT_EXT)
       if (!file) return
       if (file.size > MAX_FLASH_FILE) return showToast('Import failed: not a device state file')
@@ -438,17 +440,30 @@ function fm1FlashActions() {
         const result = await importDeviceState(_fm1.sessions?.get(id) ?? null, new Uint8Array(await file.arrayBuffer()), track?.instrument.firmwareHash)
         showToast(result.ok ? 'Device state imported' : `Import failed: ${flashReasonText(result.reason)}`)
       } catch (e) {
-        showToast(`Import failed: ${e?.message || 'the device did not restart'}`)
+        // a running device keeps running with its previous state (session trialImport)
+        showToast(`Import failed: ${failureText(e?.message)} The device keeps its previous state.`)
       }
     }
   }
 }
 
-/** Release the device of a track that was removed or whose descriptor changed. Runs before the live entry rebuilds. */
+/**
+ * Release the device of a track that was removed or whose descriptor changed; re-boot one whose
+ * saved state moved by undo / redo / reset (not by a save's own commit, _fm1.saveCommit), so it
+ * runs the project's state or fails visibly. Runs before the live entry rebuilds.
+ */
 function pruneFm1(state) {
-  const live = new Map(state.tracks.filter(track => track.instrument?.type === 'fm1').map(track => [track.id, fm1Sig(track.instrument)]))
-  for (const [id, sig] of _fm1.tracked) if (live.get(id) !== sig) _fm1.sessions?.release(id)
+  const live = trackedFm1(state)
+  const { release, reboot } = deviceChanges(_fm1.tracked, live, { saveCommit: _fm1.saveCommit })
   _fm1.tracked = live
+  for (const id of release) _fm1.sessions?.release(id)
+  for (const id of reboot) {
+    if (!_fm1.sessions?.get(id)) continue   // never booted: the next use boots from the new state
+    const track = state.tracks.find(t => t.id === id)
+    _fm1.sessions.release(id)
+    _fm1.sessions.acquire(id, fm1Descriptor(track.instrument), MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput())
+      .ready.catch(error => { if (error?.message !== 'disposed') showToast(`FM-1: ${failureText(error?.message)}`) })
+  }
 }
 
 /** A project switch ends every device of the old project. */
@@ -480,6 +495,7 @@ function instrumentDeps({ output, trackId } = {}) {
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
     fm1Sessions: fm1Sessions(),
     trackId,
+    currentInstrument: trackId ? () => _hot.byId.get(trackId)?.instrument : undefined,
     mountRack: rack => RackEngine.mount(ctx, rack, {
       output: out,
       getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
@@ -537,12 +553,19 @@ let _prewarmSig = null
 /** A kit's signature for instrument rebuilds: slot `perf` (knob layer) is read live, so it must not move the signature. */
 const kitSig = kit => kit && { ...kit, slots: Object.fromEntries(Object.entries(kit.slots ?? {}).map(([n, { perf, ...def }]) => [n, def])) }
 
+const withoutFlashId = instrument => {
+  if (instrument?.type !== 'fm1') return instrument
+  const { flashAssetId, ...rest } = instrument
+  return rest
+}
+
 function refreshHot(state = ProjectStore.getState()) {
   _hot.midiTracks = state.tracks.filter(track => track.type === 'midi')
   _hot.byId = new Map(_hot.midiTracks.map(track => [track.id, track]))
   // The output node is baked into the instrument at build time, so a move to
   // another mixer channel has to invalidate it too.
-  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([track.instrument ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? kitSig(state.kits?.[track.instrument.kitId] ?? null) : null])]))
+  // flashAssetId moves on every project save; the adapter reads the current one (currentInstrument)
+  _hot.sigs = new Map(_hot.midiTracks.map(track => [track.id, JSON.stringify([withoutFlashId(track.instrument) ?? null, track.mixerChannelId ?? null, track.instrument?.type === "kit" ? kitSig(state.kits?.[track.instrument.kitId] ?? null) : null])]))
   _hot.armedId = armPlan(state.tracks, _midiTargetTrackId).trackId
   _hot.racks = state.racks
   _hot.kits = state.kits
@@ -2028,9 +2051,10 @@ function initProjectCommands() {
     disposeLiveInstruments()
     disposeFm1()
     resetPadsForNewProject()
-    ProjectStore.load(state)
+    // folder first: the load notification prewarms the armed FM-1 track, which reads its saved state from it
     AudioStore.reset()
     AudioStore.setProjectDir(handle)
+    ProjectStore.load(state)
     // Load all referenced audio files
     for (const track of state.tracks) {
       for (const clip of track.clips) {
@@ -2047,16 +2071,20 @@ function initProjectCommands() {
 
   // FM-1 device flash goes first (one new asset file per changed device), project.json last:
   // it is the commit point, so an interrupted save leaves the previous project + assets intact.
+  // Resolves true when project.json was written, false otherwise (the toast says why).
   let saving = null
   COMMANDS['save'] = () => saving ??= (async () => {
     const handle = AudioStore.getProjectDir()
-    if (!handle) return
+    if (!handle) return false
     try {
       const { messages } = await saveProject({
         getState: () => ProjectStore.getState(),
         snapshotAll: () => _fm1.sessions?.snapshotAll() ?? new Map(),
         writeFlash: (name, bytes) => FileAdapter.writeFm1Flash(handle, name, bytes),
-        commit: assignments => ProjectStore.dispatch(SetTrackFlashAssets(assignments)),
+        commit: assignments => {
+          _fm1.saveCommit = true   // pruneFm1: the devices already run this state, no reboot
+          try { ProjectStore.dispatch(SetTrackFlashAssets(assignments)) } finally { _fm1.saveCommit = false }
+        },
         writeProject: state => FileAdapter.writeProject(handle, state),
         getSession: id => _fm1.sessions?.get(id) ?? null,
         newId: () => newId()
@@ -2064,8 +2092,10 @@ function initProjectCommands() {
       _projectDirty = false
       renderCommands()
       if (messages.length) showToast(messages.join(' · '))
+      return true
     } catch (e) {
       showToast(`SAVE FAILED: ${e?.message || e}`)
+      return false
     }
   })().finally(() => { saving = null })
 

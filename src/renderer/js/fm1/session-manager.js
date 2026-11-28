@@ -11,7 +11,7 @@ const defaultWorkletNode = (ctx) => new AudioWorkletNode(ctx, 'fm1', { numberOfI
 // track at a new asset must not reboot its device.
 const normalize = (d) => ({
   type: 'fm1', firmwareHash: d.firmwareHash, deviceChannel: d.deviceChannel ?? 0, mhz: d.mhz ?? 120,
-  ...(d.flashAssetId ? { flashAssetId: d.flashAssetId } : {}),
+  ...(d.flashAssetId != null ? { flashAssetId: d.flashAssetId } : {}),   // a bad id fails the boot (flash-corrupt)
 })
 const same = (a, b) => a.firmwareHash === b.firmwareHash && a.deviceChannel === b.deviceChannel && a.mhz === b.mhz
 
@@ -76,10 +76,11 @@ export function createFm1Sessions({
     disposeAll() { for (const key of [...sessions.keys()]) release(key) },
     panicAll() { for (const s of sessions.values()) s.panic() },
     // Flash snapshots of every ready track device (audition keys excluded), for a project save.
-    // -> Map<key, snapshotFlash result>; a device that is not ready is left out (keeps its asset).
+    // -> Map<key, snapshotFlash result + { session }>; a device that is not ready is left out (keeps
+    // its asset). `session` is the device snapshotted, so a save marks only that one saved.
     async snapshotAll() {
       const live = [...sessions].filter(([key, s]) => !String(key).startsWith('audition') && s.status().state === 'ready')
-      return new Map(await Promise.all(live.map(async ([key, s]) => [key, await s.snapshotFlash()])))
+      return new Map(await Promise.all(live.map(async ([key, s]) => [key, { ...await s.snapshotFlash(), session: s }])))
     },
   }
   return api

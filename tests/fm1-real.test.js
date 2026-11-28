@@ -291,3 +291,101 @@ run('FM-1 real firmware: a panel save survives snapshot, asset and restore', () 
     expect(y.fm1_flash_restore(p, 4100)).not.toBe(0)
   }, 120000)
 })
+
+// Two FM-1 tracks keep INDEPENDENT saved state through the whole project path: real emulators
+// behind the session manager (an in-process Worker stand-in), saveProject, the store, flashReader,
+// then a fresh manager re-opening both tracks from the written assets.
+run('FM-1 real firmware: two tracks save and reopen their own state', () => {
+  it('track A (one panel save) and track B (an edited patch, saved) each restore their own sectors', async () => {
+    const { createFm1Sessions } = await import('../src/renderer/js/fm1/session-manager.js')
+    const { saveProject, flashReader } = await import('../src/renderer/js/fm1/project-flash.js')
+    const { fm1Descriptor } = await import('../src/renderer/js/fm1/descriptor.js')
+    const { default: ProjectStore, AddTrack, SetTrackInstrument, SetTrackFlashAssets } = await import('../src/renderer/js/store/ProjectStore.js')
+    const module = await WebAssembly.compile(readFileSync(resolve(process.cwd(), 'src/renderer/public/fm1/fm1_web.wasm')))
+    const buf = readFileSync(fw)
+    const firmwareHash = 'sha256:' + sha256Hex(new Uint8Array(ab(buf)))
+    const node = () => ({ connect() {}, disconnect() {} })
+    const ctx = { currentTime: 0, sampleRate: 48000, createGain: node }
+    // the Worker protocol over a real machine, run synchronously by the test
+    const machines = []
+    const createWorker = () => {
+      const w = { postMessage(m) { w.inbox(m) }, terminate() {} }
+      w.inbox = async (m) => {
+        if (m.type === 'boot') {
+          const { x } = await bootEmulator({ module, pkg: m.package, mhz: m.mhz, sectors: m.sectors })
+          w.run = createRunner(x, { mhz: m.mhz })
+          expect(bootToReady(w.run, x)).toBe('up')
+          machines.push(w)
+          w.onmessage({ data: { type: 'ready', flashRevision: w.run.flashRevision() } })
+        } else if (m.type === 'snapshot') {
+          const revision = w.run.flashRevision()
+          w.onmessage({ data: { type: 'snapshot', request: m.request, revision, changed: revision !== m.since, sectors: packRestore(w.run.changedSectors()) } })
+        }
+      }
+      return w
+    }
+    const disk = new Map()
+    let dir = '/proj'
+    const manager = (readFlash) => createFm1Sessions({ ctx, getModule: async () => module, readFirmware: async () => ab(buf), readFlash, createWorker, now: () => 0 })
+    const ready = async (s) => { for (let i = 0; i < 200 && s.status().state === 'booting'; i++) await new Promise(r => setTimeout(r, 5)); return s.status().state }
+
+    ProjectStore.reset()
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    ProjectStore.dispatch(AddTrack('midi', 'MIDI'))
+    const [a, b] = ProjectStore.getState().tracks.slice(-2).map(t => t.id)
+    for (const id of [a, b]) ProjectStore.dispatch(SetTrackInstrument(id, { type: 'fm1', firmwareHash, deviceChannel: 0, mhz: 120 }))
+    const reader = flashReader({ getDir: () => dir, readFm1Flash: async (d, name) => disk.get(`${d}/${name}`) ?? null })
+    const first = manager(reader)
+    const sa = first.acquire(a, fm1Descriptor(ProjectStore.getState().tracks.find(t => t.id === a).instrument), {})
+    const sb = first.acquire(b, fm1Descriptor(ProjectStore.getState().tracks.find(t => t.id === b).instrument), {})
+    expect(await ready(sa)).toBe('ready')
+    expect(await ready(sb)).toBe('ready')
+    const [ma, mb] = machines
+    const play = (m, s) => { for (let i = 0; i < Math.round(s * FM1_RATE / CHUNK); i++) m.run.render() }
+    const click = (m, id) => { m.run.key(id, true); play(m, 0.08); m.run.key(id, false); play(m, 1) }
+    play(ma, 1); play(mb, 1)
+    click(ma, 9); click(ma, 1); click(ma, 1)                              // A: SAVE, OCT+, OCT+
+    mb.run.enc(1, 3); play(mb, 0.5); mb.run.enc(2, 10); play(mb, 1)        // B: another algorithm + KNOB 1, then
+    click(mb, 9); click(mb, 1); click(mb, 1)                              //    the same SAVE, OCT+, OCT+
+    play(ma, 0.5); play(mb, 0.5)
+    const recA = ma.run.changedSectors(), recB = mb.run.changedSectors()
+    expect(recA.length).toBeGreaterThan(0)
+    expect(recB.length).toBeGreaterThan(0)
+    const same = recA.length === recB.length && recA.every((r, i) => r.offset === recB[i].offset && r.bytes.every((v, k) => v === recB[i].bytes[k]))
+    expect(same, 'the two devices must hold different saves for this check to mean anything').toBe(false)
+
+    let n = 0, written = null
+    const { messages } = await saveProject({
+      getState: () => ProjectStore.getState(),
+      snapshotAll: () => first.snapshotAll(),
+      writeFlash: async (name, bytes) => { disk.set(`${dir}/${name}`, bytes) },
+      commit: list => ProjectStore.dispatch(SetTrackFlashAssets(list)),
+      writeProject: async state => { written = JSON.parse(JSON.stringify(state)) },
+      getSession: id => first.get(id),
+      newId: () => `asset-${++n}`
+    })
+    expect(messages).toEqual([])
+    expect(disk.size).toBe(2)
+    const idA = written.tracks.find(t => t.id === a).instrument.flashAssetId
+    const idB = written.tracks.find(t => t.id === b).instrument.flashAssetId
+    expect(idA).toBeTruthy(); expect(idB).toBeTruthy(); expect(idA).not.toBe(idB)
+    first.disposeAll()
+
+    // reopen: a fresh manager, the saved project
+    ProjectStore.load(written)
+    machines.length = 0
+    const second = manager(reader)
+    const track = id => ProjectStore.getState().tracks.find(t => t.id === id)
+    const ra = second.acquire(a, fm1Descriptor(track(a).instrument), {})
+    expect(await ready(ra)).toBe('ready')
+    const rb = second.acquire(b, fm1Descriptor(track(b).instrument), {})
+    expect(await ready(rb)).toBe('ready')
+    const snapA = await ra.snapshotFlash(), snapB = await rb.snapshotFlash()
+    const plain = recs => recs.map(r => ({ offset: r.offset, bytes: [...r.bytes] }))
+    expect(plain(snapA.records)).toEqual(plain(recA))
+    expect(plain(snapB.records)).toEqual(plain(recB))
+    expect(snapA.changed).toBe(false)
+    console.log(`fm1-real two tracks: A ${recA.length} sector(s) ${recA.map(r => '0x' + r.offset.toString(16))}, B ${recB.length} sector(s) ${recB.map(r => '0x' + r.offset.toString(16))}; reopened independently`)
+    second.disposeAll()
+  }, 180000)
+})

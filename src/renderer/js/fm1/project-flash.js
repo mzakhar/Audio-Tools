@@ -3,6 +3,7 @@
 // (assets first, project.json last: the commit point) is testable with fakes.
 import { encodeFlashAsset, decodeFlashAsset, FLASH_EXT } from './flash-asset.js'
 import { ClearTrackFlashAsset } from '../store/ProjectStore.js'
+import { fm1Sig } from './descriptor.js'
 
 const label = track => track?.name || 'MIDI'
 
@@ -10,9 +11,11 @@ const label = track => track?.name || 'MIDI'
  * Save the project: snapshot every track device, write one NEW asset per changed device, point
  * the tracks at them (one store update, no undo entry), write project.json, then mark the
  * devices saved. A device that timed out or whose asset failed to write keeps its previous
- * asset; project.json is written regardless.
+ * asset; project.json is written regardless. If project.json fails to write, the store's ids are
+ * rolled back to match the disk (the devices stay dirty) and the error is rethrown.
  * deps: getState() → state, snapshotAll() → Map<trackId, snapshot>, writeFlash(name, bytes),
- *       commit([{ trackId, assetId, firmwareHash }]), writeProject(state), getSession(trackId), newId()
+ *       commit([{ trackId, assetId, firmwareHash, from? }]), writeProject(state), getSession(trackId), newId()
+ * A snapshot result may carry `session` (the device snapshotted): only that device is marked saved.
  * Resolves { messages: string[] } — one per track whose device state was not saved.
  */
 export async function saveProject({ getState, snapshotAll, writeFlash, commit, writeProject, getSession, newId }) {
@@ -32,14 +35,24 @@ export async function saveProject({ getState, snapshotAll, writeFlash, commit, w
     const assetId = newId()
     try {
       await writeFlash(`${assetId}${FLASH_EXT}`, encodeFlashAsset({ firmwareHash, records: result.records }))
-      written.push({ trackId, assetId, firmwareHash, revision: result.revision })
+      written.push({ trackId, assetId, firmwareHash, revision: result.revision, session: result.session, previous: track.instrument.flashAssetId })
     } catch (e) {
       messages.push(`FM-1 on ${label(track)}: device state not saved (${e?.message || 'write failed'}), previous state kept`)
     }
   }
   if (written.length) commit(written.map(({ trackId, assetId, firmwareHash }) => ({ trackId, assetId, firmwareHash })))
-  await writeProject(getState())
-  for (const { trackId, revision } of written) getSession(trackId)?.markFlashSaved(revision)
+  try {
+    await writeProject(getState())
+  } catch (e) {
+    // the disk still has the previous project.json: point the tracks back (only where nothing moved them since)
+    if (written.length) commit(written.map(({ trackId, assetId, firmwareHash, previous }) => ({ trackId, assetId: previous, firmwareHash, from: assetId })))
+    throw e
+  }
+  for (const { trackId, revision, session } of written) {
+    // a device replaced while the save ran (undo, re-acquire) did not produce this snapshot
+    const current = getSession(trackId)
+    if (current && (!session || current === session)) current.markFlashSaved(revision)
+  }
   return { messages }
 }
 
@@ -51,11 +64,34 @@ export async function saveProject({ getState, snapshotAll, writeFlash, commit, w
 export const flashReader = ({ getDir, readFm1Flash }) => async descriptor => {
   const id = descriptor?.flashAssetId
   if (!id) return null
+  // a session boots inside the store notification that loaded the project: let that finish (and
+  // the caller set the project folder) before asking which folder this is
+  await null
   const dir = getDir()
   const bytes = dir ? await readFm1Flash(dir, `${id}${FLASH_EXT}`).catch(() => null) : null
   if (!bytes) throw new Error('flash-missing')
   return bytes
 }
+
+/**
+ * Which track devices a store change affects: the ids whose device identity changed (release),
+ * and those whose saved state (flashAssetId) changed through anything but a save's own commit —
+ * undo / redo / reset — so the running device no longer matches the project (reboot from it).
+ * tracked: Map<trackId, { sig, flash }> from trackedFm1(state).
+ */
+export function deviceChanges(before, after, { saveCommit = false } = {}) {
+  const release = [], reboot = []
+  for (const [id, was] of before) {
+    const now = after.get(id)
+    if (now?.sig !== was.sig) release.push(id)
+    else if (now.flash !== was.flash && !saveCommit) reboot.push(id)
+  }
+  return { release, reboot }
+}
+
+/** Map<trackId, { sig, flash }> of a state's FM-1 tracks, for deviceChanges. */
+export const trackedFm1 = state => new Map(state.tracks.filter(t => t.instrument?.type === 'fm1')
+  .map(t => [t.id, { sig: fm1Sig(t.instrument), flash: t.instrument.flashAssetId ?? null }]))
 
 /** True when any of these tracks' devices has flash changes not yet saved. */
 export const anyFlashDirty = (sessions, trackIds) => trackIds.some(id => !!sessions?.get(id)?.status?.().flash?.dirty)

@@ -98,4 +98,17 @@ describe('fm1 live adapter', () => {
     await inst.prewarm()
     expect(sessions.acquire).toHaveBeenCalledWith('t1', expect.objectContaining({ type: 'fm1' }), undefined)
   })
+
+  it('a save that moved flashAssetId (no rebuild) boots from the current id, not the baked one', async () => {
+    const { sessions } = fakeSessions()
+    let current = { ...fm1, flashAssetId: 'old' }
+    const inst = instrumentFor(current, { ctx, fm1Sessions: sessions, trackId: 't1', currentInstrument: () => current })
+    current = { ...fm1, flashAssetId: 'new' }
+    sessions.acquire.mockClear()
+    await inst.prewarm()
+    inst.noteOn(60, 100)
+    expect(sessions.acquire.mock.calls[0][1].flashAssetId).toBe('new')
+    expect(sessions.use.mock.calls.at(-1)[1].flashAssetId).toBe('new')
+  })
 })
+

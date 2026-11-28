@@ -21,11 +21,11 @@ export function fm1Descriptor(instrument) {
     firmwareHash: instrument?.firmwareHash ?? null,
     deviceChannel: clampInt(instrument?.deviceChannel, 0, 15, 0),
     mhz: clampInt(instrument?.mhz, 60, 240, FM1_DEFAULT_MHZ),
-    ...(FLASH_ID.test(instrument?.flashAssetId ?? '') ? { flashAssetId: instrument.flashAssetId } : {})
+    // kept even when it cannot name a file: the session then fails 'flash-corrupt' rather than
+    // silently booting clean over a damaged reference
+    ...(instrument?.flashAssetId != null ? { flashAssetId: instrument.flashAssetId } : {})
   }
 }
-
-const FLASH_ID = /^[\w-]+$/
 
 /** The device's identity for "same device?" decisions (release, re-bind): the descriptor without flashAssetId. */
 export function fm1Sig(instrument) {

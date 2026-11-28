@@ -7,7 +7,7 @@ import { unpackRestore } from '../src/renderer/js/fm1/flash-asset.js'
 const emu = vi.hoisted(() => ({ rev: 0, busy: false, booted: null, records: [] }))
 vi.mock('../src/renderer/js/fm1/emulator.js', () => ({
   bootEmulator: async (opts) => { emu.booted = opts; return { x: {} } },
-  bootToReady: () => 'up',
+  bootToReady: () => { if (emu.halt) throw new Error('halt'); return 'up' },
   createRunner: () => ({
     frame: 0,
     render() { this.frame += 128; return { l: new Float32Array(128), r: new Float32Array(128), have: 128 } },
@@ -69,5 +69,18 @@ describe('fm1 worker flash protocol', () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(snaps()[2]).toEqual({ type: 'snapshot', request: 3, reason: 'busy-timeout' })
     expect(sent.filter(m => m.type === 'status').at(-1)).toMatchObject({ flashRevision: 9 })
+  })
+
+  it('a snapshot after a boot that halted answers not-ready instead of throwing (no gate yet)', async () => {
+    vi.resetModules()
+    emu.halt = true
+    await import('../src/renderer/js/workers/fm1-worker.js')   // a fresh worker
+    const before = sent.length
+    send({ type: 'boot', module: {}, package: new ArrayBuffer(8), mhz: 120 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent.slice(before).find(m => m.type === 'error')).toMatchObject({ reason: 'halted' })
+    expect(() => send({ type: 'snapshot', request: 9, since: 0 })).not.toThrow()
+    expect(snaps().at(-1)).toEqual({ type: 'snapshot', request: 9, reason: 'not-ready' })
+    emu.halt = false
   })
 })
