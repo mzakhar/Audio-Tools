@@ -14,6 +14,9 @@ export function validateProjectPath(projectRoot, relativePath) {
   return true
 }
 
+// The one name shape main/fm1-flash-files.js accepts (mirrored so the browser adapter refuses the same names).
+export const FM1_FLASH_NAME = /^[\w-]+\.flash$/
+
 // ---------------------------------------------------------------------------
 // Browser implementation (File System Access API)
 // ---------------------------------------------------------------------------
@@ -72,6 +75,37 @@ const BrowserAdapter = {
     await writable.write(arrayBuffer)
     await writable.close()
     return `recordings/${filename}`
+  },
+
+  // FM-1 saved device state: <folder>/fm1/<id>.flash. createWritable commits on close, so a
+  // failed write never leaves a half file under the real name.
+  async writeFm1Flash(dirHandle, name, bytes) {
+    if (!dirHandle) throw new Error('no-folder')
+    if (!FM1_FLASH_NAME.test(name)) throw new Error('Invalid FM-1 flash name')
+    const fm1 = await dirHandle.getDirectoryHandle('fm1', { create: true })
+    const handle = await fm1.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(bytes)
+      await writable.close()
+    } catch (e) {
+      await writable.abort?.().catch(() => {})
+      throw e
+    }
+  },
+
+  /** The asset bytes, or null when the file (or fm1/) does not exist. */
+  async readFm1Flash(dirHandle, name) {
+    if (!dirHandle) throw new Error('no-folder')
+    if (!FM1_FLASH_NAME.test(name)) throw new Error('Invalid FM-1 flash name')
+    let handle
+    try {
+      handle = await (await dirHandle.getDirectoryHandle('fm1')).getFileHandle(name)
+    } catch (e) {
+      if (e?.name === 'NotFoundError') return null
+      throw e
+    }
+    return new Uint8Array(await (await handle.getFile()).arrayBuffer())
   },
 
   async importRackPatch() {
@@ -133,6 +167,17 @@ const ElectronAdapter = {
   async saveRecording(projectDir, arrayBuffer, filename) {
     if (!projectDir) return this.exportWav(arrayBuffer, filename)
     return window.electronFS.saveRecording(projectDir, arrayBuffer, filename)
+  },
+
+  async writeFm1Flash(projectDir, name, bytes) {
+    if (!projectDir) throw new Error('no-folder')
+    return window.electronFS.writeFm1Flash(projectDir, name, bytes)
+  },
+
+  async readFm1Flash(projectDir, name) {
+    if (!projectDir) throw new Error('no-folder')
+    const bytes = await window.electronFS.readFm1Flash(projectDir, name)
+    return bytes ? new Uint8Array(bytes) : null
   },
 
   async importRackPatch() {

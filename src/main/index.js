@@ -11,6 +11,7 @@ import { linkLead, listLeads, saveLead } from './music-discovery/leads.js'
 import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
 import { freesoundPreviewUrl } from './music-discovery/freesound.js'
+import { readFm1Flash, writeFm1Flash } from './fm1-flash-files.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -178,6 +179,9 @@ ipcMain.handle('fs:saveRecording', async (_event, projectDir, buffer, filename) 
   await writeFile(filePath, Buffer.from(buffer))
   return filePath
 })
+
+ipcMain.handle('fs:writeFm1Flash', (_event, projectDir, name, bytes) => writeFm1Flash(projectDir, name, bytes))
+ipcMain.handle('fs:readFm1Flash', (_event, projectDir, name) => readFm1Flash(projectDir, name))
 
 ipcMain.handle('fs:importRackPatch', async () => {
   const { filePaths, canceled } = await dialog.showOpenDialog({ filters: [{ name: 'Synth Rack Patch', extensions: ['synthrack'] }], properties: ['openFile'] })

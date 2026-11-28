@@ -137,7 +137,7 @@ describe('fm1 device dialog', () => {
     const text = document.getElementById(DEVICE_DIALOG_ID).textContent
     expect(text).toMatch(/Running · 2\.3x realtime/)
     expect(text).toMatch(/about 100 ms latency/)
-    expect(text).toMatch(/Saves on the device are not kept yet/)
+    expect(text).toMatch(/Saves on the device are kept when the project is saved to a folder/)
     expect(text).toMatch(/at least 120 MHz/)
   })
 
@@ -236,5 +236,59 @@ describe('panel layout hit targets', () => {
       expect([...key.children].every(child => child.classList.contains('fm1d-led'))).toBe(true)
       expect(key.textContent).toBe('')
     }
+  })
+})
+
+describe('fm1 device dialog: saved device state', () => {
+  let flash
+  const withFlash = (hasFolder) => {
+    document.body.innerHTML = MARKUP
+    el = document.getElementById(DEVICE_DIALOG_ID)
+    el.show = function () { this.open = true }
+    el.showModal = el.show
+    el.close = function () { if (this.open) { this.open = false; this.dispatchEvent(new Event('close')) } }
+    flash = { hasFolder: () => hasFolder, reset: vi.fn(), exportState: vi.fn(), importState: vi.fn() }
+    dialog = createFm1DeviceDialog({ getSession: () => session, getTrack: id => id === 't1' ? track : null, compatFor: () => null, flash })
+  }
+  const button = text => [...document.querySelectorAll('.fm1d-flash button')].find(b => b.textContent === text)
+
+  it('a saved state that cannot load shows why, and offers Start from firmware defaults', () => {
+    withFlash(true)
+    for (const [reason, text] of [['flash-missing', /missing from the project folder/], ['flash-corrupt', /damaged/], ['flash-wrong-firmware', /different firmware/]]) {
+      session.state = { state: 'failed', reason, underruns: 0, starved: 0 }
+      dialog.open('t1')
+      expect(document.querySelector('.fm1d-status').textContent).toMatch(text)
+      expect(button('Start from firmware defaults').hidden).toBe(false)
+      el.close()
+    }
+    dialog.open('t1')
+    button('Start from firmware defaults').click()
+    expect(flash.reset).toHaveBeenCalledWith('t1')
+  })
+
+  it('no reset for a running device or another failure; export/import only while running', () => {
+    withFlash(true)
+    dialog.open('t1')
+    expect(button('Start from firmware defaults').hidden).toBe(true)
+    expect(button('Export device state…').disabled).toBe(false)
+    button('Export device state…').click()
+    button('Import device state…').click()
+    expect(flash.exportState).toHaveBeenCalledWith('t1')
+    expect(flash.importState).toHaveBeenCalledWith('t1')
+    el.close()
+    session.state = { state: 'failed', reason: 'missing-firmware', underruns: 0, starved: 0 }
+    dialog.open('t1')
+    expect(button('Start from firmware defaults').hidden).toBe(true)
+    expect(button('Export device state…').disabled).toBe(true)
+    expect(button('Import device state…').disabled).toBe(true)
+  })
+
+  it('without a project folder it says saves need one; with one it does not', () => {
+    withFlash(false)
+    dialog.open('t1')
+    expect(document.querySelector('.fm1d-note').textContent).toMatch(/kept when the project is saved to a folder/)
+    withFlash(true)
+    dialog.open('t1')
+    expect(document.querySelector('.fm1d-note').textContent).not.toMatch(/saved to a folder/)
   })
 })

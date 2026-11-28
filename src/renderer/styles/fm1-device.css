@@ -74,3 +74,5 @@
   transform-origin: 50% 157%;
 }
 .fm1d-note { margin: 0; font-size: 11px; color: var(--text-dim); }
+.fm1d-flash { display: flex; flex-wrap: wrap; gap: 6px; }
+.fm1d-flash[hidden], .fm1d-flash [hidden] { display: none; }

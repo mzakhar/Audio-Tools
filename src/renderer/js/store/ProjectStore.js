@@ -184,6 +184,43 @@ export function SetTrackInstrument(trackId, instrument) {
   }
 }
 
+const fm1Matches = (track, firmwareHash) => track?.instrument?.type === 'fm1' && track.instrument.firmwareHash === firmwareHash
+
+/**
+ * Point FM-1 tracks at the flash assets a save just wrote: [{ trackId, assetId, firmwareHash }].
+ * Not an edit, a fact about files on disk: `noUndo` makes dispatch apply it to the history
+ * snapshots too (where the track has the same firmware), so an undo never points a track
+ * back at an older save. No undo entry, no label.
+ */
+export function SetTrackFlashAssets(assignments) {
+  return {
+    noUndo: true,
+    execute(state) {
+      const hits = assignments.filter(a => fm1Matches(state.tracks.find(t => t.id === a.trackId), a.firmwareHash))
+      if (!hits.length) return state
+      const next = JSON.parse(JSON.stringify(state))
+      for (const a of hits) next.tracks.find(t => t.id === a.trackId).instrument.flashAssetId = a.assetId
+      return next
+    }
+  }
+}
+
+/** "Start from firmware defaults": the track forgets its saved device state (undoable; the file stays on disk). */
+export function ClearTrackFlashAsset(trackId) {
+  return {
+    label: 'Start FM-1 from firmware defaults',
+    execute(state) {
+      const next = JSON.parse(JSON.stringify(state))
+      const track = next.tracks.find(t => t.id === trackId)
+      if (track?.instrument?.type === 'fm1') delete track.instrument.flashAssetId
+      return next
+    },
+    undo(state) {
+      return state
+    }
+  }
+}
+
 export function SetInstrumentParam(trackId, key, value) {
   return {
     label: `Set ${key}`,
@@ -1069,6 +1106,13 @@ const ProjectStore = {
   getState() { return JSON.parse(JSON.stringify(_state)) },
 
   dispatch(command) {
+    if (command.noUndo) {
+      _state = command.execute(_state)
+      _undoStack = _undoStack.map(entry => ({ ...entry, prev: command.execute(entry.prev) }))
+      _redoStack = _redoStack.map(entry => ({ ...entry, next: command.execute(entry.next) }))
+      notify()
+      return
+    }
     const next = command.execute(_state)
     _undoStack.push({ command, prev: _state })
     if (_undoStack.length > MAX_HISTORY) _undoStack.shift()

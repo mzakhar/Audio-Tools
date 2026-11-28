@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('electronFS', {
   importAudio: (srcPath, projectDir) => ipcRenderer.invoke('fs:importAudio', srcPath, projectDir),
   exportWav: (buffer, defaultName) => ipcRenderer.invoke('fs:exportWav', buffer, defaultName),
   saveRecording: (projectDir, buffer, filename) => ipcRenderer.invoke('fs:saveRecording', projectDir, buffer, filename),
+  writeFm1Flash: (projectDir, name, bytes) => ipcRenderer.invoke('fs:writeFm1Flash', projectDir, name, bytes),
+  readFm1Flash: (projectDir, name) => ipcRenderer.invoke('fs:readFm1Flash', projectDir, name),
   importRackPatch: () => ipcRenderer.invoke('fs:importRackPatch'),
   exportRackPatch: (json, defaultName) => ipcRenderer.invoke('fs:exportRackPatch', json, defaultName),
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:showOpen', options),

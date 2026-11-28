@@ -8,7 +8,7 @@ import Palettes, { paletteDefaults } from './palettes.js'
 import Keyboard from './keyboard.js'
 import Sequencer from './sequencer.js'
 import Recorder from './recorder.js'
-import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam, DEFAULT_PADS, SetPadsSettings, SetKitSlot, SeedKit } from './store/ProjectStore.js'
+import ProjectStore, { AddTrack, AddClip, SetMixerParam, SetBpm, RemoveTrack, SetTrackInstrument, SetTrackInstrumentProgram, SetInstrumentParam, DEFAULT_PADS, SetPadsSettings, SetKitSlot, SeedKit, SetTrackFlashAssets } from './store/ProjectStore.js'
 import RackEngine from './rack/rack-engine.js'
 import { routeChannel } from './midi/midi-routing.js'
 import { holdReducer } from './midi/midi-hold.js'
@@ -59,13 +59,15 @@ import { applyChannelMidi } from './instruments/channel-program.js'
 import { compilePackManifest, resolvePatch, packPatchState } from './instruments/pack-registry.js'
 import { createSampleStore } from './instruments/sample-store.js'
 import { createPackStore } from './instruments/pack-store-idb.js'
-import { importPackFromFile } from './instruments/pack-import-web.js'
+import { importPackFromFile, pickFile } from './instruments/pack-import-web.js'
 import { canBrowseFolders, createFolderLibrary } from './instruments/soundfont-folder-web.js'
 import { createAuditioner } from './instruments/auditioner.js'
 import { createFm1Sessions } from './fm1/session-manager.js'
 import { createFirmwareStore } from './fm1/firmware-store.js'
 import { libraryRows } from './fm1/catalog.js'
-import { fm1Descriptor, failureText } from './fm1/descriptor.js'
+import { fm1Descriptor, fm1Sig, failureText } from './fm1/descriptor.js'
+import { saveProject, flashReader, anyFlashDirty, exportDeviceState, importDeviceState, resetDeviceState, flashReasonText } from './fm1/project-flash.js'
+import { EXPORT_EXT } from './fm1/flash-asset.js'
 import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
 import { createFm1RecordDialog } from './components/fm1-record-dialog.js'
 import { createFm1RecordFlow } from './fm1/record-flow.js'
@@ -231,6 +233,8 @@ function fm1Sessions() {
     getModule: async () => (await fm1Wasm()).module,
     getWasmBytes: async () => (await fm1Wasm()).bytes,
     readFirmware: async id => (await fm1Store().read(id))?.slice(0) ?? null,
+    // The track's saved device state, from the open project folder (the session decodes it).
+    readFlash: flashReader({ getDir: () => AudioStore.getProjectDir(), readFm1Flash: (dir, name) => FileAdapter.readFm1Flash(dir, name) }),
     // No preferWorklet: every device runs on the Worker path. One Felucca at 120 MHz takes 75-100%
     // of the audio rendering thread (rtf 1.2-1.4 in Electron), and a saturated render thread stops
     // delivering port messages to the worklet, so MIDI and the LCD request never arrive: a silent
@@ -391,16 +395,58 @@ async function openFm1Device(trackId) {
   _fm1.dialog ??= createFm1DeviceDialog({
     getSession: id => { const track = _hot.byId.get(id); if (track) liveEntryFor(track); return _fm1.sessions?.get(id) ?? null },
     getTrack: id => _hot.byId.get(id) ?? null,
-    compatFor: hash => _fm1.compat.get(hash) ?? null
+    compatFor: hash => _fm1.compat.get(hash) ?? null,
+    flash: fm1FlashActions()
   })
   const opened = _fm1.dialog?.open(trackId)
   refreshFm1Cache().then(changed => { if (changed && _fm1.dialog?.isOpen()) _fm1.dialog.open(trackId) })
   return opened
 }
 
+const MAX_FLASH_FILE = 2 * 1024 * 1024   // a full 1 MiB flash diff is ~1.03 MiB encoded
+
+/** The device dialog's saved-state actions: reset to firmware defaults, Export / Import device state. */
+function fm1FlashActions() {
+  const trackOf = id => ProjectStore.getState().tracks.find(t => t.id === id && t.instrument?.type === 'fm1') ?? null
+  return {
+    hasFolder: () => !!AudioStore.getProjectDir(),
+    reset(id) {
+      resetDeviceState(id, {
+        dispatch: command => ProjectStore.dispatch(command),
+        reacquire: trackId => {
+          const track = trackOf(trackId)
+          if (track) fm1Sessions()?.acquire(trackId, fm1Descriptor(track.instrument), MixerEngine.getOutput(track.mixerChannelId) || AudioEngine.getMasterInput())
+        }
+      })
+      _fm1.dialog?.refresh()
+    },
+    async exportState(id) {
+      const track = trackOf(id)
+      const result = await exportDeviceState(_fm1.sessions?.get(id) ?? null, track?.instrument.firmwareHash)
+      if (!result.ok) return showToast(`Export failed: ${flashReasonText(result.reason)}`)
+      const name = `${(track.name || 'fm1').replace(/[^\w-]+/g, '_')}${EXPORT_EXT}`
+      const url = URL.createObjectURL(new Blob([result.bytes], { type: 'application/octet-stream' }))
+      Object.assign(document.createElement('a'), { href: url, download: name }).click()
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    },
+    async importState(id) {
+      const file = await pickFile(EXPORT_EXT)
+      if (!file) return
+      if (file.size > MAX_FLASH_FILE) return showToast('Import failed: not a device state file')
+      const track = trackOf(id)
+      try {
+        const result = await importDeviceState(_fm1.sessions?.get(id) ?? null, new Uint8Array(await file.arrayBuffer()), track?.instrument.firmwareHash)
+        showToast(result.ok ? 'Device state imported' : `Import failed: ${flashReasonText(result.reason)}`)
+      } catch (e) {
+        showToast(`Import failed: ${e?.message || 'the device did not restart'}`)
+      }
+    }
+  }
+}
+
 /** Release the device of a track that was removed or whose descriptor changed. Runs before the live entry rebuilds. */
 function pruneFm1(state) {
-  const live = new Map(state.tracks.filter(track => track.instrument?.type === 'fm1').map(track => [track.id, JSON.stringify(fm1Descriptor(track.instrument))]))
+  const live = new Map(state.tracks.filter(track => track.instrument?.type === 'fm1').map(track => [track.id, fm1Sig(track.instrument)]))
   for (const [id, sig] of _fm1.tracked) if (live.get(id) !== sig) _fm1.sessions?.release(id)
   _fm1.tracked = live
 }
@@ -1999,13 +2045,36 @@ function initProjectCommands() {
     if (_arrangementView) _arrangementView.render()
   })
 
-  COMMANDS['save'] = (async () => {
+  // FM-1 device flash goes first (one new asset file per changed device), project.json last:
+  // it is the commit point, so an interrupted save leaves the previous project + assets intact.
+  let saving = null
+  COMMANDS['save'] = () => saving ??= (async () => {
     const handle = AudioStore.getProjectDir()
     if (!handle) return
-    await FileAdapter.writeProject(handle, ProjectStore.getState())
-    _projectDirty = false
-    renderCommands()
-  })
+    try {
+      const { messages } = await saveProject({
+        getState: () => ProjectStore.getState(),
+        snapshotAll: () => _fm1.sessions?.snapshotAll() ?? new Map(),
+        writeFlash: (name, bytes) => FileAdapter.writeFm1Flash(handle, name, bytes),
+        commit: assignments => ProjectStore.dispatch(SetTrackFlashAssets(assignments)),
+        writeProject: state => FileAdapter.writeProject(handle, state),
+        getSession: id => _fm1.sessions?.get(id) ?? null,
+        newId: () => newId()
+      })
+      _projectDirty = false
+      renderCommands()
+      if (messages.length) showToast(messages.join(' · '))
+    } catch (e) {
+      showToast(`SAVE FAILED: ${e?.message || e}`)
+    }
+  })().finally(() => { saving = null })
+
+  // A firmware save changes the device's flash without a store command: poll the sessions so the
+  // project shows unsaved changes.
+  setInterval(() => {
+    if (!_projectOpen || _projectDirty || !_fm1.sessions) return
+    if (anyFlashDirty(_fm1.sessions, _hot.midiTracks.filter(t => t.instrument?.type === 'fm1').map(t => t.id))) { _projectDirty = true; renderCommands() }
+  }, 1000)
 
   // Shared audio import helper — picks a file and adds it to targetTrackId (or creates a new track)
   async function importAudioToTrack(targetTrackId) {
