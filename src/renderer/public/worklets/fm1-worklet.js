@@ -3,8 +3,8 @@
 // context's quantum, with timed MIDI applied at the first quantum whose start frame (context
 // frames) >= the event's frame. ONE self-contained file: an AudioWorklet does not import modules
 // everywhere, so the JIT host (fm1/jit.js, from fm1-emu web/jit.js, commit 69cb1ef, MIT,
-// Copyright (c) 2026 Joakim Eriksson) and the queue, key hold and resampler (fm1/host-core.js)
-// and createBootWatch (fm1/host-core.js) are inline copies. Keep them in step.
+// Copyright (c) 2026 Joakim Eriksson) and the queue, note counts, key hold and resampler
+// (fm1/host-core.js) and createBootWatch (fm1/host-core.js) are inline copies. Keep them in step.
 //
 // Boot runs inside process() at real time (each quantum gets only its own share of emulated
 // cycles), so a booting device never hogs the audio thread other nodes share. `ready` is posted
@@ -12,11 +12,14 @@
 // LCD) or after 8 s of
 // emulated time, flagged timedOut — the same rule as the Worker path.
 //
-// in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame? }   panic { bytes }
-//      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   dispose
+// in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame?, src? }   panic { bytes }   drop { frame }
+//      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   capture { on, id }   dispose
 // out: ready { timedOut }   error { reason, message }   lcd { lcd|null, leds }   status { rtf, starved, late, dropped }
+//      cap { id, L, R, frame, last? } — copies of the output from context frame `frame`, contiguous
+//      within a batch; `last` answers capture off (flushes what is left, possibly empty)
 
 const FM1_RATE = 44100
+const CAP_FRAMES = 4096   // capture batch, a multiple of the 128-frame quantum
 const now = globalThis.performance?.now ? () => performance.now() : () => Date.now()
 
 function jitImports(exports, stats) {
@@ -49,7 +52,7 @@ function jitImports(exports, stats) {
   }
 }
 
-function createEventQueue(limit = 4096) {
+function createEventQueue(limit = 4096, notes = null) {
   const items = []
   return {
     push(ev) {
@@ -62,10 +65,43 @@ function createEventQueue(limit = 4096) {
     takeUpTo(frame) {
       let n = 0
       while (n < items.length && items[n].frame <= frame) n++
-      return items.splice(0, n).map(e => e.bytes)
+      const out = []
+      for (const e of items.splice(0, n)) {
+        const bytes = notes && e.src ? notes.filter(e.bytes, e.src) : e.bytes
+        if (bytes) out.push(bytes)
+      }
+      return out
+    },
+    dropFrom(frame) {
+      for (let i = items.length - 1; i >= 0 && items[i].frame >= frame; i--) if (!isNoteOff(items[i].bytes)) items.splice(i, 1)
     },
     clear() { items.length = 0 },
     get size() { return items.length },
+  }
+}
+
+const isNoteOff = (b) => b.length === 3 && ((b[0] & 0xF0) === 0x80 || ((b[0] & 0xF0) === 0x90 && b[2] === 0))
+
+function createNoteCounts() {
+  const holders = new Map()
+  return {
+    filter(bytes, src) {
+      const kind = bytes[0] & 0xF0
+      if (bytes.length !== 3 || (kind !== 0x80 && kind !== 0x90)) return bytes
+      const key = (bytes[0] & 15) * 128 + (bytes[1] & 127)
+      let counts = holders.get(key)
+      if (kind === 0x90 && bytes[2] > 0) {
+        if (!counts) holders.set(key, counts = new Map())
+        counts.set(src, src === 'live' ? 1 : (counts.get(src) ?? 0) + 1)   // live: one off releases, like a keyboard
+        return bytes
+      }
+      const n = counts?.get(src) ?? 0
+      if (n > 1) counts.set(src, n - 1)
+      else counts?.delete(src)
+      if (counts && !counts.size) holders.delete(key)
+      return counts?.size ? null : bytes
+    },
+    reset() { holders.clear() },
   }
 }
 
@@ -138,7 +174,8 @@ class Fm1Processor extends AudioWorkletProcessor {
     super()
     this.x = null
     this.done = false
-    this.queue = createEventQueue()
+    this.notes = createNoteCounts()
+    this.queue = createEventQueue(4096, this.notes)
     this.keys = createKeyHold()
     this.rs = createResampler(FM1_RATE, sampleRate)
     this.emu = 0                     // emulator frames rendered
@@ -152,6 +189,7 @@ class Fm1Processor extends AudioWorkletProcessor {
     this.busy = 0
     this.rendered = 0
     this.short = 0
+    this.cap = null                  // { id, L, R, fill, frame } while capturing
     this.port.onmessage = (e) => this.onMessage(e.data)
     // a compiled Module does not cross into a worklet scope everywhere (Chrome: messageerror);
     // the session then falls back to the Worker path
@@ -185,17 +223,45 @@ class Fm1Processor extends AudioWorkletProcessor {
     if (m.type === 'boot') { this.boot(m); return }
     if (m.type === 'dispose') { this.done = true; this.x = null; this.queue.clear(); return }
     if (m.type === 'lcd') { this.lcdOn = !!m.on; this.lcdForce = this.lcdOn; return }
+    if (m.type === 'capture') {
+      const had = !!this.cap
+      if (had) this.flushCap(!m.on)
+      this.cap = m.on ? { id: m.id, L: new Float32Array(CAP_FRAMES), R: new Float32Array(CAP_FRAMES), fill: 0, frame: 0 } : null
+      if (!m.on && !had) this.port.postMessage({ type: 'cap', id: m.id, L: new Float32Array(0), R: new Float32Array(0), frame: currentFrame, last: true })
+      return
+    }
     const x = this.x
     if (!x) return
     if (m.type === 'midi') {
       let frame = m.frame
       if (frame === undefined || frame < currentFrame) { if (frame !== undefined) this.late++; frame = currentFrame }
-      if (!this.queue.push({ frame, bytes: m.bytes })) this.dropped++
-    } else if (m.type === 'panic') { this.queue.clear(); this.queue.push({ frame: currentFrame, bytes: m.bytes }) }
+      if (!this.queue.push({ frame, bytes: m.bytes, src: m.src })) this.dropped++
+    } else if (m.type === 'panic') { this.queue.clear(); this.notes.reset(); this.queue.push({ frame: currentFrame, bytes: m.bytes }) }
+    else if (m.type === 'drop') this.queue.dropFrom(Math.max(m.frame ?? currentFrame, currentFrame))
     else if (m.type === 'key') {
       if (m.down) { this.keys.down(m.id, this.emu); x.fm1_key(m.id, 1) } else this.keys.up(m.id, this.emu)
     } else if (m.type === 'enc') x.fm1_enc(m.id, m.clicks | 0)
     else if (m.type === 'pot') x.fm1_pot(Math.max(0, Math.min(1023, Math.round(m.value))))
+  }
+
+  flushCap(last) {
+    const c = this.cap
+    if (!c.fill && !last) return
+    const full = c.fill === CAP_FRAMES
+    const L = full ? c.L : c.L.slice(0, c.fill), R = full ? c.R : c.R.slice(0, c.fill)
+    this.port.postMessage({ type: 'cap', id: c.id, L, R, frame: c.frame, ...(last ? { last: true } : {}) }, [L.buffer, R.buffer])
+    if (full) { c.L = new Float32Array(CAP_FRAMES); c.R = new Float32Array(CAP_FRAMES) }
+    c.fill = 0
+  }
+
+  capture(l, r) {
+    const c = this.cap
+    if (c.fill && c.frame + c.fill !== currentFrame) this.flushCap(false)   // a gap: new batch
+    if (!c.fill) c.frame = currentFrame
+    c.L.set(l, c.fill)
+    c.R.set(r, c.fill)
+    c.fill += l.length
+    if (c.fill + l.length > CAP_FRAMES) this.flushCap(false)
   }
 
   process(_inputs, outputs) {
@@ -226,6 +292,7 @@ class Fm1Processor extends AudioWorkletProcessor {
     const l = new Float32Array(buf, x.fm1_out_l(), need), r = new Float32Array(buf, x.fm1_out_r(), need)
     const outR = out[1] || new Float32Array(n)
     this.rs.process(l, r, out[0], outR)
+    if (this.cap) this.capture(out[0], outR)
     if (this.booting) {
       const up = this.bootWatch({ have, lcdRev: x.fm1_lcd_revision(), ms: x.fm1_ms?.() ?? 0 })
       if (up) { this.booting = false; this.port.postMessage({ type: 'ready', timedOut: up === 'timeout' }) }

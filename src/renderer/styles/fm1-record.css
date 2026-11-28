@@ -1,0 +1,12 @@
+/* FM-1 record dialog. Modal; stacks to one column and never exceeds the viewport (390 px safe). */
+#fm1-record-dialog[open] { width: min(420px, 96vw); max-height: calc(100vh - 16px); overflow-y: auto; }
+.fm1r-view { display: flex; flex-direction: column; gap: 8px; }
+/* [hidden] must win over .dlg-row / .fm1r-view display rules (the confirm row showed in the pending view) */
+#fm1-record-dialog [hidden] { display: none !important; }
+.fm1r-field { flex-wrap: wrap; align-items: center; }
+.fm1r-field .dlg-label { flex: 1 1 140px; }
+.fm1r-field input[type="number"], .fm1r-field select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
+.fm1r-phase, .fm1r-elapsed { display: block; text-align: center; }
+.fm1r-elapsed { font-size: 24px; }
+.fm1r-meter { width: 100%; height: 14px; accent-color: var(--state-record); }
+.fm1r-msg { min-height: 1.4em; margin: 6px 0 0; color: var(--text); }

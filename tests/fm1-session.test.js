@@ -152,10 +152,10 @@ describe('fm1 session (Worker path)', () => {
     s.noteOn(60, 100, 1.12)
     s.noteOff(60, 1.22)
     const midi = w.sent.filter(m => m.type === 'midi')
-    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1024 + 4800 })
-    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1024 + 9600 })
+    expect(midi[0]).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 1024 + 4800, src: 'live' })
+    expect(midi[1]).toEqual({ type: 'midi', bytes: [0x82, 60, 0], frame: 1024 + 9600, src: 'live' })
     s.sendMidi([0xB2, 1, 64])
-    expect(w.sent.at(-1)).toEqual({ type: 'midi', bytes: [0xB2, 1, 64], frame: undefined })
+    expect(w.sent.at(-1)).toEqual({ type: 'midi', bytes: [0xB2, 1, 64], frame: undefined, src: 'live' })
   })
 
   it('takes late / starved counts from worker status', async () => {
@@ -252,7 +252,9 @@ describe('fm1 session (worklet path)', () => {
     port.emit({ type: 'ready' })
     expect(s.leadSec).toBeCloseTo(0.02)
     s.noteOn(60, 100, 2)
-    expect(port.sent.at(-1)).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 96000 })
+    expect(port.sent.at(-1)).toEqual({ type: 'midi', bytes: [0x92, 60, 100], frame: 96000, src: 'live' })
+    s.dropFrom(2.5)
+    expect(port.sent.at(-1)).toEqual({ type: 'drop', frame: 120000 })
     s.dispose()
     expect(port.sent.at(-1)).toEqual({ type: 'dispose' })
     expect(nodes[0].gone).toBe(true)
@@ -283,6 +285,20 @@ describe('fm1 session (worklet path)', () => {
       createWorkletNode: () => { throw new Error('no') }, createWorker: () => { throw new Error('no') } })
     const t = bad.sessions.acquire('t1', desc, out)
     await expect(t.ready).rejects.toThrow('wasm-failed')
+  })
+
+  // Two worklet devices on the one audio thread overloaded it in Electron (context clock at 65%,
+  // both devices silent): only one device runs in the worklet, the others on Workers.
+  it('runs ONE device in the worklet; a second runs on the Worker path, the worklet is reused once free', async () => {
+    const { sessions, nodes, workers } = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8) })
+    const a = sessions.acquire('t1', desc, out)
+    const b = sessions.acquire('t2', desc, out)
+    expect([a.path, b.path]).toEqual(['worklet', 'worker'])
+    await flush()
+    expect([nodes.length, workers.length]).toEqual([1, 1])
+    expect(sessions.acquire('t1', { ...desc, mhz: 160 }, out).path).toBe('worklet')   // the replaced one freed it
+    sessions.release('t1')
+    expect(sessions.acquire('t3', desc, out).path).toBe('worklet')
   })
 
   it('falls back to the Worker path when addModule fails', async () => {
@@ -365,5 +381,136 @@ describe('fm1 session manager', () => {
     sessions.disposeAll()
     expect(a.status().state).toBe('disposed')
     expect(sessions.get('t1')).toBeNull()
+  })
+})
+
+describe('fm1 session: one device, live and timeline notes', () => {
+  // The session forwards everything, tagged by source; the host decides at the frame the off is
+  // due (createNoteCounts in the queue), so call order cannot release another source's note.
+  it('tags every note with its source and forwards all of them; panic offs the held notes', async () => {
+    const { s, w } = await readySession()
+    w.emit(block(0))
+    const midi = () => w.sent.filter(m => m.type === 'midi').map(m => [m.bytes, m.src])
+    s.noteOn(60, 100)                       // live
+    s.noteOn(60, 90, 1.1, 'timeline')
+    s.noteOff(60, 1.2, 'timeline')
+    s.noteOff(60)
+    expect(midi()).toEqual([[[0x92, 60, 100], 'live'], [[0x92, 60, 90], 'timeline'], [[0x82, 60, 0], 'timeline'], [[0x82, 60, 0], 'live']])
+    s.noteOn(62, 100)
+    s.panic()
+    expect(w.sent.at(-1)).toEqual({ type: 'panic', bytes: [...allNotesOffBytes(), 0x82, 62, 0] })
+  })
+})
+
+describe('fm1 session capture', () => {
+  const ramp = (n, from) => Float32Array.from({ length: n }, (_, i) => (from + i) / 1e5)
+  const blk = (frame, from) => ({ type: 'block', frame, l: ramp(1024, from), r: ramp(1024, from).map(v => -v) })
+
+  it('Worker path: places blocks at their audible time, keeps the underrun gap, drops before start', async () => {
+    const { s, w, ctx } = await readySession()
+    ctx.currentTime = 1
+    w.emit(blk(0, 0))                                 // anchored at ceil(1.02 * 48000) = 48960
+    const S = 48960 / 48000 + 512 / 48000             // start mid-way through the first block
+    const cap = s.startCapture({ startTime: S })
+    w.emit(blk(0, 0))                                 // (re-sent first block: audible before S partly)
+    expect(() => s.startCapture({ startTime: 2 })).toThrow('already')
+    ctx.currentTime = 1.01
+    w.emit(blk(1024, 1024))
+    ctx.currentTime = 1.5                             // late: re-anchors at ceil(1.52 * 48000)
+    w.emit(blk(2048, 2048))
+    expect(s.status().underruns).toBe(1)
+    const at3 = ctx.sources.at(-1).startAt
+    expect(cap.peak()).toBeCloseTo(3071 / 1e5)
+    const take = await cap.finish()
+    expect(take.rate).toBe(48000)
+    // the frame audible at S is block 0 sample 512
+    expect(take.L[0]).toBeCloseTo(512 / 1e5, 7)
+    expect(take.R[511 + 1024]).toBeCloseTo(-2047 / 1e5, 7)
+    const gapAt = Math.round((at3 - S) * 48000)
+    expect(gapAt).toBe(Math.ceil(1.52 * 48000 - 1e-6) - 49472)
+    expect([...take.L.subarray(1536, gapAt)].every(v => v === 0)).toBe(true)
+    expect(take.L[gapAt]).toBeCloseTo(2048 / 1e5, 7)
+    expect(take.frames).toBe(gapAt + 1024)
+    // capture is over: a new one may start, later blocks do not reach the old take
+    w.emit(blk(3072, 0))
+    expect(take.frames).toBe(gapAt + 1024)
+    s.startCapture({ startTime: 0 }).cancel()
+  })
+
+  it('Worker path: finish(endTime) trims; cancel drops the take; maxSeconds sets full', async () => {
+    const { s, w, ctx } = await readySession()
+    ctx.currentTime = 1
+    w.emit(blk(0, 0))
+    const S = 48960 / 48000
+    const a = s.startCapture({ startTime: S })
+    w.emit(blk(0, 0))
+    expect((await a.finish(S + 100 / 48000)).frames).toBe(100)
+    const b = s.startCapture({ startTime: S, maxSeconds: 1000 / 48000 })
+    w.emit(blk(0, 0))
+    expect(b.full()).toBe(true)
+    expect(b.frames()).toBe(1000)
+    b.cancel()
+    expect(() => s.startCapture({ startTime: S }).cancel()).not.toThrow()
+  })
+
+  it('worklet path: capture on/off messages, batches placed by context frame, finish waits for the last batch', async () => {
+    const { sessions, nodes } = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8) })
+    const s = sessions.acquire('t1', desc, out)
+    const early = s.startCapture({ startTime: 2 })    // before the node exists: sent once it does
+    await flush(); await flush()
+    const port = nodes[0].port
+    expect(port.sent.find(m => m.type === 'capture')).toEqual({ type: 'capture', on: true, id: 1 })
+    port.emit({ type: 'ready' })
+    early.cancel()
+    expect(port.sent.at(-1)).toEqual({ type: 'capture', on: false, id: 1 })
+    port.emit({ type: 'cap', id: 1, L: new Float32Array(4).fill(1), R: new Float32Array(4), frame: 96000, last: true })
+
+    const cap = s.startCapture({ startTime: 2 })
+    expect(port.sent.at(-1)).toEqual({ type: 'capture', on: true, id: 2 })
+    port.emit({ type: 'cap', id: 2, L: new Float32Array(256).fill(0.25), R: new Float32Array(256).fill(-0.25), frame: 96000 - 128 })
+    port.emit({ type: 'cap', id: 2, L: new Float32Array(128).fill(0.5), R: new Float32Array(128), frame: 96000 + 512 })
+    expect(cap.frames()).toBe(640)
+    let done = null
+    const p = cap.finish().then(t => { done = t })
+    await flush()
+    expect(done).toBeNull()                           // waiting for the flush
+    expect(port.sent.at(-1)).toEqual({ type: 'capture', on: false, id: 2 })
+    port.emit({ type: 'cap', id: 2, L: new Float32Array(128).fill(0.75), R: new Float32Array(128), frame: 96000 + 640, last: true })
+    await p
+    expect(done.frames).toBe(768)
+    expect(done.L[0]).toBe(0.25)                      // frame 96000 = time 2
+    expect(done.L[127]).toBe(0.25)
+    expect(done.L[128]).toBe(0)                       // gap
+    expect(done.L[512]).toBe(0.5)
+    expect(done.L[767]).toBe(0.75)
+    expect(done.R[0]).toBe(-0.25)
+  })
+
+  it('worklet path: finish still resolves if the device goes away', async () => {
+    const { sessions, nodes } = setup({ worklet: true, getWasmBytes: async () => new ArrayBuffer(8) })
+    const s = sessions.acquire('t1', desc, out)
+    await flush(); await flush()
+    nodes[0].port.emit({ type: 'ready' })
+    const cap = s.startCapture({ startTime: 0 })
+    const p = cap.finish()
+    s.dispose()
+    await expect(p).resolves.toMatchObject({ frames: 0 })
+  })
+})
+
+describe('fm1 session capture started after play()', () => {
+  it('Worker path: blocks scheduled before startCapture that reach past a future startTime are in the take', async () => {
+    const { s, w, ctx } = await readySession()
+    ctx.currentTime = 1
+    const fill = (frame, v) => ({ type: 'block', frame, l: new Float32Array(1024).fill(v), r: new Float32Array(1024).fill(-v) })
+    w.emit(fill(0, 0.1)); w.emit(fill(1024, 0.2)); w.emit(fill(2048, 0.3))   // at 1.02 ... ahead of time
+    const S = (48960 + 1500) / 48000                                          // play() just returned S
+    const cap = s.startCapture({ startTime: S })
+    w.emit(fill(3072, 0.4))
+    const take = await cap.finish()
+    expect(take.frames).toBe(4096 - 1500)
+    expect(take.L[0]).toBeCloseTo(0.2)
+    expect(take.L[2048 - 1500]).toBeCloseTo(0.3)
+    expect(take.R[3072 - 1500]).toBeCloseTo(-0.4)
   })
 })

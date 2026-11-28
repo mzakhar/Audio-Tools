@@ -66,6 +66,11 @@ import { createFirmwareStore } from './fm1/firmware-store.js'
 import { libraryRows } from './fm1/catalog.js'
 import { fm1Descriptor, failureText } from './fm1/descriptor.js'
 import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
+import { createFm1RecordDialog } from './components/fm1-record-dialog.js'
+import { createFm1RecordFlow } from './fm1/record-flow.js'
+import { isActive as fm1RecordActive } from './fm1/record-take.js'
+import { newId } from './utils/new-id.js'
+import { encodeWAV, interleaveToI16 } from './utils/wav-encoder.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
 import { PadGrid } from './components/pad-grid.js'
@@ -95,7 +100,7 @@ function webDiscovery() {
     available: async () => true,
     onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) },
     run(brief) {
-      const runId = crypto.randomUUID()
+      const runId = newId()
       const controller = new AbortController()
       requests.set(runId, controller)
       queueMicrotask(async () => {
@@ -251,6 +256,126 @@ async function refreshFm1Cache() {
   }
 }
 
+/** Arguments for TimelinePlayer.play from the current project; shared by the Play button and FM-1 recording. */
+function arrangePlayArgs(beat) {
+  const state = ProjectStore.getState()
+  return {
+    beat,
+    bpm: state.bpm,
+    tracks: state.tracks,
+    audioStore: AudioStore,
+    mixerEngine: MixerEngine,
+    palettes: Palettes,
+    racks: state.racks,
+    kits: state.kits,
+    packFor,
+    sampleStoreFor,
+    rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
+    fm1Sessions: fm1Sessions(),
+    notify: showToast
+  }
+}
+
+let _fm1Rec = null
+function fm1Record() {
+  if (_fm1Rec) return _fm1Rec
+  const fm1Tracks = () => _hot.midiTracks.filter(track => track.instrument?.type === 'fm1')
+  const flow = createFm1RecordFlow({
+    sessions: { get: id => { const track = _hot.byId.get(id); if (track) liveEntryFor(track); return fm1Sessions()?.get(id) ?? null } },
+    timeline: {
+      prepare: async () => {
+        const state = ProjectStore.getState()
+        await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
+      },
+      play: ({ beat, bpm, endBeat }) => {
+        // FM-1 notes go 1.5 s ahead: a background window holds timers ~1 s, which cut the first notes of a take
+        const started = TimelinePlayer.play({ ...arrangePlayArgs(beat), bpm, endBeat, fm1Lookahead: 1.5 })
+        syncTransportPressed()
+        return typeof started === 'number' ? started : TimelinePlayer.startAudioTime
+      },
+      stop: options => { TimelinePlayer.stop(options); syncTransportPressed() }
+    },
+    store: ProjectStore,
+    getTrack: id => _hot.byId.get(id) ?? null,
+    files: { saveRecording: (...args) => FileAdapter.saveRecording(...args), exportWav: exportWavOrDownload },
+    audioStore: AudioStore,
+    encode: (L, R, rate) => encodeWAV(interleaveToI16(L, R), rate, 2),
+    time: () => AudioEngine.getContext().currentTime,
+    now: () => new Date(),
+    bpm: () => ProjectStore.getState().bpm,
+    beatsPerBar: () => _hot.beatsPerBar,
+    newId,
+    commands: { AddTrack, AddClip, SetMixerParam },
+    notify: showToast
+  })
+  const dialog = createFm1RecordDialog({
+    flow,
+    getTracks: () => fm1Tracks().map(track => ({ id: track.id, name: track.name })),
+    armedId: () => _hot.armedId
+  })
+  return (_fm1Rec = { flow, dialog })
+}
+
+/** True while an FM-1 recording owns the transport (arming, recording, tail, saving). */
+const fm1Recording = () => !!_fm1Rec && fm1RecordActive(_fm1Rec.flow.state().phase)
+
+/** Save-as for a WAV: the native picker (Electron dialog / showSaveFilePicker), or a plain download
+ *  where neither exists (the LAN http route). Resolves null when the user cancelled. */
+async function exportWavOrDownload(bytes, name) {
+  if (window.electronFS || typeof window.showSaveFilePicker === 'function') return FileAdapter.exportWav(bytes, name)
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+  const link = Object.assign(document.createElement('a'), { href: url, download: name })
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+  return name
+}
+
+// Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode. An FM-1
+// recording owns the transport: Play is ignored (checked again after every await, a recording may
+// have started meanwhile), Stop is the record dialog's Stop.
+async function transportPlay() {
+  if (fm1Recording()) return
+  await ensureAudio()
+  if (fm1Recording()) return
+  if (_currentMode === 'arrange') {
+    const state = ProjectStore.getState()
+    // Decode every kit track's samples first: otherwise each one's first hit is silent.
+    await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
+    if (fm1Recording()) return
+    TimelinePlayer.play(arrangePlayArgs(0))
+  } else if (_currentMode === 'pads') {
+    startPadsLoop()
+  } else {
+    Sequencer.play()
+  }
+  syncTransportPressed()
+}
+
+function transportStop() {
+  if (fm1Recording()) return fm1RecordStop()
+  if (_currentMode === 'arrange') {
+    TimelinePlayer.stop()
+  } else if (_currentMode === 'pads') {
+    stopPadsLoop()
+  } else {
+    Sequencer.stop()
+  }
+  syncTransportPressed()
+}
+
+/** Transport Stop during an FM-1 recording: recording -> the dialog's Stop (keeps the take);
+ *  arming -> cancel with a message; tail/saving -> nothing to stop, the dialog shows where it is. */
+function fm1RecordStop() {
+  const { flow, dialog } = _fm1Rec
+  flow.transportStop()
+  if (dialog && !dialog.isOpen()) dialog.open()
+}
+
+async function openFm1Record() {
+  await ensureAudio()
+  return fm1Record().dialog?.open()
+}
+
 async function openFm1Device(trackId) {
   await ensureAudio()
   _fm1.dialog ??= createFm1DeviceDialog({
@@ -272,8 +397,10 @@ function pruneFm1(state) {
 
 /** A project switch ends every device of the old project. */
 function disposeFm1() {
+  _fm1Rec?.flow.abort('The project changed, so the recording was cancelled.')
   _fm1.sessions?.disposeAll()
   _fm1.tracked.clear()
+  _prewarmSig = null   // the same track ids may come back (re-Open): their devices must boot again
 }
 // Leaving the page ends every device too: Workers and worklet nodes must not outlive it.
 // (Pagehide, not beforeunload: it also fires on bfcache entry and mobile tab discard.)
@@ -1446,45 +1573,9 @@ function initCommandBar() {
     if (_projectOpen && !_projectDirty) { _projectDirty = true; renderCommands() }
   })
 
-  // Transport — mode-aware: drives Sequencer in synth mode, TimelinePlayer in arrange mode
-  document.getElementById('global-play-btn')?.addEventListener('click', async () => {
-    await ensureAudio()
-    if (_currentMode === 'arrange') {
-      const state = ProjectStore.getState()
-      // Decode every kit track's samples first: otherwise each one's first hit is silent.
-      await preloadKitSamples(userSampleStoreFor(AudioEngine.getContext()), state.tracks, state.kits)
-      TimelinePlayer.play({
-        beat: 0,
-        bpm: state.bpm,
-        tracks: state.tracks,
-        audioStore: AudioStore,
-        mixerEngine: MixerEngine,
-        palettes: Palettes,
-        racks: ProjectStore.getState().racks,
-        kits: ProjectStore.getState().kits,
-        packFor,
-        sampleStoreFor,
-        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
-        fm1Sessions: fm1Sessions(),
-        notify: showToast
-      })
-    } else if (_currentMode === 'pads') {
-      startPadsLoop()
-    } else {
-      Sequencer.play()
-    }
-    syncTransportPressed()
-  })
-  document.getElementById('global-stop-btn')?.addEventListener('click', () => {
-    if (_currentMode === 'arrange') {
-      TimelinePlayer.stop()
-    } else if (_currentMode === 'pads') {
-      stopPadsLoop()
-    } else {
-      Sequencer.stop()
-    }
-    syncTransportPressed()
-  })
+  // Transport — every Play/Stop (buttons, Space, Shift+Space, the pad controller) clicks these.
+  document.getElementById('global-play-btn')?.addEventListener('click', transportPlay)
+  document.getElementById('global-stop-btn')?.addEventListener('click', transportStop)
 
   // Everything that is not live lives in the ⋯ menu or a dialog.
   buildAppMenu()
@@ -1496,6 +1587,7 @@ function initCommandBar() {
     const track = _hot.byId.get(_hot.armedId)
     if (track?.instrument?.type === 'fm1') return openFm1Device(track.id)
   }
+  COMMANDS['fm1-record'] = () => openFm1Record()
   COMMANDS['mixer'] = () => toggleMixer()
   // No listener yet for these two — the instrument agent wires them.
   COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
@@ -2514,6 +2606,7 @@ function boot() {
     const prevPads = _hot.pads
     refreshHot(state)
     _fm1.dialog?.refresh()   // track gone or no longer FM-1 -> close; new device -> re-bind
+    if (_fm1Rec?.dialog?.isOpen()) _fm1Rec.dialog.refresh()   // FM-1 tracks added/renamed/removed
     if (_lessons?.active() && prevPads !== _hot.pads) _lessons.padsChanged(prevPads, _hot.pads, _loopPlayer?.isPlaying() ? _loopPlayer.currentBeat() : -1)
     syncMixerStrips(state)
     syncInstrumentUi()

@@ -104,6 +104,47 @@ describe('fm1-worklet', () => {
     expect(x.midi[0].at).toBe(2)
   })
 
+  it('note gate (inline copy): a live release before a queued timeline note is not swallowed; panic resets', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame, src) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src } })
+    send([0x90, 60, 100], 0, 'live')
+    send([0x90, 60, 90], 1000, 'timeline')
+    send([0x80, 60, 0], 2000, 'timeline')
+    send([0x80, 60, 0], 500, 'live')
+    for (let q = 0; q < 20; q++) quantum(p, q * 128)
+    const bytes = () => { const b = x.midi.map(m => m.b); const out = []; for (let i = 0; i < b.length; i += 3) out.push(b.slice(i, i + 3)); return out }
+    expect(bytes()).toEqual([[0x90, 60, 100], [0x80, 60, 0], [0x90, 60, 90], [0x80, 60, 0]])
+    x.midi.length = 0
+    send([0x90, 62, 100], 2560, 'live')
+    send([0x90, 62, 100], 2560, 'timeline')
+    quantum(p, 2560)
+    p.port.onmessage({ data: { type: 'panic', bytes: [0xB0, 123, 0] } })
+    send([0x80, 62, 0], 2688, 'timeline')               // nobody holds it after the panic
+    quantum(p, 2688)
+    expect(bytes().slice(-2)).toEqual([[0xB0, 123, 0], [0x80, 62, 0]])
+  })
+
+  it('note gate (inline copy): overlapping same-pitch notes from one source end with the last off', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src: 'timeline' } })
+    send([0x90, 60, 100], 0); send([0x90, 60, 100], 200); send([0x80, 60, 0], 400); send([0x80, 60, 0], 900)
+    for (let q = 0; q < 10; q++) quantum(p, q * 128)
+    expect(x.midi.map(m => m.b)).toEqual([0x90, 60, 100, 0x90, 60, 100, 0x80, 60, 0])
+    expect(x.midi.at(-1).at).toBe(Math.ceil(900 / 128))   // the off at frame 900, not the one at 400
+  })
+
+  it('drop removes queued note-ons from its frame on and keeps the offs', async () => {
+    const { p, x } = await booted()
+    globalThis.currentFrame = 0
+    const send = (bytes, frame) => p.port.onmessage({ data: { type: 'midi', bytes, frame, src: 'timeline' } })
+    send([0x90, 60, 100], 100); send([0x80, 60, 0], 900); send([0x90, 64, 100], 700); send([0x80, 64, 0], 1000)
+    p.port.onmessage({ data: { type: 'drop', frame: 500 } })
+    for (let q = 0; q < 10; q++) quantum(p, q * 128)
+    expect(x.midi.map(m => m.b)).toEqual([0x90, 60, 100, 0x80, 60, 0, 0x80, 64, 0])
+  })
+
   it('renders need(128) frames at 44.1 kHz per 48 kHz quantum and fills the quantum', async () => {
     const { p, x } = await booted()
     let o
@@ -177,5 +218,43 @@ describe('fm1-worklet', () => {
     halted = 1
     for (let i = 0; i < 200; i++) quantum(q, i * 128)
     expect(q.port.sent.find(m => m.type === 'error')).toMatchObject({ reason: 'halted' })
+  })
+})
+
+describe('fm1-worklet capture', () => {
+  const caps = p => p.port.sent.filter(m => m.type === 'cap')
+
+  it('posts 4096-frame batches of its output stamped with the first context frame, flushes on off', async () => {
+    const { p } = await booted()
+    quantum(p, 0)
+    expect(caps(p)).toHaveLength(0)
+    p.port.onmessage({ data: { type: 'capture', on: true, id: 7 } })
+    const outs = []
+    for (let q = 0; q < 40; q++) outs.push(quantum(p, 1280 + q * 128))
+    const sent = caps(p)
+    expect(sent.map(m => [m.frame, m.L.length])).toEqual([[1280, 4096]])
+    expect(sent[0].id).toBe(7)
+    expect(sent[0].last).toBeUndefined()
+    expect(sent[0].L.every(v => Math.abs(v - 0.5) < 1e-6)).toBe(true)
+    expect(sent[0].R.every(v => Math.abs(v + 0.5) < 1e-6)).toBe(true)
+    expect(sent[0].L.subarray(128, 256)).toEqual(outs[1][0][0])
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 7 } })
+    const last = caps(p).at(-1)
+    expect(last).toMatchObject({ id: 7, frame: 1280 + 4096, last: true })
+    expect(last.L).toHaveLength(8 * 128)
+    quantum(p, 1280 + 40 * 128)
+    expect(caps(p)).toHaveLength(2)
+  })
+
+  it('a gap in context frames starts a new batch; off with nothing captured answers empty', async () => {
+    const { p } = await booted()
+    p.port.onmessage({ data: { type: 'capture', on: true, id: 1 } })
+    quantum(p, 0); quantum(p, 128)
+    quantum(p, 1024)                                  // frames 256..1023 never rendered
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 1 } })
+    expect(caps(p).map(m => [m.frame, m.L.length, !!m.last])).toEqual([[0, 256, false], [1024, 128, true]])
+    p.port.onmessage({ data: { type: 'capture', on: false, id: 2 } })
+    expect(caps(p).at(-1)).toMatchObject({ id: 2, last: true })
+    expect(caps(p).at(-1).L).toHaveLength(0)
   })
 })

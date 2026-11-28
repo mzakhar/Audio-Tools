@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   framesAt, createEventQueue, createKeyHold, createResampler, rgb565ToRgba,
-  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, createBootWatch,
+  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, createBootWatch, createNoteCounts, createTake,
 } from '../src/renderer/js/fm1/host-core.js'
 
 describe('framesAt', () => {
@@ -179,5 +179,147 @@ describe('createBootWatch', () => {
     expect(w({ have: 128, lcdRev: 1, ms: 300 })).toBeNull()
     expect(w({ have: 128, lcdRev: 1, ms: 8000 })).toBe('timeout')
     expect(createBootWatch()({ have: 0, lcdRev: 1, ms: 8000 })).toBe('timeout')
+  })
+})
+
+describe('createNoteCounts', () => {
+  it('a live retrigger (on, on) is released by one live off, like a keyboard', () => {
+    const c = createNoteCounts()
+    expect(c.filter([0x90, 60, 100], 'live')).not.toBeNull()
+    expect(c.filter([0x90, 60, 100], 'live')).not.toBeNull()
+    expect(c.filter([0x80, 60, 0], 'live')).toEqual([0x80, 60, 0])
+  })
+
+  const on = (p, ch = 2) => [0x90 | ch, p, 100], off = (p, ch = 2) => [0x80 | ch, p, 0]
+  it('every on passes; an off is dropped only while ANOTHER source holds the note; reset clears', () => {
+    const c = createNoteCounts()
+    expect(c.filter(on(60), 'live')).toEqual(on(60))
+    expect(c.filter(on(60), 'timeline')).toEqual(on(60))
+    expect(c.filter(on(60, 3), 'timeline')).toEqual(on(60, 3))   // another channel is another note
+    expect(c.filter(off(60), 'timeline')).toBeNull()              // live still holds it
+    expect(c.filter(off(60), 'live')).toEqual(off(60))
+    expect(c.filter(off(60, 3), 'timeline')).toEqual(off(60, 3))
+    expect(c.filter(off(60), 'live')).toEqual(off(60))           // nobody holds it: passes (harmless)
+    expect(c.filter([0x92, 61, 0], 'live')).toEqual([0x92, 61, 0])   // velocity 0 = an off
+    c.filter(on(61), 'live'); c.reset()
+    expect(c.filter(off(61), 'timeline')).toEqual(off(61))
+    expect(c.filter([0xB2, 1, 64], 'live')).toEqual([0xB2, 1, 64])  // not a note
+  })
+  it('plain repeated notes from one source: each on/off pair passes', () => {
+    const c = createNoteCounts()
+    for (let i = 0; i < 3; i++) {
+      expect(c.filter(on(64), 'live')).toEqual(on(64))
+      expect(c.filter(off(64), 'live')).toEqual(off(64))
+    }
+  })
+  it('overlapping notes of one pitch from ONE source (two clips / tracks on one channel): only the last off is sent', () => {
+    const c = createNoteCounts()
+    expect(c.filter(on(64), 'timeline')).toEqual(on(64))
+    expect(c.filter(on(64), 'timeline')).toEqual(on(64))   // second note starts while the first sounds
+    expect(c.filter(off(64), 'timeline')).toBeNull()        // the first note's off must not cut the second
+    expect(c.filter(off(64), 'timeline')).toEqual(off(64))
+    expect(c.filter(off(64), 'timeline')).toEqual(off(64))  // a stray extra off still passes
+  })
+})
+
+describe('event queue dropFrom (transport stop without panic)', () => {
+  it('drops what was queued to start from the frame on, keeps note-offs (also velocity-0 ons)', () => {
+    const q = createEventQueue()
+    q.push({ frame: 100, bytes: [0x90, 60, 100] })
+    q.push({ frame: 300, bytes: [0x80, 60, 0] })
+    q.push({ frame: 400, bytes: [0x90, 62, 100] })
+    q.push({ frame: 500, bytes: [0x90, 62, 0] })
+    q.push({ frame: 450, bytes: [0xB0, 1, 64] })
+    q.dropFrom(200)
+    expect(q.takeUpTo(1e9)).toEqual([[0x90, 60, 100], [0x80, 60, 0], [0x90, 62, 0]])
+  })
+})
+
+describe('event queue with the note gate (frame order, not call order)', () => {
+  const on = [0x92, 60, 100], off = [0x82, 60, 0]
+  it("reviewer's case: live holds P, the timeline queues P later, live lets go first -> no stuck note", () => {
+    const q = createEventQueue(4096, createNoteCounts())
+    q.push({ frame: 0, bytes: on, src: 'live' })          // live press
+    q.push({ frame: 1000, bytes: on, src: 'timeline' })   // timeline note, queued (sent a lead early)
+    q.push({ frame: 2000, bytes: off, src: 'timeline' })  //   with its off
+    q.push({ frame: 500, bytes: off, src: 'live' })       // live release, before the timeline note sounds
+    expect(q.takeUpTo(0)).toEqual([on])
+    expect(q.takeUpTo(500)).toEqual([off])                // nobody else holds it at frame 500
+    expect(q.takeUpTo(1000)).toEqual([on])
+    expect(q.takeUpTo(2000)).toEqual([off])               // the timeline's own off releases it
+  })
+  it('live still held when the timeline note ends: the timeline off is held back until the live off', () => {
+    const q = createEventQueue(4096, createNoteCounts())
+    q.push({ frame: 0, bytes: on, src: 'live' })
+    q.push({ frame: 100, bytes: on, src: 'timeline' })
+    q.push({ frame: 200, bytes: off, src: 'timeline' })
+    q.push({ frame: 900, bytes: off, src: 'live' })
+    expect(q.takeUpTo(899)).toEqual([on, on])
+    expect(q.takeUpTo(900)).toEqual([off])
+  })
+})
+
+describe('createTake', () => {
+  const ramp = (n, from = 1) => Float32Array.from({ length: n }, (_, i) => (from + i) / 1000)
+  it('places blocks by audible time and leaves an underrun gap silent', () => {
+    const t = createTake({ rate: 1000, startTime: 2, maxFrames: 100 })
+    t.add(ramp(10), ramp(10).map(v => -v), 2)
+    t.add(ramp(5, 50), ramp(5, 50), 2.02)          // 10 frames late: 10..19 stay 0
+    expect(t.frames()).toBe(25)
+    const { L, R, rate, frames } = t.finish()
+    expect([rate, frames, L.length]).toEqual([1000, 25, 25])
+    expect(L[0]).toBeCloseTo(0.001); expect(R[9]).toBeCloseTo(-0.010)
+    expect([...L.subarray(10, 20)].every(v => v === 0)).toBe(true)
+    expect(L[20]).toBeCloseTo(0.050)
+    expect(t.peak).toBeCloseTo(0.054)
+  })
+  it('rounds the start index, drops samples before startTime', () => {
+    const t = createTake({ rate: 1000, startTime: 1, maxFrames: 100 })
+    t.add(ramp(10), ramp(10), 0.9954)               // index round(-4.6) = -5: first 5 dropped
+    const { L } = t.finish()
+    expect(L.length).toBe(5)
+    expect(L[0]).toBeCloseTo(0.006)
+    t.add(ramp(3), ramp(3), 0.5)                    // wholly before: ignored
+    expect(t.frames()).toBe(5)
+  })
+  it('stops at maxFrames and says full; finish truncates or extends to an end time', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 8 })
+    t.add(ramp(6), ramp(6), 0)
+    expect(t.full).toBe(false)
+    t.add(ramp(6, 100), ramp(6, 100), 0.006)
+    expect(t.full).toBe(true)
+    expect(t.frames()).toBe(8)
+    expect(t.finish(0.003).L).toEqual(ramp(3))
+    const long = t.finish(0.02)                      // capped at maxFrames
+    expect(long.frames).toBe(8)
+    const u = createTake({ rate: 1000, startTime: 0, maxFrames: 100 })
+    u.add(ramp(4), ramp(4), 0)
+    const ext = u.finish(0.01)
+    expect(ext.frames).toBe(10)
+    expect([...ext.R.subarray(4)].every(v => v === 0)).toBe(true)
+    expect(createTake({ rate: 1000, startTime: 0, maxFrames: 10 }).finish()).toMatchObject({ frames: 0 })
+  })
+  it('grows across many blocks without losing earlier samples', () => {
+    const t = createTake({ rate: 100, startTime: 0, maxFrames: 1e6 })
+    for (let i = 0; i < 300; i++) t.add(new Float32Array(64).fill(i / 1000), new Float32Array(64), i * 0.64)
+    const { L } = t.finish()
+    expect(L.length).toBe(300 * 64)
+    expect(L[0]).toBe(0); expect(L[64 * 150]).toBeCloseTo(0.15); expect(L.at(-1)).toBeCloseTo(0.299)
+  })
+  it('finish returns views (no copy) when the buffers already hold the length', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 5000 })
+    t.add(ramp(10), ramp(10), 0)
+    const a = t.finish(0.005), b = t.finish()
+    expect(a.L.buffer).toBe(b.L.buffer)               // same storage
+    expect([a.frames, b.frames]).toEqual([5, 10])
+  })
+  it('takeRecentPeak is the peak since the previous call (meter window); peak stays the take peak', () => {
+    const t = createTake({ rate: 1000, startTime: 0, maxFrames: 100 })
+    t.add(new Float32Array([0.5]), new Float32Array([0]), 0)
+    expect(t.takeRecentPeak()).toBe(0.5)
+    expect(t.takeRecentPeak()).toBe(0)
+    t.add(new Float32Array([0.1]), new Float32Array([-0.2]), 0.001)
+    expect(t.takeRecentPeak()).toBeCloseTo(0.2)
+    expect(t.peak).toBe(0.5)
   })
 })
