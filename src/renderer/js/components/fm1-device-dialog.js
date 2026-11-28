@@ -8,7 +8,7 @@
 
 import { openDialog } from '../ui/dialog.js'
 import { ENCODERS, POT, BUTTONS, KEYS, LCD, boxStyle } from '../fm1/panel-layout.js'
-import { fm1Descriptor, failureText, slowWarning } from '../fm1/descriptor.js'
+import { fm1Descriptor, fm1Sig, failureText, slowWarning } from '../fm1/descriptor.js'
 
 export const DEVICE_DIALOG_ID = 'fm1-device-dialog'
 
@@ -39,9 +39,11 @@ const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value))
 
 /**
  * deps: getSession(trackId) → session | null (acquires it if needed),
- *       getTrack(trackId) → track | null, compatFor(firmwareHash) → catalog compat | null
+ *       getTrack(trackId) → track | null, compatFor(firmwareHash) → catalog compat | null,
+ *       trackNumber (optional): trackId → 1-based position, so two tracks with one name stay apart,
+ *       flash (optional): { hasFolder() → bool, reset(trackId), exportState(trackId), importState(trackId) }
  */
-export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
+export function createFm1DeviceDialog({ getSession, getTrack, trackNumber, compatFor, flash }) {
   const dlg = document.getElementById(DEVICE_DIALOG_ID)
   const body = dlg?.querySelector('#fm1d-body')
   if (!dlg || !body) return null
@@ -64,7 +66,19 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
   scroll.append(panel)
   const noteEl = make('p', 'fm1d-note')
   const warnEl = make('p', 'fm1d-note')
-  body.append(statusEl, scroll, noteEl, warnEl)
+  const flashRow = make('div', 'fm1d-flash')
+  const flashBtn = (text, action) => {
+    const node = make('button', 'btn', { type: 'button' })
+    node.textContent = text
+    node.addEventListener('click', () => { if (trackId !== null) flash?.[action]?.(trackId) })
+    flashRow.append(node)
+    return node
+  }
+  const resetBtn = flashBtn('Start from firmware defaults', 'reset')
+  const exportBtn = flashBtn('Export device state…', 'exportState')
+  const importBtn = flashBtn('Import device state…', 'importState')
+  flashRow.hidden = !flash
+  body.append(statusEl, scroll, noteEl, warnEl, flashRow)
 
   const canvas = make('canvas', 'fm1d-lcd', { width: LCD_PX, height: LCD_PX, role: 'img', 'aria-label': 'FM-1 display' })
   place(canvas, LCD)
@@ -199,6 +213,9 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
     if (status && (status.underruns > baseline.underruns || status.starved > baseline.starved)) strained = true
     statusEl.textContent = statusLine(status, { strained })
     statusEl.classList.toggle('warn', !status || status.state === 'failed' || strained)
+    // A saved state that cannot be loaded is never replaced silently: resetting is this explicit button.
+    resetBtn.hidden = !(status?.state === 'failed' && String(status.reason).startsWith('flash-'))
+    exportBtn.disabled = importBtn.disabled = status?.state !== 'ready'
   }
 
   function unbind() {
@@ -209,7 +226,7 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
   }
 
   let boundSig = null
-  const sigOf = track => JSON.stringify(fm1Descriptor(track.instrument))
+  const sigOf = track => fm1Sig(track.instrument)
 
   /** Follow the store: close when the track is gone or no longer FM-1, re-bind when its device changed. */
   function refresh() {
@@ -226,7 +243,8 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
     const track = getTrack(id)
     const descriptor = fm1Descriptor(track?.instrument)
     boundSig = track ? sigOf(track) : null
-    title.textContent = `FM-1 · ${track?.name || 'MIDI'}`
+    const n = trackNumber?.(id)
+    title.textContent = `FM-1 · ${track?.name || 'MIDI'}${n ? ` · track ${n}` : ''}`
     session = getSession(id)
     strained = false
     const first = session?.status?.()
@@ -234,7 +252,7 @@ export function createFm1DeviceDialog({ getSession, getTrack, compatFor }) {
     showPot(pots.get(id))
     noteEl.textContent = [
       session?.path === 'worker' ? 'Worker mode: about 100 ms latency on this connection.' : '',
-      'Saves on the device are not kept yet.'
+      flash?.hasFolder?.() ? '' : 'Saves on the device are kept when the project is saved to a folder.'
     ].filter(Boolean).join(' ')
     warnEl.textContent = slowWarning(descriptor.mhz, compatFor?.(descriptor.firmwareHash)) || ''
     paintStatus()

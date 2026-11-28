@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { createRunner, bootToReady, CHUNK } from '../src/renderer/js/fm1/emulator.js'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { createRunner, bootToReady, bootEmulator, CHUNK } from '../src/renderer/js/fm1/emulator.js'
 import { fakeFm1Exports } from './helpers/fm1-fake-exports.js'
 
 const bytesAt = (x, at) => x.midi.filter(m => m.at === at).map(m => m.b)
@@ -71,5 +71,44 @@ describe('bootToReady', () => {
     const slow = fakeFm1Exports({ silentFor: 1e9, ms: () => (ms += 1000) })
     expect(bootToReady(createRunner(slow, { mhz: 120 }), slow)).toBe('timeout')
     expect(bootToReady(createRunner(slow, { mhz: 120 }), { ...slow, fm1_halted: () => 1 })).toBe('halted')
+  })
+})
+
+describe('bootEmulator flash restore', () => {
+  const pkg = new Uint8Array(16).buffer
+  function restoring(result = 0) {
+    const x = fakeFm1Exports()
+    const calls = []
+    x.fm1_boot_fwsc = () => { calls.push('boot'); return 0 }
+    x.fm1_flash_restore = (p, n) => { calls.push(['restore', n, new Uint8Array(x.memory.buffer, p, n).slice()]); return result }
+    const render = x.fm1_render
+    x.fm1_render = (...a) => { calls.push('render'); return render(...a) }
+    vi.spyOn(WebAssembly, 'instantiate').mockResolvedValue({ exports: x })
+    return { x, calls }
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it('restores the sectors after boot, before the first render', async () => {
+    const { x, calls } = restoring()
+    const sectors = new Uint8Array(4100).fill(3)
+    await bootEmulator({ module: {}, pkg, mhz: 120, jit: false, sectors })
+    createRunner(x, { mhz: 120 }).render()
+    expect(calls[0]).toBe('boot')
+    expect(calls[1][0]).toBe('restore')
+    expect(calls[1][1]).toBe(4100)
+    expect(calls[1][2]).toEqual(sectors)
+    expect(calls[2]).toBe('render')
+  })
+
+  it('no sectors: no restore call', async () => {
+    const { calls } = restoring()
+    await bootEmulator({ module: {}, pkg, mhz: 120, jit: false, sectors: new Uint8Array(0) })
+    expect(calls).toEqual(['boot'])
+  })
+
+  it('a rejected restore fails the boot as flash-corrupt', async () => {
+    restoring(1)
+    await expect(bootEmulator({ module: {}, pkg, mhz: 120, jit: false, sectors: new Uint8Array(4100) }))
+      .rejects.toMatchObject({ reason: 'flash-corrupt' })
   })
 })

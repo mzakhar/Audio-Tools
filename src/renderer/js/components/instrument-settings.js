@@ -164,7 +164,8 @@ export class InstrumentSettings {
     if (!installed.some(record => record.id === descriptor.firmwareHash)) option(firmware, descriptor.firmwareHash || '', 'Missing firmware')
     for (const record of installed) option(firmware, record.id, record.name)
     firmware.value = descriptor.firmwareHash || ''
-    firmware.onchange = () => this.set({ ...instrument, firmwareHash: firmware.value })
+    // Saved device state belongs to one firmware: a different firmware starts from its defaults.
+    firmware.onchange = () => { const { flashAssetId, ...rest } = instrument; this.set({ ...rest, firmwareHash: firmware.value }) }
 
     const channel = document.createElement('select')
     channel.setAttribute('aria-label', 'Device channel')
@@ -189,7 +190,7 @@ export class InstrumentSettings {
     if (!installed.length) this.bodyEl.append(note('No firmware installed. Use FM-1 firmware… in the ⋯ menu.'))
     const warning = slowWarning(descriptor.mhz, this.deps.fm1Compat?.(descriptor.firmwareHash))
     if (warning) this.bodyEl.append(note(warning))
-    this.bodyEl.append(open, note('Saves on the device are not kept yet.'))
+    this.bodyEl.append(open, note('Saves on the device are kept when the project is saved to a folder.'))
   }
 
   renderInternal(instrument) {

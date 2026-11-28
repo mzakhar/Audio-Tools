@@ -7,14 +7,19 @@ import { createFm1Session } from './session.js'
 const defaultWorker = () => new Worker(new URL('../workers/fm1-worker.js', import.meta.url), { type: 'module' })
 const defaultWorkletNode = (ctx) => new AudioWorkletNode(ctx, 'fm1', { numberOfInputs: 0, outputChannelCount: [2] })
 
-const normalize = (d) => ({ type: 'fm1', firmwareHash: d.firmwareHash, deviceChannel: d.deviceChannel ?? 0, mhz: d.mhz ?? 120 })
+// flashAssetId rides along for the session's boot but is not identity: a save that points the
+// track at a new asset must not reboot its device.
+const normalize = (d) => ({
+  type: 'fm1', firmwareHash: d.firmwareHash, deviceChannel: d.deviceChannel ?? 0, mhz: d.mhz ?? 120,
+  ...(d.flashAssetId != null ? { flashAssetId: d.flashAssetId } : {}),   // a bad id fails the boot (flash-corrupt)
+})
 const same = (a, b) => a.firmwareHash === b.firmwareHash && a.deviceChannel === b.deviceChannel && a.mhz === b.mhz
 
 // getWasmBytes (optional, () => Promise<ArrayBuffer>): the worklet path posts bytes, since a
 // compiled Module does not cross into a worklet scope everywhere. Without it the worklet is sent
 // the Module and falls back to the Worker path where that fails.
 export function createFm1Sessions({
-  ctx, getModule, getWasmBytes, readFirmware, preferWorklet = () => false, workletUrl, now,
+  ctx, getModule, getWasmBytes, readFirmware, readFlash, preferWorklet = () => false, workletUrl, now,
   createWorker = defaultWorker, createWorkletNode = defaultWorkletNode, leadMs,
 }) {
   const sessions = new Map()
@@ -50,7 +55,7 @@ export function createFm1Sessions({
       // ponytail: a fixed limit of one; budget by mhz/measured rtf if light firmware needs two.
       const workletBusy = [...sessions.values()].some(other => other.path === 'worklet' && !['failed', 'disposed'].includes(other.status().state))
       const session = createFm1Session({
-        ctx, key, descriptor: d, output, getModule, getWasmBytes, readFirmware, now, leadMs,
+        ctx, key, descriptor: d, output, getModule, getWasmBytes, readFirmware, readFlash, now, leadMs,
         useWorklet: !!(preferWorklet() && ctx.audioWorklet && workletUrl && !workletBusy),
         loadWorklet, createWorker, createWorkletNode,
       })
@@ -70,6 +75,13 @@ export function createFm1Sessions({
     release,
     disposeAll() { for (const key of [...sessions.keys()]) release(key) },
     panicAll() { for (const s of sessions.values()) s.panic() },
+    // Flash snapshots of every ready track device (audition keys excluded), for a project save.
+    // -> Map<key, snapshotFlash result + { session }>; a device that is not ready is left out (keeps
+    // its asset). `session` is the device snapshotted, so a save marks only that one saved.
+    async snapshotAll() {
+      const live = [...sessions].filter(([key, s]) => !String(key).startsWith('audition') && s.status().state === 'ready')
+      return new Map(await Promise.all(live.map(async ([key, s]) => [key, { ...await s.snapshotFlash(), session: s }])))
+    },
   }
   return api
 }
