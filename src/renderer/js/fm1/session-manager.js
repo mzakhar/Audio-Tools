@@ -1,0 +1,58 @@
+// One FM-1 session per key (a track id, or 'audition'), shared by live play, timeline playback
+// and the device panel. Lives outside the live-instrument cache so rebuilding an adapter or a
+// panic never reboots a device.
+import { createFm1Session } from './session.js'
+
+const defaultWorker = () => new Worker(new URL('../workers/fm1-worker.js', import.meta.url), { type: 'module' })
+const defaultWorkletNode = (ctx) => new AudioWorkletNode(ctx, 'fm1', { numberOfInputs: 0, outputChannelCount: [2] })
+
+const normalize = (d) => ({ type: 'fm1', firmwareHash: d.firmwareHash, deviceChannel: d.deviceChannel ?? 0, mhz: d.mhz ?? 120 })
+const same = (a, b) => a.firmwareHash === b.firmwareHash && a.deviceChannel === b.deviceChannel && a.mhz === b.mhz
+
+// getWasmBytes (optional, () => Promise<ArrayBuffer>): the worklet path posts bytes, since a
+// compiled Module does not cross into a worklet scope everywhere. Without it the worklet is sent
+// the Module and falls back to the Worker path where that fails.
+export function createFm1Sessions({
+  ctx, getModule, getWasmBytes, readFirmware, preferWorklet = () => false, workletUrl, now,
+  createWorker = defaultWorker, createWorkletNode = defaultWorkletNode, leadMs,
+}) {
+  const sessions = new Map()
+  let workletLoad = null
+  const loadWorklet = () => {
+    workletLoad ||= ctx.audioWorklet.addModule(workletUrl).catch((e) => { workletLoad = null; throw e })
+    return workletLoad
+  }
+
+  function release(key) {
+    sessions.get(key)?.dispose()
+    sessions.delete(key)
+  }
+
+  return {
+    // Same key and descriptor -> the existing session (re-pointed at output). A different
+    // descriptor, or a session that failed or was disposed, is replaced by a fresh boot.
+    acquire(key, descriptor, output) {
+      const d = normalize(descriptor)
+      const s = sessions.get(key)
+      if (s) {
+        const { state } = s.status()
+        if (state !== 'failed' && state !== 'disposed' && same(s.descriptor, d)) {
+          if (output && output !== s.output) s.connect(output)
+          return s
+        }
+        s.dispose()
+      }
+      const session = createFm1Session({
+        ctx, key, descriptor: d, output, getModule, getWasmBytes, readFirmware, now, leadMs,
+        useWorklet: !!(preferWorklet() && ctx.audioWorklet && workletUrl),
+        loadWorklet, createWorker, createWorkletNode,
+      })
+      sessions.set(key, session)
+      return session
+    },
+    get: (key) => sessions.get(key) ?? null,
+    release,
+    disposeAll() { for (const key of [...sessions.keys()]) release(key) },
+    panicAll() { for (const s of sessions.values()) s.panic() },
+  }
+}
