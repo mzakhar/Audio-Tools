@@ -21,6 +21,7 @@ This is a compatibility target, not a claim that every existing or future packag
 | 4 — Project persistence and portability | planned | Exact firmware and per-track flash restore safely; missing assets recover. |
 | 5 — Offline bounce and transport | planned | Mixed projects bounce without silent omissions; supported sync is explicit. |
 | 6 — Compatibility and release | planned | Real environment tests, licensing review and user documentation pass. |
+| 7 — Download firmware from its source | planned | One-click install of catalog firmware in Electron and on the HTTPS host, verified like a manual import. |
 
 Update this table and decisions after each completed phase. Phase 0 is a gate: no implementation architecture should be represented as verified before it passes.
 
@@ -192,8 +193,35 @@ Implement offline emulator stepping and PCM integration; add optional clock only
 
 Run unit/integration tests, `npm test`, `npm run build`, Electron, HTTPS and LAN smoke tests; document limitations and hardware-specific firmware results. Audit licenses/notices and source offers. Update user guide, catalog provenance and phase table. Release only after project data recovery and audio capture are demonstrated.
 
+### 7 — Download firmware from its source (approved 2026-11-28 as a phase; not built)
+
+Install a catalog firmware with one click instead of download-then-import. Approved by the owner as a deliberate
+network change; it replaces the earlier "no runtime download" rule for this one path only.
+
+- **Where the bytes come from:** the catalog entry's `packageUrl` (the author's GitHub release asset or the Firmware
+  Hub mirror). Synth fetches on the user's click and redistributes nothing.
+- **Electron:** the main process downloads (node fetch, no browser CORS) behind an IPC call that takes a catalog entry
+  id, never a URL from the renderer; main resolves the URL from the bundled/imported catalog it loads itself.
+- **HTTPS host (`synth.zakharhome.org`):** a new route on the existing discovery service, `/api/fm1-firmware`, behind the
+  same Cloudflare Access JWT check as `/api/assistant`. The renderer calls it same-origin, so CSP `connect-src
+  'self'` is unchanged. The service holds its own copy of the seed catalog and only fetches URLs it lists.
+- **LAN http:** not offered (the discovery service is only routed on the external host and the LAN route has no
+  auth; an open fetch proxy on the LAN is not added). The button explains "Download needs the desktop app or
+  https://synth.zakharhome.org; on this address use Import firmware…".
+- **Safety in both fetchers:** host allowlist (`github.com`, `objects.githubusercontent.com` /
+  `release-assets.githubusercontent.com` redirects, `thefirmwarehub.com`); https only; redirects re-checked against
+  the allowlist (max 5); 8 MiB cap enforced while streaming; 30 s timeout; no cookies or auth forwarded. The renderer
+  then runs the same path as a manual import: `parseFwsc` validation, SHA-256, `install()`. When the catalog has a
+  `sha256`, a mismatch is rejected and nothing is stored; without one, the row is installed and labelled
+  "unverified download".
+- **UI:** "Download and install" on not-installed catalog rows in the FM-1 firmware dialog (progress, cancel, the
+  error reason); the instrument settings firmware select offers not-installed catalog entries with the same action.
+- **Tests:** allowlist and redirect handling, cap and timeout, hash mismatch, unverified label, the Access check on
+  the service route, IPC refuses unknown entry ids, LAN message, no renderer fetch to any non-same-origin URL.
+- **Deploy:** discovery service image/route change in this repo plus the fleet pin; no new secrets.
+
 ## Non-goals and unresolved decisions
 
-No physical FM-1 flashing, BLE/USB peripheral emulation promise, external catalog fetching, universal firmware support, automatic sample-to-MIDI extraction, full panel automation or universal tempo sync. Future work may add these after independent decisions.
+No physical FM-1 flashing, BLE/USB peripheral emulation promise, external catalog fetching (firmware package download is phase 7), universal firmware support, automatic sample-to-MIDI extraction, full panel automation or universal tempo sync. Future work may add these after independent decisions.
 
 Open gates: proven WASM/JIT CSP policy; viable insecure-HTTP audio fallback; source and licensing of bundled packages; snapshot/flash format and asset location; offline stepping and deterministic event ordering; capture API and practical latency; supported firmware clock protocol. Phase 0 supplies evidence, not assumed answers.
