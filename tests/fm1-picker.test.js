@@ -171,12 +171,12 @@ describe('instrument settings FM-1 source', () => {
     expect(select('Firmware').selectedOptions[0].textContent).toBe('Missing firmware')
   })
 
-  it('choosing FM-1 with no firmware installed explains why instead of silently snapping back', () => {
+  it('choosing FM-1 with no firmware installed offers the firmware picker', () => {
     deps.fm1Installed = () => []
     change(select('Instrument source'), 'fm1')
     expect(dispatched).toHaveLength(0)
-    expect(select('Instrument source').value).toBe('palette')
-    expect(document.getElementById('is-body').textContent).toMatch(/No FM-1 firmware installed. Open FM-1 firmware… to import one./)
+    expect(select('Instrument source').value).toBe('fm1')
+    expect(select('Firmware')).toBeTruthy()
     settings.render()
     expect(document.getElementById('is-body').textContent).not.toMatch(/No FM-1 firmware installed/)
   })

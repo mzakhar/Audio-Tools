@@ -108,6 +108,11 @@ describe('reconcileCatalog', () => {
 })
 
 describe('libraryRows / filterRows', () => {
+  it('links unhashed downloads to their catalog entry', () => {
+    const rows = libraryRows({ catalogs: [cat([entry('p/x')], { catalogId: 'seed' })], installed: [{ id: 'sha256:1', sha256: '1', catalogId: 'seed', entryId: 'p/x', unverifiedDownload: true }] })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ installed: true, unverifiedDownload: true, catalogId: 'seed', entryId: 'p/x' })
+  })
   it('dedupes row keys, first wins', () => {
     const a = cat([entry('p/x', { name: 'First' })])
     const b = cat([entry('p/x', { name: 'Second' })])

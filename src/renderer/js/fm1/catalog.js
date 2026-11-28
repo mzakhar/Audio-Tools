@@ -127,8 +127,9 @@ export function libraryRows({ catalogs, installed }) {
   const seen = new Set()
   for (const cat of catalogs) {
     for (const e of cat.entries) {
-      const rec = e.sha256 && !claimed.has(e.sha256) ? bySha.get(e.sha256) : undefined
-      if (rec) claimed.add(e.sha256)
+      const rec = e.sha256 && !claimed.has(e.sha256) ? bySha.get(e.sha256)
+        : installed.find(r => r.catalogId === cat.catalogId && r.entryId === e.id && !claimed.has(r.sha256))
+      if (rec) claimed.add(rec.sha256)
       const broken = e.compat.status === 'broken'
       const key = rec ? rec.id : `cat:${cat.catalogId}:${e.id}`
       if (seen.has(key)) continue // first wins; keys must be unique in the DOM
@@ -137,6 +138,7 @@ export function libraryRows({ catalogs, installed }) {
         key,
         name: e.name, author: e.author, version: e.version, target: e.target, description: e.description,
         licenseId: e.licenseId, sourceUrl: e.sourceUrl, packageUrl: e.packageUrl, sha256: e.sha256,
+        catalogId: cat.catalogId, entryId: e.id, unverifiedDownload: !!rec?.unverifiedDownload,
         installed: !!rec, origin: 'catalog',
         status: rec ? `installed-${e.compat.status}` : broken ? 'broken' : 'available',
         compat: e.compat,

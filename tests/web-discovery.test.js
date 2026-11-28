@@ -16,7 +16,11 @@ const token = (claims = {}) => {
 }
 const request = (payload, access = token()) => ({ method: 'POST', url: '/api/music-discovery', headers: { 'cf-access-jwt-assertion': access }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(payload)) } })
 const leadRequest = (method, payload, access = token()) => ({ method, url: '/api/music-discovery/leads', headers: { 'cf-access-jwt-assertion': access }, async *[Symbol.asyncIterator]() { if (payload) yield Buffer.from(JSON.stringify(payload)) } })
-const response = () => ({ writeHead: vi.fn(), end: vi.fn() })
+const response = () => {
+  const res = { headersSent: false, end: vi.fn(), write: vi.fn(() => true) }
+  res.writeHead = vi.fn(() => { res.headersSent = true })
+  return res
+}
 const validBrief = { text: 'soul vocal', target: 'sample-loop', sources: ['web'] }
 const freesound = { results: [{ name: 'Soul Vocal', username: 'Ada', url: 'https://freesound.org/people/ada/sounds/1/', license: 'CC0' }] }
 
@@ -25,6 +29,56 @@ function handler(fetchFn, extra = {}) {
 }
 
 describe('web music discovery proxy', () => {
+  it('protects firmware downloads with Access and resolves only seed entries', async () => {
+    const fetchFn = vi.fn(async target => String(target) === `${teamDomain}/cdn-cgi/access/certs`
+      ? { ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }
+      : new Response(new Uint8Array([1, 2, 3])))
+    const firmwareRequest = (payload, access) => ({ ...request(payload, access), url: '/api/fm1-firmware' })
+    const denied = response()
+    await handler(fetchFn)(firmwareRequest({ catalogId: 'synth-seed', entryId: '646timur-cell/pulhra' }, 'invalid'), denied)
+    expect(denied.writeHead).toHaveBeenCalledWith(403, expect.any(Object))
+    expect(fetchFn).not.toHaveBeenCalled()
+    const bad = response()
+    await handler(fetchFn)(firmwareRequest({ catalogId: 'other', entryId: '646timur-cell/pulhra' }, token()), bad)
+    expect(bad.writeHead).toHaveBeenCalledWith(400, expect.any(Object))
+    const good = response()
+    await handler(fetchFn)(firmwareRequest({ catalogId: 'synth-seed', entryId: '646timur-cell/pulhra' }, token()), good)
+    expect(good.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({ 'content-type': 'application/octet-stream' }))
+    expect(Array.from(good.write.mock.calls[0][0])).toEqual([1, 2, 3])
+    expect(good.end).toHaveBeenCalled()
+  })
+
+  it('limits concurrent firmware buffers and releases the slot', async () => {
+    let release
+    const fetchFn = vi.fn(async target => String(target) === `${teamDomain}/cdn-cgi/access/certs`
+      ? { ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }
+      : new Promise(resolve => { release = () => resolve(new Response(new Uint8Array([1]))) }))
+    const run = handler(fetchFn)
+    const firmwareRequest = () => ({ ...request({ catalogId: 'synth-seed', entryId: '646timur-cell/pulhra' }), url: '/api/fm1-firmware' })
+    const first = run(firmwareRequest(), response())
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const second = response()
+    await run(firmwareRequest(), second)
+    expect(second.writeHead).toHaveBeenCalledWith(429, expect.any(Object))
+    release()
+    await first
+    const third = run(firmwareRequest(), response())
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(5))
+    release()
+    await third
+  })
+
+  it('destroys a partial response when upstream exceeds the limit', async () => {
+    const fetchFn = vi.fn(async target => String(target) === `${teamDomain}/cdn-cgi/access/certs`
+      ? { ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }
+      : new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(1)); controller.enqueue(new Uint8Array(8 * 1024 * 1024)); controller.close() } })))
+    const res = response()
+    res.destroy = vi.fn()
+    await handler(fetchFn)({ ...request({ catalogId: 'synth-seed', entryId: '646timur-cell/pulhra' }), url: '/api/fm1-firmware' }, res)
+    expect(res.write).toHaveBeenCalledTimes(1)
+    expect(res.destroy).toHaveBeenCalledOnce()
+    expect(res.end).not.toHaveBeenCalled()
+  })
   it('verifies Access, uses fixed upstream hosts, and returns bounded grounded rows', async () => {
     const fetchFn = vi.fn(async (url, options) => {
       if (String(url) === `${teamDomain}/cdn-cgi/access/certs`) return { ok: true, json: async () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'key-1', use: 'sig' }] }) }

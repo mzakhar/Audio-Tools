@@ -41,7 +41,7 @@ export function createFirmwareStore({ idb = globalThis.indexedDB, hash = sha256H
   })
 
   return {
-    async install({ name, bytes }) {
+    async install({ name, bytes, expectedSha256, catalogId, entryId }) {
       if (!idb) return { ok: false, reason: 'no-storage' }
       try {
         const u8 = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new Uint8Array(bytes)
@@ -49,18 +49,27 @@ export function createFirmwareStore({ idb = globalThis.indexedDB, hash = sha256H
         const parsed = parse(u8)
         if (!parsed.ok) return { ok: false, reason: parsed.reason, ...(parsed.identity ? { identity: parsed.identity } : {}) }
         const sha256 = hash(u8)
+        if (expectedSha256 && sha256 !== expectedSha256) return { ok: false, reason: 'hash-mismatch' }
         const id = `sha256:${sha256}`
         const fileName = String(name ?? '')
         const record = {
           id, sha256, fileName, name: fileName.replace(/\.fwsc$/i, ''),
           identity: parsed.identity, target: parsed.target, product: parsed.product,
-          size: u8.byteLength, importedAt: now()
+          size: u8.byteLength, importedAt: now(),
+          ...(catalogId && entryId ? { catalogId, entryId, unverifiedDownload: !expectedSha256 } : {})
         }
         const tx = (await db()).transaction([PACKAGES, INSTALLED], 'readwrite')
         const finished = done(tx)
         finished.catch(() => {})
         const existing = await request(tx.objectStore(INSTALLED).get(id))
-        if (existing) return { ok: true, id, record: existing, duplicate: true }
+        if (existing) {
+          if (catalogId && entryId && !existing.catalogId) {
+            Object.assign(existing, { catalogId, entryId, unverifiedDownload: !expectedSha256 })
+            tx.objectStore(INSTALLED).put(existing, id)
+          }
+          await finished
+          return { ok: true, id, record: existing, duplicate: true }
+        }
         tx.objectStore(PACKAGES).put(u8.slice().buffer, id) // exact copy: a view over a larger buffer must not store the whole buffer
         tx.objectStore(INSTALLED).put(record, id)
         await finished
