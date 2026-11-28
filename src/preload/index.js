@@ -45,3 +45,14 @@ contextBridge.exposeInMainWorld('dawAssistant', {
   propose: (prompt, digest, providerId) => ipcRenderer.invoke('dawAssistant:propose', { prompt, digest, providerId }),
   ask: (prompt, digest) => ipcRenderer.invoke('dawAssistant:ask', { prompt, digest }),
 })
+
+contextBridge.exposeInMainWorld('fm1Firmware', {
+  importCatalog: () => ipcRenderer.invoke('fm1:importCatalog'),
+  download: (catalogId, entryId, requestId) => ipcRenderer.invoke('fm1:download', catalogId, entryId, requestId),
+  cancel: requestId => ipcRenderer.invoke('fm1:cancel', requestId),
+  onProgress: listener => {
+    const callback = (_event, payload) => listener(payload)
+    ipcRenderer.on('fm1:progress', callback)
+    return () => ipcRenderer.removeListener('fm1:progress', callback)
+  },
+})

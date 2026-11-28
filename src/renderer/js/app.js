@@ -211,7 +211,7 @@ async function warmPack(pack, patch) {
 // One emulated device per track, owned by the session manager (created on first
 // use, once the AudioContext exists) so live play, the timeline and the device
 // panel share it. The firmware store is shared with the library dialog.
-const _fm1 = { store: null, sessions: null, module: null, dialog: null, installed: [], compat: new Map(), tracked: new Map(), loaded: false, seed: null, saveCommit: false }
+const _fm1 = { store: null, sessions: null, module: null, dialog: null, installed: [], rows: [], compat: new Map(), tracked: new Map(), loaded: false, seed: null, saveCommit: false }
 
 function fm1Store() { return _fm1.store ??= createFirmwareStore() }
 
@@ -252,9 +252,10 @@ async function refreshFm1Cache() {
     _fm1.seed ??= (await import('./fm1/seed-catalog.json')).default
     const rows = libraryRows({ catalogs: [...catalogs, _fm1.seed], installed })
     const compat = new Map(rows.filter(row => row.installedId && row.compat).map(row => [row.installedId, row.compat]))
-    const changed = JSON.stringify([installed.map(record => [record.id, record.name]), [...compat]])
-      !== JSON.stringify([_fm1.installed.map(record => [record.id, record.name]), [..._fm1.compat]])
+    const changed = JSON.stringify([installed.map(record => [record.id, record.name]), [...compat], rows.map(row => row.key)])
+      !== JSON.stringify([_fm1.installed.map(record => [record.id, record.name]), [..._fm1.compat], _fm1.rows.map(row => row.key)])
     _fm1.installed = installed
+    _fm1.rows = rows
     _fm1.compat = compat
     if (changed) { renderInstrumentSlot(); _instrumentBrowser?.refresh(); _arrangementView?.render() }
     return changed
@@ -2743,6 +2744,8 @@ function boot() {
     packCatalog: () => _packCatalog,
     warmPack: (pack, patch) => warmPack(pack, patch).catch(() => {}),
     fm1Installed: () => _fm1.installed,
+    fm1CatalogRows: () => _fm1.rows,
+    fm1Store: fm1Store(),
     fm1Compat: hash => _fm1.compat.get(hash) ?? null,
     openFm1Device,
     refreshFm1: refreshFm1Cache

@@ -16,6 +16,14 @@ const make = (opts = {}) => {
 }
 
 describe('firmware store', () => {
+  it('rejects a mismatched catalog hash before saving and marks unhashed downloads', async () => {
+    const { store } = make()
+    const bytes = buf(7)
+    expect(await store.install({ name: 'x.fwsc', bytes, expectedSha256: 'f'.repeat(64) })).toMatchObject({ ok: false, reason: 'hash-mismatch' })
+    expect(await store.list()).toEqual([])
+    const result = await store.install({ name: 'x.fwsc', bytes, catalogId: 'seed', entryId: 'p/x' })
+    expect(result.record).toMatchObject({ catalogId: 'seed', entryId: 'p/x', unverifiedDownload: true })
+  })
   it('install -> list/read round trip with the exact bytes', async () => {
     const { store } = make()
     const bytes = buf(7, 1, 2)

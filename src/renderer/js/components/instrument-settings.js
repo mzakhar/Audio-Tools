@@ -7,6 +7,7 @@ import { kitFor, DEFAULT_KIT_ID } from '../pads/kit.js'
 import { openDialog } from '../ui/dialog.js'
 import { SetTrackInstrument, SetTrackMidiChannel } from '../store/ProjectStore.js'
 import { fm1Descriptor, fm1InstrumentFor, FM1_MHZ_CHOICES, slowWarning } from '../fm1/descriptor.js'
+import { downloadFirmware } from '../fm1/download.js'
 
 export const SETTINGS_DIALOG_ID = 'instrument-settings-dialog'
 
@@ -140,13 +141,15 @@ export class InstrumentSettings {
       if (source.value === 'fm1') {
         const record = this.deps.fm1Installed?.()[0]
         if (record) this.set(fm1InstrumentFor(record, keep))
-        else { this.fm1Missing = true; this.render() }   // nothing to switch to: say why, once
+        else { this.fm1Missing = true; this.render() }
       }
     }
     this.bodyEl.append(field('Source', source))
     if (this.fm1Missing) {
       this.fm1Missing = false
-      this.bodyEl.append(note('No FM-1 firmware installed. Open FM-1 firmware… to import one.'))
+      source.value = 'fm1'
+      this.renderFm1(track, { type: 'fm1' })
+      return
     }
 
     if (instrument.type === 'pack') this.renderPack(instrument, packs)
@@ -157,15 +160,34 @@ export class InstrumentSettings {
   }
 
   renderFm1(track, instrument) {
+    const originalInstrument = track.instrument
     const installed = this.deps.fm1Installed?.() || []
     const descriptor = fm1Descriptor(instrument)
     const firmware = document.createElement('select')
     firmware.setAttribute('aria-label', 'Firmware')
     if (!installed.some(record => record.id === descriptor.firmwareHash)) option(firmware, descriptor.firmwareHash || '', 'Missing firmware')
     for (const record of installed) option(firmware, record.id, record.name)
+    const available = (this.deps.fm1CatalogRows?.() || []).filter(row => !row.installed && row.packageUrl)
+    for (const row of available) option(firmware, row.key, `${row.name} — download`)
     firmware.value = descriptor.firmwareHash || ''
     // Saved device state belongs to one firmware: a different firmware starts from its defaults.
-    firmware.onchange = () => { const { flashAssetId, ...rest } = instrument; this.set({ ...rest, firmwareHash: firmware.value }) }
+    firmware.onchange = async () => {
+      const row = available.find(item => item.key === firmware.value)
+      const select = hash => { const { flashAssetId, ...rest } = instrument; this.set({ ...rest, firmwareHash: hash }) }
+      if (!row) return select(firmware.value)
+      const controller = new AbortController(), status = note('Downloading…'), cancel = document.createElement('button')
+      cancel.type = 'button'; cancel.textContent = 'Cancel download'; cancel.onclick = () => controller.abort()
+      firmware.disabled = true; this.bodyEl.append(status, cancel)
+      try {
+        const bytes = await downloadFirmware(row, { signal: controller.signal, progress: n => { status.textContent = `Downloaded ${n} bytes` } })
+        if (controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError')
+        const result = await this.deps.fm1Store.install({ name: `${row.name}.fwsc`, bytes, expectedSha256: row.sha256, catalogId: row.catalogId, entryId: row.entryId })
+        if (!result.ok) throw new Error(result.reason === 'hash-mismatch' ? 'Downloaded firmware does not match the catalog hash' : `Install failed: ${result.reason}`)
+        await this.deps.refreshFm1?.()
+        if (this.trackId === track.id && this.track()?.instrument === originalInstrument) select(result.id)
+      } catch (e) { status.textContent = controller.signal.aborted ? 'Download cancelled' : e.message }
+      finally { firmware.disabled = false; cancel.remove() }
+    }
 
     const channel = document.createElement('select')
     channel.setAttribute('aria-label', 'Device channel')

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } from 'electron'
 import { join, resolve, dirname, relative } from 'path'
-import { readFile, writeFile, mkdir, copyFile } from 'fs/promises'
+import { readFile, writeFile, mkdir, copyFile, stat } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { importSf2Pack, importSf2Preset, listInstrumentPacks, readInstrumentSample } from './instrument-packs.js'
 import { addSoundFontFolder, listSoundFontFolders, removeSoundFontFolder, scanSoundFontFolders } from './soundfont-folders.js'
@@ -12,6 +12,8 @@ import { safeOpenUrl } from '../shared/music-discovery/contracts.js'
 import { loadFreesound, saveFreesound } from './music-discovery/freesound-connection.js'
 import { freesoundPreviewUrl } from './music-discovery/freesound.js'
 import { readFm1Flash, writeFm1Flash, createProjectDirs } from './fm1-flash-files.js'
+import { loadFm1Catalog, importFm1Catalog } from './fm1-catalogs.js'
+import { downloadFm1Firmware } from '../shared/fm1-download.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -200,6 +202,30 @@ ipcMain.handle('fs:exportRackPatch', async (_event, json, defaultName) => {
   await writeFile(filePath, json, 'utf-8')
   return filePath
 })
+
+const fm1Downloads = new Map()
+ipcMain.handle('fm1:importCatalog', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog({ filters: [{ name: 'FM-1 catalog', extensions: ['json'] }], properties: ['openFile'] })
+  if (canceled || !filePaths[0]) return null
+  if ((await stat(filePaths[0])).size > 2 * 1024 * 1024) throw new Error('Catalog is over 2 MB')
+  const data = await readFile(filePaths[0])
+  if (data.byteLength > 2 * 1024 * 1024) throw new Error('Catalog is over 2 MB')
+  return importFm1Catalog(app.getPath('userData'), data.toString('utf8'))
+})
+ipcMain.handle('fm1:download', async (event, catalogId, entryId, requestId) => {
+  if (typeof requestId !== 'string' || requestId.length > 100 || !requestId) throw new Error('Invalid request')
+  const key = `${event.sender.id}:${requestId}`
+  if (fm1Downloads.has(key)) throw new Error('Download already running')
+  const controller = new AbortController()
+  fm1Downloads.set(key, controller)
+  try {
+    const catalog = await loadFm1Catalog(app.getPath('userData'), catalogId)
+    return await downloadFm1Firmware(entryId, catalog, { signal: controller.signal, onProgress: (loaded, total) => {
+      if (!event.sender.isDestroyed()) event.sender.send('fm1:progress', { requestId, loaded, total })
+    } })
+  } finally { fm1Downloads.delete(key) }
+})
+ipcMain.handle('fm1:cancel', (event, requestId) => fm1Downloads.get(`${event.sender.id}:${requestId}`)?.abort())
 
 ipcMain.handle('dialog:showOpen', async (_event, options) => {
   const result = await dialog.showOpenDialog(options)

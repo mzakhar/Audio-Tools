@@ -1,4 +1,5 @@
 import { createPublicKey, verify as verifySignature } from 'node:crypto'
+import { once } from 'node:events'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { normalizeBrief, rankCandidates, validateCandidate } from '../shared/music-discovery/contracts.js'
@@ -6,6 +7,7 @@ import { createOpenAIWebSearchAdapter } from '../main/music-discovery/openai-web
 import { validatePlanShape } from '../shared/daw-assistant/plan.js'
 import { clampDigest } from '../shared/daw-assistant/digest.js'
 import { MODES, validateAnswerShape } from '../shared/daw-assistant/ask.js'
+import { downloadFm1Firmware } from '../shared/fm1-download.js'
 import {
   ASSISTANT_ASK_INSTRUCTIONS, ASSISTANT_ASK_SCHEMA, ASSISTANT_INSTRUCTIONS, ASSISTANT_PLAN_SCHEMA,
   assistantModelCall,
@@ -169,6 +171,7 @@ export function createWebDiscoveryHandler(options = {}) {
   }
   // One pod. Serialize read-modify-write so two saves cannot lose a lead.
   let leadWrites = Promise.resolve()
+  let firmwareBusy = false
   const saveSharedLead = (payload, identity) => {
     const next = leadWrites.then(async () => {
       const lead = leadFor(payload, identity)
@@ -181,10 +184,32 @@ export function createWebDiscoveryHandler(options = {}) {
   }
   return async (req, res) => {
     const path = new URL(req.url || '/', 'http://origin').pathname
-    if (!['/api/music-discovery', '/api/music-discovery/leads', '/api/assistant'].includes(path)) return send(res, 404, { error: 'Not found' })
+    if (!['/api/music-discovery', '/api/music-discovery/leads', '/api/assistant', '/api/fm1-firmware'].includes(path)) return send(res, 404, { error: 'Not found' })
     try {
       const identity = await accessIdentity(req.headers?.['cf-access-jwt-assertion'], { teamDomain, audience, fetchFn, now })
       if (!withinLimit(identity, path)) return send(res, 429, { error: 'Too many requests' })
+      if (path === '/api/fm1-firmware') {
+        if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' })
+        const payload = await body(req)
+        if (payload?.catalogId !== 'synth-seed' || typeof payload?.entryId !== 'string') return send(res, 400, { error: 'Unknown firmware entry' })
+        if (firmwareBusy) return send(res, 429, { error: 'Another firmware download is in progress' })
+        firmwareBusy = true
+        const controller = new AbortController()
+        const cancel = () => { if (!res.writableEnded) controller.abort() }
+        res.once?.('close', cancel)
+        try {
+          const catalog = JSON.parse(await readFile(join(process.cwd(), 'src/renderer/js/fm1/seed-catalog.json'), 'utf8'))
+          await downloadFm1Firmware(payload.entryId, catalog, { fetchFn, signal: controller.signal, onChunk: async (chunk, length, signal) => {
+            if (!res.headersSent) res.writeHead(200, { 'content-type': 'application/octet-stream', ...(length ? { 'content-length': length } : {}), 'cache-control': 'no-store' })
+            if (!res.write(chunk)) await once(res, 'drain', { signal })
+          } })
+          if (!res.headersSent) res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' })
+          return res.end()
+        } catch (error) {
+          if (res.headersSent) { res.destroy(); return }
+          throw error
+        } finally { firmwareBusy = false; res.off?.('close', cancel) }
+      }
       if (path === '/api/music-discovery/leads') {
         if (req.method === 'GET') return send(res, 200, { leads: await readLeads(dataDir) })
         if (req.method === 'POST') return send(res, 201, { lead: await saveSharedLead(await body(req), identity) })
