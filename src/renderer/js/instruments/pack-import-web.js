@@ -8,11 +8,11 @@ export const MAX_SF2_BYTES = 128 * 1024 * 1024
 const MAX_SAMPLES = 4096
 
 /** Hidden input, created per use — a permanent one in index.html keeps a file handle alive. */
-export function pickSf2File() {
+export function pickFile(accept) {
   return new Promise(resolve => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.sf2,.sf3'
+    input.accept = accept
     input.style.display = 'none'
     document.body.appendChild(input)
     const finish = value => { input.remove(); resolve(value) }
@@ -21,6 +21,8 @@ export function pickSf2File() {
     input.click()
   })
 }
+
+export const pickSf2File = () => pickFile('.sf2,.sf3')
 
 /** `presets` is a list of phdr indices; null converts the whole bank. */
 export function parseInWorker(bytes, name, presets = null) {

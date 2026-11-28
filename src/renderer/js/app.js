@@ -800,6 +800,27 @@ async function putUserSample(sample) {
   if (store) missesOf(store).delete(stored.id)
   return stored
 }
+let _fm1Library = null
+/** Lazy: the store, dialog and seed catalog load on first open. */
+async function openFm1Library() {
+  if (!_fm1Library) {
+    const [{ createFirmwareStore }, { createFm1LibraryDialog }, { pickFile }, seed] = await Promise.all([
+      import('./fm1/firmware-store.js'),
+      import('./components/fm1-library-dialog.js'),
+      import('./instruments/pack-import-web.js'),
+      import('./fm1/seed-catalog.json')
+    ])
+    _fm1Library = createFm1LibraryDialog({
+      store: createFirmwareStore(),
+      seedCatalog: seed.default,
+      toast: showToast,
+      pickFile: () => pickFile('.fwsc'),
+      pickCatalogFile: () => pickFile('.json')
+    })
+  }
+  return _fm1Library.open()
+}
+
 let _sliceDialog = null
 
 /** File -> { bytes, buffer, name } or { error } (a short message for the toast). Never throws. */
@@ -1347,6 +1368,7 @@ function initCommandBar() {
   COMMANDS['midi-setup'] = () => openDialog('midi-setup-dialog')
   COMMANDS['controller-map'] = () => _controllerLearn?.open()
   COMMANDS['lessons'] = () => openLessons()
+  COMMANDS['fm1-library'] = () => openFm1Library()
   COMMANDS['mixer'] = () => toggleMixer()
   // No listener yet for these two — the instrument agent wires them.
   COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
