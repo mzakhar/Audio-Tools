@@ -67,3 +67,10 @@ it('lists Lessons in setup, always visible', () => {
   const item = commandItems({}).find(i => i.id === 'lessons')
   expect(item).toMatchObject({ group: 'setup', enabled: true, visible: true })
 })
+
+it('fm1-record needs an open project and an armed FM-1 track', () => {
+  const find = opts => commandItems(opts).find(i => i.id === 'fm1-record')
+  expect(find({ projectOpen: true, fm1Armed: true })).toMatchObject({ label: 'Record FM-1 to audio track…', group: 'setup', enabled: true, visible: true })
+  expect(find({ projectOpen: true, fm1Armed: false }).enabled).toBe(false)
+  expect(find({ projectOpen: false, fm1Armed: true }).enabled).toBe(false)
+})
