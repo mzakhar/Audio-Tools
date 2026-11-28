@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   framesAt, createEventQueue, createKeyHold, createResampler, rgb565ToRgba,
-  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, bootCheck,
+  noteOnBytes, noteOffBytes, allNotesOffBytes, overload, createBlockWriter, createBootWatch,
 } from '../src/renderer/js/fm1/host-core.js'
 
 describe('framesAt', () => {
@@ -164,11 +164,20 @@ describe('createBlockWriter (Worker path: 44.1 kHz -> context rate, fixed blocks
   })
 })
 
-describe('bootCheck', () => {
-  it('up once the firmware fills audio frames, timeout after 8 s, else still booting', () => {
-    expect(bootCheck({ have: 0, ms: 100 })).toBeNull()
-    expect(bootCheck({ have: 128, ms: 100 })).toBe('up')
-    expect(bootCheck({ have: 128, ms: 9000 })).toBe('up')
-    expect(bootCheck({ have: 0, ms: 8000 })).toBe('timeout')
+describe('createBootWatch', () => {
+  it('up at the first LCD redraw >= 100 ms after audio started; redraws before audio do not count', () => {
+    const w = createBootWatch()
+    expect(w({ have: 0, lcdRev: 1, ms: 60 })).toBeNull()       // splash before audio
+    expect(w({ have: 0, lcdRev: 2, ms: 200 })).toBeNull()
+    expect(w({ have: 128, lcdRev: 3, ms: 320 })).toBeNull()    // audio starts (same render redraw)
+    expect(w({ have: 128, lcdRev: 4, ms: 380 })).toBeNull()    // too soon
+    expect(w({ have: 128, lcdRev: 4, ms: 700 })).toBeNull()    // no redraw
+    expect(w({ have: 128, lcdRev: 5, ms: 796 })).toBe('up')
+  })
+  it('timeout after 8 s emulated', () => {
+    const w = createBootWatch()
+    expect(w({ have: 128, lcdRev: 1, ms: 300 })).toBeNull()
+    expect(w({ have: 128, lcdRev: 1, ms: 8000 })).toBe('timeout')
+    expect(createBootWatch()({ have: 0, lcdRev: 1, ms: 8000 })).toBe('timeout')
   })
 })

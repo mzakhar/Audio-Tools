@@ -243,7 +243,7 @@ async function refreshFm1Cache() {
       !== JSON.stringify([_fm1.installed.map(record => [record.id, record.name]), [..._fm1.compat]])
     _fm1.installed = installed
     _fm1.compat = compat
-    if (changed) { renderInstrumentSlot(); _instrumentBrowser?.refresh() }
+    if (changed) { renderInstrumentSlot(); _instrumentBrowser?.refresh(); _arrangementView?.render() }
     return changed
   } catch (error) {
     console.warn('Could not read FM-1 firmware:', error)
@@ -275,6 +275,9 @@ function disposeFm1() {
   _fm1.sessions?.disposeAll()
   _fm1.tracked.clear()
 }
+// Leaving the page ends every device too: Workers and worklet nodes must not outlive it.
+// (Pagehide, not beforeunload: it also fires on bfcache entry and mobile tab discard.)
+window.addEventListener('pagehide', disposeFm1)
 
 /** Deps for instrumentFor/liveInstrumentFor — one shape, every call site, so
  *  an audition cannot be built differently from the thing it auditions. */
@@ -2436,7 +2439,8 @@ function boot() {
     _arrangementView = new ArrangementView(container, {
       store: ProjectStore,
       audioStore: AudioStore,
-      packCatalog: () => _packCatalog
+      packCatalog: () => _packCatalog,
+      fm1Installed: () => _fm1.installed
     })
   }
   _instrumentSettings = new InstrumentSettings({

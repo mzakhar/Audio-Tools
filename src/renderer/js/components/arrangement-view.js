@@ -144,10 +144,11 @@ export function hitTestClip(clip, mouseX, trackY, ppb, scrollLeft, trackHeaderW,
 }
 
 export class ArrangementView {
-  constructor(container, { store, audioStore, packCatalog } = {}) {
+  constructor(container, { store, audioStore, packCatalog, fm1Installed } = {}) {
     this._store = store || ProjectStore
     this._audioStore = audioStore || AudioStore
     this._packCatalog = packCatalog || (() => [])
+    this._fm1Installed = fm1Installed || (() => [])
     this._container = container
 
     this._ppb = DEFAULT_PPB
@@ -678,10 +679,10 @@ export class ArrangementView {
       instrumentChip.style.display = isMidi ? '' : 'none'
       instrumentGear.style.display = isMidi ? '' : 'none'
       if (isMidi) {
-        const label = trackInstrumentLabel(track.instrument, this._packCatalog)
+        const label = trackInstrumentLabel(track.instrument, this._packCatalog, this._fm1Installed)
         instrumentChip.textContent = label
         instrumentChip.title = `${label} — click to change`
-        instrumentChip.className = 'track-instrument-chip' + (label.startsWith('Missing:') ? ' missing' : '')
+        instrumentChip.className = 'track-instrument-chip' + (label.startsWith('Missing') ? ' missing' : '')
         const arm = () => document.dispatchEvent(new CustomEvent('track-selected', { detail: { trackId: track.id } }))
         instrumentChip.onclick = () => { arm(); document.dispatchEvent(new CustomEvent('open-instrument-browser')) }
         instrumentGear.title = 'Instrument settings'

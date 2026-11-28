@@ -61,10 +61,12 @@ describe('emulator runner', () => {
 })
 
 describe('bootToReady', () => {
-  it('renders until the firmware makes sound, and reports a halt', () => {
-    const x = fakeFm1Exports({ silentFor: 3 })
+  it('renders until audio started and the UI redrew, and reports a halt', () => {
+    const x = fakeFm1Exports({ silentFor: 3, ms: () => x.rendered.length * 50 })
+    const rev = x.fm1_lcd_revision
+    x.fm1_lcd_revision = () => (x.rendered.length >= 8 ? 2 : rev())
     expect(bootToReady(createRunner(x, { mhz: 120 }), x)).toBe('up')
-    expect(x.rendered).toHaveLength(4)
+    expect(x.rendered).toHaveLength(8)
     let ms = 0
     const slow = fakeFm1Exports({ silentFor: 1e9, ms: () => (ms += 1000) })
     expect(bootToReady(createRunner(slow, { mhz: 120 }), slow)).toBe('timeout')

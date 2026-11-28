@@ -150,12 +150,20 @@ export function createBlockWriter(inRate, outRate, size = 1024) {
   }
 }
 
-// Boot is over once the firmware's audio is up: the first render that fills any frames (have >
-// 0; any non-silent output implies it). A redrawn LCD is not used: on every firmware tried
-// (Felucca, Sloop, FM-1 015, Dock) the first redraw lands ~60-110 ms emulated, well before audio
-// starts (~320 ms). After timeoutMs of emulated time it is called ready anyway ('timeout', which
-// the status reports). Both hosts use this rule; the worklet carries an inline copy.
-export function bootCheck({ have = 0, ms = 0 }, timeoutMs = 8000) {
-  if (have > 0) return 'up'
-  return ms >= timeoutMs ? 'timeout' : null
+// Boot is over once the firmware is up AND taking input. Measured on Felucca, Sloop, FM-1 015 and
+// Dock (node, 120 MHz): audio starts (first render with have > 0) at ~320 ms emulated, but MIDI
+// sent then is lost and panel keys are ignored until the UI comes up, which redraws the LCD again
+// (~540-1410 ms). So: ready at the first LCD revision change at least settleMs after audio
+// started. After timeoutMs of emulated time it is ready anyway ('timeout', which the status
+// reports). Both hosts use this rule; the worklet carries an inline copy.
+export function createBootWatch({ timeoutMs = 8000, settleMs = 100 } = {}) {
+  let audioAt = -1, rev = null
+  return function step({ have = 0, lcdRev, ms = 0 }) {
+    if (audioAt < 0 && have > 0) { audioAt = ms; rev = lcdRev }
+    else if (audioAt >= 0 && lcdRev !== rev) {
+      rev = lcdRev
+      if (ms - audioAt >= settleMs) return 'up'
+    }
+    return ms >= timeoutMs ? 'timeout' : null
+  }
 }

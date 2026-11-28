@@ -4,11 +4,12 @@
 // frames) >= the event's frame. ONE self-contained file: an AudioWorklet does not import modules
 // everywhere, so the JIT host (fm1/jit.js, from fm1-emu web/jit.js, commit 69cb1ef, MIT,
 // Copyright (c) 2026 Joakim Eriksson) and the queue, key hold and resampler (fm1/host-core.js)
-// and bootCheck (fm1/host-core.js) are inline copies. Keep them in step.
+// and createBootWatch (fm1/host-core.js) are inline copies. Keep them in step.
 //
 // Boot runs inside process() at real time (each quantum gets only its own share of emulated
 // cycles), so a booting device never hogs the audio thread other nodes share. `ready` is posted
-// once the firmware's audio is up (bootCheck: the first render that fills frames) or after 8 s of
+// once the firmware is up and taking input (createBootWatch: audio started, then the UI redrew the
+// LCD) or after 8 s of
 // emulated time, flagged timedOut — the same rule as the Worker path.
 //
 // in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame? }   panic { bytes }
@@ -117,9 +118,16 @@ function createResampler(inRate, outRate) {
   }
 }
 
-function bootCheck({ have = 0, ms = 0 }, timeoutMs = 8000) {
-  if (have > 0) return 'up'
-  return ms >= timeoutMs ? 'timeout' : null
+function createBootWatch({ timeoutMs = 8000, settleMs = 100 } = {}) {
+  let audioAt = -1, rev = null
+  return function step({ have = 0, lcdRev, ms = 0 }) {
+    if (audioAt < 0 && have > 0) { audioAt = ms; rev = lcdRev }
+    else if (audioAt >= 0 && lcdRev !== rev) {
+      rev = lcdRev
+      if (ms - audioAt >= settleMs) return 'up'
+    }
+    return ms >= timeoutMs ? 'timeout' : null
+  }
 }
 
 // compiled once per worklet scope, shared by every FM-1 node on the context
@@ -169,6 +177,7 @@ class Fm1Processor extends AudioWorkletProcessor {
     this.mhz = m.mhz
     this.playing = false
     this.booting = true
+    this.bootWatch = createBootWatch()
     this.x = x
   }
 
@@ -218,7 +227,7 @@ class Fm1Processor extends AudioWorkletProcessor {
     const outR = out[1] || new Float32Array(n)
     this.rs.process(l, r, out[0], outR)
     if (this.booting) {
-      const up = bootCheck({ have, ms: x.fm1_ms?.() ?? 0 })
+      const up = this.bootWatch({ have, lcdRev: x.fm1_lcd_revision(), ms: x.fm1_ms?.() ?? 0 })
       if (up) { this.booting = false; this.port.postMessage({ type: 'ready', timedOut: up === 'timeout' }) }
     }
 

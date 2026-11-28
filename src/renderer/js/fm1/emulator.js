@@ -3,7 +3,7 @@
 // (workers/fm1-worker.js) and by the node integration test; the AudioWorklet carries its own copy
 // of this logic (public/worklets/fm1-worklet.js).
 import { jitImports, newJitStats } from './jit.js'
-import { createEventQueue, createKeyHold, bootCheck, FM1_RATE } from './host-core.js'
+import { createEventQueue, createKeyHold, createBootWatch, FM1_RATE } from './host-core.js'
 
 export const CHUNK = 128
 const LCD_PIXELS = 240 * 240
@@ -94,13 +94,14 @@ export function createRunner(x, { mhz, keyHoldFrames = 4410 } = {}) {
   }
 }
 
-// Render until the firmware is up (bootCheck), the boot timeout passes, or it halts.
-// -> 'up' | 'timeout' | 'halted'. Throws what render throws (a trap).
+// Render until the firmware is up and taking input (createBootWatch), the boot timeout passes, or
+// it halts. -> 'up' | 'timeout' | 'halted'. Throws what render throws (a trap).
 export function bootToReady(run, x, timeoutMs = 8000) {
+  const watch = createBootWatch({ timeoutMs })
   for (;;) {
     if (x.fm1_halted()) return 'halted'
     const { have } = run.render()
-    const state = bootCheck({ have, ms: x.fm1_ms() }, timeoutMs)
+    const state = watch({ have, lcdRev: x.fm1_lcd_revision(), ms: x.fm1_ms() })
     if (state) return state
   }
 }

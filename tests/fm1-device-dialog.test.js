@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createFm1DeviceDialog, statusLine, DEVICE_DIALOG_ID } from '../src/renderer/js/components/fm1-device-dialog.js'
 
 const MARKUP = `<dialog id="${DEVICE_DIALOG_ID}"><span id="fm1d-title"></span><div id="fm1d-body"></div></dialog>`
@@ -211,5 +213,28 @@ describe('statusLine', () => {
     expect(statusLine({ state: 'failed', reason: 'halted' })).toMatch(/crashed/)
     expect(statusLine({ state: 'ready' })).toBe('Running')
     expect(statusLine({ state: 'ready', bootTimeout: true })).toMatch(/over 8 s to start/)
+  })
+})
+
+describe('panel layout hit targets', () => {
+  it('no two controls overlap, so every key and button is clickable over its whole box', async () => {
+    const { ENCODERS, POT, BUTTONS, KEYS, LCD } = await import('../src/renderer/js/fm1/panel-layout.js')
+    const box = s => ('r' in s ? { x: s.cx - s.r, y: s.cy - s.r, w: 2 * s.r, h: 2 * s.r } : s)
+    const all = [...ENCODERS, POT, ...BUTTONS, ...KEYS, LCD].map(box)
+    for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+      const a = all[i], b = all[j]
+      const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+      expect(overlap, `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(false)
+    }
+  })
+
+  it('a key holds nothing that takes the pointer: its LED ignores pointer events', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/fm1-device.css'), 'utf8')
+    expect(css).toMatch(/\.fm1d-led\s*\{[^}]*pointer-events:\s*none/)
+    dialog.open('t1')
+    for (const key of document.querySelectorAll('button.fm1d-key')) {
+      expect([...key.children].every(child => child.classList.contains('fm1d-led'))).toBe(true)
+      expect(key.textContent).toBe('')
+    }
   })
 })

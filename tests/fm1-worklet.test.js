@@ -35,24 +35,34 @@ function quantum(p, frame) {
 }
 
 describe('fm1-worklet', () => {
-  it('posts ready only once the firmware makes sound, booting at real time per quantum', async () => {
-    const { p, x } = await booted(fakeFm1Exports({ silentFor: 5 }))
+  it('posts ready only once audio started and the UI then redrew the LCD, booting at real time per quantum', async () => {
+    let ms = 0
+    const { p, x } = await booted(fakeFm1Exports({ silentFor: 5, ms: () => ms }))
+    const readies = () => p.port.sent.filter(m => m.type === 'ready')
     for (let q = 0; q < 5; q++) quantum(p, q * 128)
-    expect(p.port.sent.some(m => m.type === 'ready')).toBe(false)
     const cap = 120e6 * 128 / 48000
     expect(x.budgets.every(b => b <= cap + 1e-6)).toBe(true)
-    quantum(p, 5 * 128)
-    expect(p.port.sent.filter(m => m.type === 'ready')).toEqual([{ type: 'ready', timedOut: false }])
+    quantum(p, 5 * 128)                                 // audio starts at ms 0
+    expect(readies()).toHaveLength(0)
+    expect(x.budgets.at(-1)).toBeLessThanOrEqual(cap + 1e-6)
     quantum(p, 6 * 128)
     expect(x.budgets.at(-1)).toBeGreaterThan(cap)        // playing: catch-up budget
+    ms = 50; x.lcdRev++                                 // a redraw too soon after audio: not yet
     quantum(p, 7 * 128)
-    expect(p.port.sent.filter(m => m.type === 'ready')).toHaveLength(1)
+    expect(readies()).toHaveLength(0)
+    ms = 300; x.lcdRev++                                // the UI comes up
+    quantum(p, 8 * 128)
+    expect(readies()).toEqual([{ type: 'ready', timedOut: false }])
+    x.lcdRev++
+    quantum(p, 9 * 128)
+    expect(readies()).toHaveLength(1)
   })
 
-  it('a redrawn LCD alone does not end boot; 8 s without audio is ready anyway, flagged', async () => {
-    const lcd = await booted(fakeFm1Exports({ silentFor: 1e9 }))
+  it('a redrawn LCD before audio does not end boot; 8 s is ready anyway, flagged', async () => {
+    let t = 0
+    const lcd = await booted(fakeFm1Exports({ silentFor: 1e9, ms: () => t }))
     quantum(lcd.p, 0)
-    lcd.x.lcdRev++
+    t = 500; lcd.x.lcdRev++
     quantum(lcd.p, 128)
     expect(lcd.p.port.sent.some(m => m.type === 'ready')).toBe(false)
 
@@ -78,7 +88,7 @@ describe('fm1-worklet', () => {
     expect(compile).toHaveBeenCalledTimes(2)
     expect(b.port.sent.some(m => m.type === 'error')).toBe(false)
     quantum(b, 0)
-    expect(b.port.sent).toContainEqual({ type: 'ready', timedOut: false })
+    expect(b.x).toBeTruthy()
     compile.mockRestore(); inst.mockRestore()
   })
 

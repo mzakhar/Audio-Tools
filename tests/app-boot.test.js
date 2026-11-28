@@ -62,6 +62,7 @@ class FakeAudioContext {
 
 describe('app boots', () => {
   const errors = []
+  const pagehide = []
 
   beforeAll(async () => {
     document.documentElement.innerHTML = readFileSync(resolve(process.cwd(), 'src/renderer/index.html'), 'utf8')
@@ -89,7 +90,10 @@ describe('app boots', () => {
     const onError = console.error
     console.error = (...args) => { errors.push(args.join(' ')); onError(...args) }
 
+    const addListener = window.addEventListener.bind(window)
+    window.addEventListener = (type, ...rest) => { if (type === 'pagehide') pagehide.push(rest[0]); return addListener(type, ...rest) }
     await import('../src/renderer/js/app.js')
+    window.addEventListener = addListener
     document.dispatchEvent(new Event('DOMContentLoaded'))
     await new Promise(done => setTimeout(done, 50))
   })
@@ -110,6 +114,12 @@ describe('app boots', () => {
       document.querySelector(`.tool-btn[data-tool="${view}"]`).click()
       expect(document.getElementById('main').dataset.view).toBe(view)
     }
+    expect(errors).toEqual([])
+  })
+
+  it('ends every FM-1 device when the page goes away (pagehide)', () => {
+    expect(pagehide).toHaveLength(1)
+    expect(() => window.dispatchEvent(new Event('pagehide'))).not.toThrow()
     expect(errors).toEqual([])
   })
 

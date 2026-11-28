@@ -54,3 +54,57 @@ run('FM-1 real firmware (Felucca 1.8.4, 120 MHz)', () => {
     expect(loud).toBeGreaterThan(quiet * 4 + 1e-4)
   }, 120000)
 })
+
+// The AudioWorklet host itself (the file as shipped, fake AudioWorkletGlobalScope) over the real
+// wasm: the first note right after `ready` must sound, and panel buttons must reach the firmware
+// (FX redraws Felucca's LCD and the worklet posts the new image).
+run('FM-1 real firmware through the worklet host', () => {
+  it('a note sent right after ready sounds; FX changes the LCD', async () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/renderer/public/worklets/fm1-worklet.js'), 'utf8')
+    const saved = ['registerProcessor', 'AudioWorkletProcessor', 'sampleRate', 'currentFrame'].map(k => [k, globalThis[k]])
+    let Processor
+    globalThis.AudioWorkletProcessor = class { constructor() { this.port = { sent: [], postMessage(m) { this.sent.push(m) } } } }
+    globalThis.registerProcessor = (_, cls) => { Processor = cls }
+    globalThis.sampleRate = 48000
+    globalThis.currentFrame = 0
+    try {
+      new Function(src)()
+      const p = new Processor()
+      const wasm = readFileSync(resolve(process.cwd(), 'src/renderer/public/fm1/fm1_web.wasm'))
+      const pkg = readFileSync(fw)
+      const ab = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)
+      p.port.onmessage({ data: { type: 'boot', wasm: ab(wasm), package: ab(pkg), mhz: 120 } })
+      while (!p.x) await new Promise(r => setTimeout(r, 5))
+      const send = data => p.port.onmessage({ data })
+      const quanta = (n) => {
+        let s = 0
+        for (let i = 0; i < n; i++) {
+          const o = [[new Float32Array(128), new Float32Array(128)]]
+          expect(p.process([], o)).toBe(true)
+          globalThis.currentFrame += 128
+          for (const v of o[0][0]) s += v * v
+        }
+        return Math.sqrt(s / (n * 128))
+      }
+      while (!p.port.sent.some(m => m.type === 'ready')) quanta(1)
+      const readyMs = p.x.fm1_ms()
+      send({ type: 'midi', bytes: noteOnBytes(0, 60, 100) })
+      const first = quanta(150)                       // 0.4 s
+      send({ type: 'lcd', on: true })
+      quanta(40)
+      const rev = p.x.fm1_lcd_revision()
+      const before = p.port.sent.length
+      send({ type: 'key', id: 2, down: true })        // FX
+      send({ type: 'key', id: 2, down: false })       // the host holds it 4410 frames
+      quanta(225)                                     // 0.6 s
+      const images = p.port.sent.slice(before).filter(m => m.type === 'lcd' && m.lcd)
+      console.log(`fm1-real worklet: ready at ${readyMs} ms emulated, first-note rms ${first.toExponential(2)}, FX lcd rev ${rev} -> ${p.x.fm1_lcd_revision()}, ${images.length} images posted`)
+      expect(p.port.sent.some(m => m.type === 'error')).toBe(false)
+      expect(first).toBeGreaterThan(1e-3)
+      expect(p.x.fm1_lcd_revision()).not.toBe(rev)
+      expect(images.length).toBeGreaterThan(0)
+    } finally {
+      for (const [k, v] of saved) globalThis[k] = v
+    }
+  }, 120000)
+})
