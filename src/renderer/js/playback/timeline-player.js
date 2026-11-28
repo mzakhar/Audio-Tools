@@ -12,6 +12,9 @@ import { paletteDefaults } from '../palettes.js'
 import { kitFor } from '../pads/kit.js'
 import { kitInstrument } from '../pads/kit-voices.js'
 import { userSampleStoreFor as defaultUserSampleStoreFor } from '../instruments/user-samples.js'
+import { fm1Descriptor, failureText } from '../fm1/descriptor.js'
+
+const FM1_SLACK = 0.03 // seconds of timer jitter on top of the session's own lead
 
 // One note contract for both instrument kinds. Keep scheduling here; only
 // delivery differs, so palette and rack timing cannot drift apart.
@@ -31,7 +34,7 @@ export function rackInstrument(handle, moduleId) {
 }
 
 /** Shared by the timeline and the step sequencer: one scheduled note contract. */
-export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, packInstruments }) {
+export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, packInstruments, fm1Sessions, trackId }) {
   const instrument = track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }
   if (instrument.type === 'pack') {
     const pack = packFor?.(instrument.packId, instrument.packVersion)
@@ -57,6 +60,20 @@ export function instrumentFor(track, { palettes, ctx, output, rackHandles, kits,
     if (!kit) return null
     const inst = kitInstrument(kit, { ctx, output, sampleStore: userSampleStoreFor?.(ctx) })
     return (note, time) => inst.hit(note.pitch, note.velocity ?? 0.8, time)
+  }
+  if (instrument.type === 'fm1') {
+    const key = trackId ?? track.id
+    if (!fm1Sessions || !key) return null
+    // The device runs in its own clock: notes go to it ahead of time with exact
+    // audio times, and the session owns the device, so nothing here disposes it.
+    const session = fm1Sessions.acquire(key, fm1Descriptor(instrument), output)
+    const play = (note, time, stopTime) => {
+      session.noteOn(note.pitch, Math.round((note.velocity ?? 0.8) * 127), time)
+      session.noteOff(note.pitch, stopTime)
+    }
+    play.session = session
+    play.lead = () => session.leadSec + FM1_SLACK
+    return play
   }
   if (instrument.type !== 'palette') return null
   const paletteKey = instrument.paletteKey || track.paletteKey || 'classic'
@@ -87,8 +104,9 @@ const TimelinePlayer = {
   _rackClockTimer: null,
   _instrumentRackHandles: [],
   _packInstruments: [],
+  _fm1Sessions: [],       // device sessions this playback drives; stop() silences, never disposes
 
-  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor }) {
+  play({ beat = 0, bpm, tracks, audioStore, mixerEngine, palettes, rackHandles = [], racks = {}, kits, packFor, sampleStoreFor, fm1Sessions, notify }) {
     this.stop()  // cancel any previous playback
 
     const ctx = AudioEngine.getContext()
@@ -100,6 +118,8 @@ const TimelinePlayer = {
     this._sources = []
     this._midiTimeouts = []
     this._packInstruments = []
+    this._fm1Sessions = []
+    const fm1Problems = []
     this._instrumentRackHandles = tracks
       .filter(track => track.type === 'midi' && track.instrument?.type === 'rack')
       .map(track => ({ track, rack: racks[track.instrument.rackId] }))
@@ -133,8 +153,16 @@ const TimelinePlayer = {
       if (track.type === 'midi') {
         const channelId = track.mixerChannelId
         const output = mixerEngine ? mixerEngine.getOutput(channelId) : AudioEngine.getMasterInput()
-        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, packInstruments: this._packInstruments })
+        const playNote = instrumentFor(track, { palettes, ctx, output, rackHandles, kits, packFor, sampleStoreFor, packInstruments: this._packInstruments, fm1Sessions, trackId: track.id })
+        if (track.instrument?.type === 'fm1') {
+          const status = playNote?.session.status()
+          if (!playNote) fm1Problems.push(`${track.name || 'MIDI'}: no device`)
+          else if (status.state === 'failed') fm1Problems.push(`${track.name || 'MIDI'}: ${failureText(status.reason)}`)
+          else if (status.state !== 'ready') fm1Problems.push(`${track.name || 'MIDI'}: still starting, early notes will be missed`)
+          if (playNote) this._fm1Sessions.push(playNote.session)
+        }
         if (!playNote) return
+        const lead = playNote.lead?.() ?? 0
 
         track.clips.forEach(clip => {
           if (clip.type !== 'midi') return
@@ -145,7 +173,7 @@ const TimelinePlayer = {
 
             const noteAudioTime = this._startAudioTime + beatsToSeconds(noteBeat - beat, bpm)
             const stopAudioTime = noteAudioTime + beatsToSeconds(note.duration, bpm)
-            const msUntilNote   = Math.max(0, (noteAudioTime - ctx.currentTime) * 1000)
+            const msUntilNote   = Math.max(0, (noteAudioTime - ctx.currentTime - lead) * 1000)
 
             const handle = setTimeout(() => {
               if (!this._isPlaying) return
@@ -203,6 +231,7 @@ const TimelinePlayer = {
         this._sources.push(src)
       })
     })
+    if (fm1Problems.length) notify?.(`FM-1 ${fm1Problems.join('; ')}`)
   },
 
   stop() {
@@ -215,6 +244,8 @@ const TimelinePlayer = {
     this._instrumentRackHandles = []
     this._packInstruments.forEach(instrument => instrument.dispose())
     this._packInstruments = []
+    this._fm1Sessions.forEach(session => { try { session.panic() } catch (e) {} })
+    this._fm1Sessions = []
     this._sources.forEach(src => { try { src.stop() } catch (e) {} })
     this._sources = []
     this._midiTimeouts.forEach(id => clearTimeout(id))
@@ -233,6 +264,8 @@ const TimelinePlayer = {
   },
 
   async bounce({ bpm, tracks, audioStore, durationBeats, sampleRate = 44100, racks = {}, kits, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, palettes = null }) {
+    const fm1Tracks = tracks.filter(track => track.type === 'midi' && track.instrument?.type === 'fm1')
+    if (fm1Tracks.length) throw new Error(`FM-1 tracks cannot be bounced yet: ${fm1Tracks.map(track => track.name || track.id).join(', ')}`)
     const totalSeconds = beatsToSeconds(durationBeats, bpm)
     const offline = new OfflineAudioContext(2, Math.ceil(totalSeconds * sampleRate), sampleRate)
     const startTime = 0.05

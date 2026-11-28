@@ -32,6 +32,7 @@ const SCOPES = [
   { id: 'fav',     label: '♥',        scope: 'all', only: 'fav' },
   { id: 'recent',  label: 'RECENT',   scope: 'all', only: 'recent' },
   { id: 'preset',  label: 'PRESETS',  scope: 'preset' },
+  { id: 'fm1',     label: 'FM-1',     scope: 'fm1' },
 ]
 
 export class InstrumentBrowser {
@@ -45,6 +46,7 @@ export class InstrumentBrowser {
    *  ensureTrack()   armed MIDI track, auto-provisioned if the project has none
    *  addTrack()      new armed MIDI track
    *  presets()       state.presets — project-saved patches, listed beside packs
+   *  fm1Rows()       installed FM-1 firmware records (firmware-store list()), cached
    *  packState(instrument) → 'ready' | 'unavailable' | 'missing'
    *  openSettings(trackId)
    */
@@ -56,6 +58,7 @@ export class InstrumentBrowser {
     this.timer = null
     this.favourites = readList(FAV_KEY)
     this.recent = readList(RECENT_KEY)
+    this.booting = null  // key of the FM-1 row being auditioned
 
     this.el = document.getElementById(BROWSER_DIALOG_ID)
     if (!this.el) return
@@ -107,6 +110,7 @@ export class InstrumentBrowser {
       palettes: this.deps.palettes?.() || {},
       racks: this.deps.racks?.() || {},
       presets: this.deps.presets?.() || [],
+      fm1: this.deps.fm1Rows?.() || [],
     })
   }
 
@@ -206,6 +210,10 @@ export class InstrumentBrowser {
       state.setAttribute('aria-label', `Remove preset ${row.label}`)
       state.textContent = '✕ remove'
       state.onclick = event => { event.stopPropagation(); this.removePreset(row) }
+    } else if (row.kind === 'fm1') {
+      const booting = this.booting === row.key
+      state.className = `ib-state ${booting ? 'booting' : 'ready'}`
+      state.textContent = booting ? '… booting' : '● installed'
     } else {
       const status = row.kind === 'pack' ? (this.deps.packState?.(row.instrument) || 'ready') : 'ready'
       state.className = `ib-state ${status}`
@@ -213,7 +221,7 @@ export class InstrumentBrowser {
     }
 
     item.append(fav, label, sub, program, state)
-    item.onclick = () => { this.highlight = i; this.paintHighlight(); this.queueAudition() }
+    item.onclick = () => { this.highlight = i; this.paintHighlight(); this.queueAudition(true) }
     item.ondblclick = () => this.assign(row, false)
     return item
   }
@@ -226,11 +234,24 @@ export class InstrumentBrowser {
     this.render()
   }
 
-  queueAudition() {
+  /** An FM-1 audition boots an emulator, so only a click auditions it — never an arrow-key pass over the list. */
+  queueAudition(explicit = false) {
     if (this.timer) clearTimeout(this.timer)
     const row = this.rows[this.highlight]
     if (!row) return
-    this.timer = setTimeout(() => { this.timer = null; this.deps.auditioner?.play(row.instrument) }, AUDITION_DEBOUNCE)
+    if (row.kind === 'fm1' && !explicit) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      const played = this.deps.auditioner?.play(row.instrument)
+      if (row.kind !== 'fm1') return
+      this.booting = row.key
+      this.render()
+      Promise.resolve(played).catch(() => {}).finally(() => {
+        if (this.booting !== row.key) return
+        this.booting = null
+        if (this.el?.open) this.render()
+      })
+    }, AUDITION_DEBOUNCE)
   }
 
   move(delta) {

@@ -1,0 +1,75 @@
+/* FM-1 device dialog. Non-modal, so Synth's own keyboard keeps playing the track.
+   The panel is laid out in the upstream 1280x820 space as percentages, so it scales
+   with the dialog; at narrow widths it keeps a minimum width and scrolls instead of
+   shrinking the controls past a fingertip. LCD pixels are data; chrome is tokens. */
+#fm1-device-dialog[open] {
+  position: fixed;
+  inset: 8px 0 auto 0;
+  margin: 0 auto;
+  width: min(940px, 96vw);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  z-index: 20;
+}
+#fm1-device-dialog .dlg-body { display: flex; flex-direction: column; gap: 6px; }
+.fm1d-status { margin: 0; min-height: 1.4em; font-size: 12px; color: var(--text); }
+.fm1d-status.warn { color: var(--danger); }
+.fm1d-scroll { overflow-x: auto; }
+.fm1d-panel {
+  position: relative;
+  min-width: 720px;
+  aspect-ratio: 1280 / 820;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+}
+.fm1d-panel > * { position: absolute; box-sizing: border-box; }
+.fm1d-lcd {
+  background: var(--lcd-bg);
+  image-rendering: pixelated;
+  border: 1px solid var(--border-strong);
+}
+.fm1d-btn, .fm1d-key {
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 0 0 3px;
+  background: var(--surface-control);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.fm1d-key.black { background: var(--black-key); color: var(--text-inverse); }
+.fm1d-btn.down, .fm1d-key.down { box-shadow: var(--shadow-pressed); background: var(--bg3); }
+.fm1d-key.black.down { background: var(--key-active); }
+.fm1d-btn:focus-visible, .fm1d-key:focus-visible, .fm1d-enc:focus-visible, .fm1d-pot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.fm1d-led {
+  position: absolute; top: 3px; left: 50%; width: 8px; height: 8px; margin-left: -4px;
+  border-radius: 50%;
+  background: var(--state-on);
+  opacity: var(--led, 0);
+  pointer-events: none;
+}
+.fm1d-enc, .fm1d-pot {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  border-radius: 50%;
+  background: var(--surface-control);
+  border: 2px solid var(--border-strong);
+  color: var(--text);
+  font: 600 9px/1.1 var(--font-ui);
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+.fm1d-pot > i, .fm1d-enc > i {
+  position: absolute; left: 50%; top: 6%; width: 3px; height: 28%; margin-left: -1.5px;
+  background: var(--state-on); border-radius: 2px;
+  transform-origin: 50% 157%;
+}
+.fm1d-note { margin: 0; font-size: 11px; color: var(--text-dim); }

@@ -11,6 +11,7 @@ import { velocityGain } from '../utils/velocity.js'
 import { paletteDefaults } from '../palettes.js'
 import { kitFor } from '../pads/kit.js'
 import { kitInstrument } from '../pads/kit-voices.js'
+import { fm1Descriptor, bendBytes, modBytes } from '../fm1/descriptor.js'
 import { userSampleStoreFor as defaultUserSampleStoreFor } from '../instruments/user-samples.js'
 
 const DEFAULT_BEND_RANGE = 2 // semitones, the GM default
@@ -33,7 +34,7 @@ export function liveInstrumentFor(track, deps) {
   return instrumentFor(track.instrument || { type: 'palette', paletteKey: track.paletteKey || 'classic' }, deps)
 }
 
-export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, getKits, mountRack, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, onStatus } = {}) {
+export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, getKits, mountRack, packFor, sampleStoreFor, userSampleStoreFor = defaultUserSampleStoreFor, onStatus, fm1Sessions, trackId } = {}) {
   if (!instrument) return null
   const bendRange = instrument.bendRange ?? DEFAULT_BEND_RANGE
   const modOff = instrument.modDest === 'off'
@@ -121,6 +122,30 @@ export function instrumentFor(instrument, { palettes, ctx, output, racks, kits, 
     // Perf (knob layer) is read live, so a knob detent never rebuilds the instrument.
     const perfFor = getKits ? note => kitFor(instrument.kitId, getKits())?.slots?.[note]?.perf : undefined
     return kit ? kitInstrument(kit, { ctx, output, perfFor, sampleStore: userSampleStoreFor?.(ctx) }) : null
+  }
+
+  if (instrument.type === 'fm1') {
+    if (!fm1Sessions) return null
+    // One device per track, owned by the session manager so the live path, the
+    // timeline and the panel share it; only an audition owns (and ends) its own.
+    const key = trackId || 'audition'
+    const descriptor = fm1Descriptor(instrument)
+    const session = fm1Sessions.acquire(key, descriptor, output)
+    const at = time => Math.max(time ?? 0, ctx.currentTime)
+    const ch = descriptor.deviceChannel
+    return {
+      session,
+      prewarm: () => session.ready,
+      preload: () => session.ready,
+      noteOn: (pitch, velocity, time = ctx.currentTime) => session.noteOn(pitch, velocity, at(time)),
+      noteOff: (pitch, time = ctx.currentTime) => session.noteOff(pitch, at(time)),
+      send(event) {
+        if (event?.type === 'pitch-bend') session.sendMidi(bendBytes(ch, event.value), ctx.currentTime)
+        else if (event?.type === 'mod' && !modOff) session.sendMidi(modBytes(ch, event.value), ctx.currentTime)
+      },
+      panic: () => session.panic(),
+      dispose() { if (key === 'audition') fm1Sessions.release(key) }
+    }
   }
 
   // Pack playback is added with the pack sample store. Never substitute a
