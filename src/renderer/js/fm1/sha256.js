@@ -1,4 +1,6 @@
-// Pure SHA-256. Same code on LAN http (no crypto.subtle) and HTTPS; ~1 MB well under 100 ms.
+// Pure SHA-256. Same code on LAN http (no crypto.subtle) and HTTPS.
+// Measured in node: 8 MiB (the package cap) hashes in ~150 ms, on the main thread.
+// ponytail: main-thread hash, move to a Worker if imports of large packages jank.
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

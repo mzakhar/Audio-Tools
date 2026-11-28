@@ -803,22 +803,23 @@ async function putUserSample(sample) {
 let _fm1Library = null
 /** Lazy: the store, dialog and seed catalog load on first open. */
 async function openFm1Library() {
-  if (!_fm1Library) {
+  // Cache the promise: concurrent opens must share one controller (one set of listeners).
+  _fm1Library ??= (async () => {
     const [{ createFirmwareStore }, { createFm1LibraryDialog }, { pickFile }, seed] = await Promise.all([
       import('./fm1/firmware-store.js'),
       import('./components/fm1-library-dialog.js'),
       import('./instruments/pack-import-web.js'),
       import('./fm1/seed-catalog.json')
     ])
-    _fm1Library = createFm1LibraryDialog({
+    return createFm1LibraryDialog({
       store: createFirmwareStore(),
       seedCatalog: seed.default,
       toast: showToast,
       pickFile: () => pickFile('.fwsc'),
       pickCatalogFile: () => pickFile('.json')
     })
-  }
-  return _fm1Library.open()
+  })()
+  try { return (await _fm1Library).open() } catch (e) { _fm1Library = null; throw e }
 }
 
 let _sliceDialog = null

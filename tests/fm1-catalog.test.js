@@ -27,10 +27,14 @@ describe('parseCatalog', () => {
     expect(parse({ catalogId: 'Bad Id' }).reason).toBe('bad-catalog-id')
     expect(parse({ version: '' }).reason).toBe('bad-version')
     expect(parse({ entries: 'no' }).reason).toBe('bad-entries')
-    expect(parse({}, [entry('BAD')]).reason).toBe('bad-entry')
-    expect(parse({}, [entry('a/b/c')]).reason).toBe('bad-entry')
-    expect(parse({}, [{ id: 'a/x' }]).reason).toBe('bad-entry')
-    expect(parse({}, [5]).reason).toBe('bad-entry')
+    expect(parse({ version: 'v1' }).reason).toBe('bad-version')
+    expect(parse({ version: '2026-01-01T10:00:00Z' }).ok).toBe(true)
+    // a malformed entry is skipped, not fatal
+    const mixed = parse({}, [entry('BAD'), entry('a/b/c'), { id: 'a/x' }, 5, entry('a/ok')])
+    expect(mixed.ok).toBe(true)
+    expect(mixed.skipped).toBe(4)
+    expect(mixed.catalog.entries.map(e => e.id)).toEqual(['a/ok'])
+    expect(parse({}).skipped).toBe(0)
   })
 
   it('enforces size and entry-count limits', () => {
@@ -104,6 +108,13 @@ describe('reconcileCatalog', () => {
 })
 
 describe('libraryRows / filterRows', () => {
+  it('dedupes row keys, first wins', () => {
+    const a = cat([entry('p/x', { name: 'First' })])
+    const b = cat([entry('p/x', { name: 'Second' })])
+    const rows = libraryRows({ catalogs: [a, b], installed: [] })
+    expect(rows.map(r => r.name)).toEqual(['First'])
+  })
+
   const record = (n, sha) => ({ id: `sha256:${sha}`, sha256: sha, name: n, target: 'FM-1' })
   const seed = cat([
     entry('s/zed', { name: 'Zed', sha256: SHA('1'), compat: { status: 'tested' } }),

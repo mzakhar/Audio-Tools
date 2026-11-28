@@ -25,6 +25,7 @@ describe('parseFwsc', () => {
     expect(parseFwsc(new Uint8Array(MIN_PACKAGE - 1)).reason).toBe('too-small')
     expect(parseFwsc(new Uint8Array(MAX_PACKAGE + 1)).reason).toBe('too-large')
     expect(parseFwsc(new Uint8Array(0)).reason).toBe('too-small')
+    for (const bad of [null, undefined, 5, 'x'.repeat(2000), [1, 2, 3], { length: 5e9 }]) expect(parseFwsc(bad)).toEqual({ ok: false, reason: 'bad-header' })
   })
 
   it('rejects each malformed shape with its reason', () => {

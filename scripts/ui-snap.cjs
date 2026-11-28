@@ -21,6 +21,7 @@ const SHOTS = [
   ['lesson', `document.querySelector('[data-tool="pads"]').click(); document.querySelector('.pads-lessons').click(); document.querySelector('[data-lesson="l3"]').click()`],
   ['browser-dialog', `document.querySelector('[data-tool="synth"]').click(); document.getElementById('instrument-browser-dialog').showModal()`],
   ['library-dialog', `document.getElementById('library-dialog').showModal()`],
+  ['fm1-library', `document.querySelector('[data-cmd="fm1-library"]').click(); new Promise(r => setTimeout(r, 1200))`],
 ]
 // Own profile per run: parallel runs must not share localStorage (the theme lives there).
 app.setPath('userData', path.join(require('os').tmpdir(), 'ui-snap-' + process.pid))
@@ -37,6 +38,7 @@ app.whenReady().then(async () => {
     for (const [vp, w, h, zoom] of VIEWPORTS) {
       win.setContentSize(w, h)
       for (const [name, script] of SHOTS) {
+        if (process.env.SNAP_ONLY && !process.env.SNAP_ONLY.split(',').includes(name)) continue // SNAP_ONLY=a,b limits shots
         const file = path.join(outDir, `${name}--${theme}--${vp}.png`)
         if (fs.existsSync(file)) continue // rerun resumes after an Electron crash
         await win.loadURL(url)

@@ -47,7 +47,7 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
   const $ = sel => root.querySelector(`#${FM1_LIBRARY_DIALOG_ID} ${sel}`)
   const search = $('.fm1-search'), list = $('.fm1-list'), detail = $('.fm1-detail')
   const importBtn = $('.fm1-import'), catalogBtn = $('.fm1-import-catalog')
-  let installed = [], catalogs = [], selected = null, confirming = null
+  let installed = [], catalogs = [], selected = null, confirming = null, refocus = false
 
   const rows = () => filterRows(libraryRows({ catalogs: [...catalogs, seedCatalog], installed }), search.value)
 
@@ -82,6 +82,7 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
         const rm = el('button', 'btn fm1-remove', confirming === r.key ? 'Confirm remove' : 'Remove')
         rm.type = 'button'
         rm.addEventListener('click', () => remove(r))
+        if (confirming === r.key && refocus) { refocus = false; queueMicrotask(() => rm.focus()) }
         li.append(rm)
       }
       list.append(li)
@@ -96,11 +97,19 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
   }
 
   async function remove(r) {
-    if (confirming !== r.key) { selected = confirming = r.key; return render() }
+    if (confirming !== r.key) { selected = confirming = r.key; refocus = true; return render() }
     confirming = null
     try { await store.remove(r.installedId); toast('Removed') } catch { toast('Could not remove the firmware') }
     await refresh()
   }
+
+  // One import at a time; both buttons stay disabled until it settles. Never an unhandled rejection.
+  async function guarded(fn) {
+    importBtn.disabled = catalogBtn.disabled = true
+    try { await fn() } catch { toast('Could not read the file') } finally { importBtn.disabled = catalogBtn.disabled = false }
+  }
+
+  const saveFailure = reason => reason === 'quota' ? 'Browser storage is full' : reason === 'no-storage' ? 'Storage unavailable' : 'Could not save the catalog'
 
   async function importFirmware() {
     const file = await pickFile()
@@ -116,17 +125,20 @@ export function createFm1LibraryDialog({ root = document, store, seedCatalog, to
     if (file.size > MAX_CATALOG_BYTES) return toast('Catalog is over 2 MB')
     const parsed = parseCatalog(await file.text())
     if (!parsed.ok) return toast(`Not a valid catalog (${parsed.reason})`)
+    if (parsed.catalog.catalogId === seedCatalog.catalogId) return toast('That catalog id is reserved')
     const stored = catalogs.find(c => c.catalogId === parsed.catalog.catalogId) ?? null
     const r = reconcileCatalog(stored, parsed.catalog)
     if (r.ok === false) return toast(r.reason === 'older' ? 'Catalog is older than the one you have' : `Catalog rejected (${r.reason})`)
-    try { await store.putCatalog(r.catalog) } catch { return toast('Browser storage is full') }
-    toast(`Catalog ${r.catalog.catalogId}: +${r.added} ~${r.updated} -${r.removed}`)
+    try { await store.putCatalog(r.catalog) } catch (e) {
+      return toast(saveFailure(e?.name === 'QuotaExceededError' ? 'quota' : e?.message === 'no-storage' ? 'no-storage' : null))
+    }
+    toast(`Catalog ${r.catalog.catalogId}: +${r.added} ~${r.updated} -${r.removed}${parsed.skipped > 0 ? ` (${parsed.skipped} skipped)` : ''}`)
     await refresh()
   }
 
   search.addEventListener('input', render)
-  importBtn.addEventListener('click', importFirmware)
-  catalogBtn.addEventListener('click', importCatalog)
+  importBtn.addEventListener('click', () => guarded(importFirmware))
+  catalogBtn.addEventListener('click', () => guarded(importCatalog))
 
   return {
     async open() {

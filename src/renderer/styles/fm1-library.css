@@ -1,8 +1,9 @@
 /* FM-1 firmware library dialog */
 #fm1-library-dialog[open] { width: min(640px, 94vw); }
 #fm1-library-dialog .dlg-body { max-height: calc(88vh - 44px); overflow-y: auto; }
+/* The list scrolls on its own so the import buttons stay on screen. */
 .fm1-search { width: 100%; box-sizing: border-box; }
-.fm1-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fm1-list { max-height: 48vh; overflow-y: auto; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .fm1-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
   padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-s);
@@ -18,4 +19,4 @@
 .fm1-row[data-status$="broken"] .fm1-chip { color: var(--text); border-style: dashed; }
 .fm1-link { font-size: 11px; color: var(--text); }
 .fm1-detail { min-height: 1.5em; }
-@media (max-width: 480px) { .fm1-row { flex-direction: column; align-items: flex-start; } }
+@media (max-width: 480px) { .fm1-row { flex-direction: column; align-items: flex-start; } .fm1-pick { flex: 0 0 auto; } }

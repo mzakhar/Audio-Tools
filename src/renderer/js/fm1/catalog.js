@@ -7,6 +7,7 @@ export const MAX_ENTRIES = 5000
 
 const ID_RE = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)?$/
 const CATALOG_ID_RE = /^[a-z0-9][a-z0-9._-]*$/
+const VERSION_RE = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+Z?)?$/
 const SHA_RE = /^[0-9a-f]{64}$/
 const STATUSES = ['tested', 'upstream-ok', 'untested', 'broken']
 const DISTRIBUTIONS = ['obtain-separately', 'bundled', 'byo']
@@ -64,13 +65,14 @@ export function parseCatalog(text) {
   if (!isObj(j) || j.schema !== CATALOG_SCHEMA) return fail('bad-schema')
   if (typeof j.catalogId !== 'string' || !CATALOG_ID_RE.test(j.catalogId) || j.catalogId.length > 40) return fail('bad-catalog-id')
   const version = str(j.version, 40)
-  if (!version) return fail('bad-version')
+  if (!version || !VERSION_RE.test(version)) return fail('bad-version')
   if (!Array.isArray(j.entries) || j.entries.length > MAX_ENTRIES) return fail('bad-entries')
 
   const byId = new Map()
+  let skipped = 0
   for (const raw of j.entries) {
     const e = normalizeEntry(raw)
-    if (!e) return fail('bad-entry')
+    if (!e) { skipped++; continue }
     const prev = byId.get(e.id)
     if (prev && JSON.stringify(prev) !== JSON.stringify(e)) return fail('duplicate-id')
     byId.set(e.id, e)
@@ -84,6 +86,7 @@ export function parseCatalog(text) {
   }))
   return {
     ok: true,
+    skipped,
     catalog: {
       schema: CATALOG_SCHEMA, catalogId: j.catalogId, version, generatedAt: str(j.generatedAt, 40),
       attribution, entries: [...byId.values()], removed
@@ -121,13 +124,17 @@ export function libraryRows({ catalogs, installed }) {
   const bySha = new Map(installed.map(r => [r.sha256, r]))
   const claimed = new Set()
   const rows = []
+  const seen = new Set()
   for (const cat of catalogs) {
     for (const e of cat.entries) {
       const rec = e.sha256 && !claimed.has(e.sha256) ? bySha.get(e.sha256) : undefined
       if (rec) claimed.add(e.sha256)
       const broken = e.compat.status === 'broken'
+      const key = rec ? rec.id : `cat:${cat.catalogId}:${e.id}`
+      if (seen.has(key)) continue // first wins; keys must be unique in the DOM
+      seen.add(key)
       rows.push({
-        key: rec ? rec.id : `cat:${cat.catalogId}:${e.id}`,
+        key,
         name: e.name, author: e.author, version: e.version, target: e.target, description: e.description,
         licenseId: e.licenseId, sourceUrl: e.sourceUrl, packageUrl: e.packageUrl, sha256: e.sha256,
         installed: !!rec, origin: 'catalog',

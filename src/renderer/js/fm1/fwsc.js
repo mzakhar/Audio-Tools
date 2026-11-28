@@ -156,7 +156,8 @@ function parseWith(bytes, blocks) {
 /** @param {Uint8Array|ArrayBuffer} input */
 export function parseFwsc(input) {
   try {
-    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
+    if (!(input instanceof ArrayBuffer) && !ArrayBuffer.isView(input)) return fail('bad-header')
+    const bytes = input instanceof Uint8Array ? input : ArrayBuffer.isView(input) ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength) : new Uint8Array(input)
     if (bytes.length < MIN_PACKAGE) return fail('too-small')
     if (bytes.length > MAX_PACKAGE) return fail('too-large')
     let blocks = 20

@@ -25,8 +25,35 @@ describe('firmware store', () => {
     expect(r.id).toBe(`sha256:${hashOf(new Uint8Array(bytes))}`)
     expect(r.record).toMatchObject({ fileName: 'Felucca.fwsc', name: 'Felucca', identity: 'FM-1_918', target: 'FM-1', product: '918', size: 3, importedAt: 42 })
     expect(await store.list()).toEqual([r.record])
-    expect(await store.read(r.id)).toBe(bytes)
+    expect(await store.read(r.id)).toEqual(bytes)
     expect(await store.read('sha256:nope')).toBeNull()
+  })
+
+  it('stores exactly the view bytes, not the larger buffer', async () => {
+    const { store } = make()
+    const big = new Uint8Array([9, 9, 7, 1, 2, 9])
+    const view = big.subarray(2, 5)
+    const r = await store.install({ name: 'v.fwsc', bytes: view })
+    expect(r.id).toBe(`sha256:${hashOf(view)}`)
+    const got = await store.read(r.id)
+    expect(got.byteLength).toBe(3)
+    expect([...new Uint8Array(got)]).toEqual([7, 1, 2])
+  })
+
+  it('open failure (sync throw, onerror, onblocked) is not cached', async () => {
+    let mode = 'throw'
+    const real = fakeIdb()
+    const idb = { open: (...a) => {
+      if (mode === 'throw') throw new Error('boom')
+      if (mode === 'blocked') { const req = {}; setTimeout(() => req.onblocked?.()); return req }
+      return real.open(...a)
+    } }
+    const store = createFirmwareStore({ idb, hash: hashOf, parse: okParse })
+    await expect(store.list()).rejects.toThrow('boom')
+    mode = 'blocked'
+    await expect(store.list()).rejects.toThrow('blocked')
+    mode = 'ok'
+    expect(await store.list()).toEqual([])
   })
 
   it('duplicate install is idempotent and writes nothing', async () => {

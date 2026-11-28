@@ -17,21 +17,34 @@ const CATALOGS = 'catalogs'
 
 export function createFirmwareStore({ idb = globalThis.indexedDB, hash = sha256Hex, parse = parseFwsc, now = Date.now } = {}) {
   let opened = null
-  const db = () => opened ??= new Promise((resolve, reject) => {
-    const req = idb.open(DB_NAME, DB_VERSION)
+  // Any rejection (sync throw, onerror, onblocked) clears the cache so the next call retries.
+  const db = () => {
+    const p = opened ??= open()
+    p.catch(() => { if (opened === p) opened = null })
+    return p
+  }
+  const open = () => new Promise((resolve, reject) => {
+    const fail = reject
+    let req
+    try { req = idb.open(DB_NAME, DB_VERSION) } catch (e) { return fail(e) }
     req.onupgradeneeded = () => {
       const d = req.result
       for (const name of [PACKAGES, INSTALLED, CATALOGS]) if (!d.objectStoreNames.contains(name)) d.createObjectStore(name)
     }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => { opened = null; reject(req.error || new Error('IndexedDB open failed')) }
+    req.onsuccess = () => {
+      const d = req.result
+      d.onversionchange = () => { d.close(); opened = null }
+      resolve(d)
+    }
+    req.onerror = () => fail(req.error || new Error('IndexedDB open failed'))
+    req.onblocked = () => fail(new Error('blocked'))
   })
 
   return {
     async install({ name, bytes }) {
       if (!idb) return { ok: false, reason: 'no-storage' }
       try {
-        const u8 = new Uint8Array(bytes)
+        const u8 = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new Uint8Array(bytes)
         // parseFwsc owns the 960 B .. 8 MiB bound, and runs before any hashing.
         const parsed = parse(u8)
         if (!parsed.ok) return { ok: false, reason: parsed.reason, ...(parsed.identity ? { identity: parsed.identity } : {}) }
@@ -48,7 +61,7 @@ export function createFirmwareStore({ idb = globalThis.indexedDB, hash = sha256H
         finished.catch(() => {})
         const existing = await request(tx.objectStore(INSTALLED).get(id))
         if (existing) return { ok: true, id, record: existing, duplicate: true }
-        tx.objectStore(PACKAGES).put(bytes, id)
+        tx.objectStore(PACKAGES).put(u8.slice().buffer, id) // exact copy: a view over a larger buffer must not store the whole buffer
         tx.objectStore(INSTALLED).put(record, id)
         await finished
         return { ok: true, id, record, duplicate: false }
