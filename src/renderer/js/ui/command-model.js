@@ -13,10 +13,11 @@ const DEFAULTS = {
   midiInput: null,
   canImportPacks: true,
   assistant: false,
+  fm1Armed: false,
 }
 
 export function commandItems(opts = {}) {
-  const { mode, projectOpen, recording, midiInput, canImportPacks, assistant } = { ...DEFAULTS, ...(opts || {}) }
+  const { mode, projectOpen, recording, midiInput, canImportPacks, assistant, fm1Armed } = { ...DEFAULTS, ...(opts || {}) }
 
   const isArrange = mode === 'arrange'
 
@@ -142,6 +143,15 @@ export function commandItems(opts = {}) {
       shortcut: null,
       group: 'setup',
       enabled: true,
+      visible: true,
+    },
+    {
+      id: 'fm1-device',
+      label: 'FM-1 device…',
+      shortcut: null,
+      group: 'setup',
+      // Opens the armed track's device; with no FM-1 track armed there is nothing to open.
+      enabled: !!fm1Armed,
       visible: true,
     },
     {

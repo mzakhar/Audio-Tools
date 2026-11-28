@@ -7,9 +7,10 @@ import { kitFor } from '../pads/kit.js'
 const catalog = value => (typeof value === 'function' ? value() : value) || []
 const manifestOf = pack => pack?.manifest || pack
 
-export function trackInstrumentLabel(instrument, packs) {
+export function trackInstrumentLabel(instrument, packs, fm1Installed) {
   if (!instrument || instrument.type === 'palette') return Palettes[instrument?.paletteKey || 'classic']?.name || 'Internal Synth'
   if (instrument.type === 'kit') return kitFor(instrument.kitId)?.name || 'Missing: kit'
+  if (instrument.type === 'fm1') return catalog(fm1Installed).find(record => record.id === instrument.firmwareHash)?.name || 'Missing firmware'
   if (instrument.type === 'rack') return `Rack: ${instrument.rackId}`
   const pack = catalog(packs).find(item => item.id === instrument.packId && item.version === instrument.packVersion)
   const patch = manifestOf(pack)?.patches?.find(item => item.id === instrument.patchId)

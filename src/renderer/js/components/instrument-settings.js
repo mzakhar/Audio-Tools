@@ -6,6 +6,7 @@ import Palettes from '../palettes.js'
 import { kitFor, DEFAULT_KIT_ID } from '../pads/kit.js'
 import { openDialog } from '../ui/dialog.js'
 import { SetTrackInstrument, SetTrackMidiChannel } from '../store/ProjectStore.js'
+import { fm1Descriptor, fm1InstrumentFor, FM1_MHZ_CHOICES, slowWarning } from '../fm1/descriptor.js'
 
 export const SETTINGS_DIALOG_ID = 'instrument-settings-dialog'
 
@@ -53,7 +54,8 @@ function sampleWeight(manifest) {
 }
 
 export class InstrumentSettings {
-  /** deps: { store, packCatalog(), warmPack(pack, patch) } */
+  /** deps: { store, packCatalog(), warmPack(pack, patch), fm1Installed(), fm1Compat(hash), openFm1Device(trackId), refreshFm1() }
+   *  fm1Installed/fm1Compat read a cache; refreshFm1() reloads it, resolving true when it changed. */
   constructor(deps) {
     this.deps = deps
     this.trackId = null
@@ -82,6 +84,7 @@ export class InstrumentSettings {
     this.tab = 'Patch'
     if (!openDialog(SETTINGS_DIALOG_ID)) return
     this.render()
+    Promise.resolve(this.deps.refreshFm1?.()).then(changed => { if (changed && this.el.open) this.render() }, () => {})
     this.bodyEl.querySelector('select, input, button')?.focus()
   }
 
@@ -122,6 +125,7 @@ export class InstrumentSettings {
     option(source, 'pack', 'Instrument Pack')
     option(source, 'rack', 'Rack')
     option(source, 'kit', 'Drum Kit')
+    option(source, 'fm1', 'FM-1 Device')
     source.value = instrument.type || 'palette'
     source.onchange = () => {
       const keep = { ...(instrument.bendRange != null ? { bendRange: instrument.bendRange } : {}), ...(instrument.modDest ? { modDest: instrument.modDest } : {}) }
@@ -133,13 +137,55 @@ export class InstrumentSettings {
       }
       if (source.value === 'kit') this.set({ type: 'kit', kitId: DEFAULT_KIT_ID, ...keep })
       if (source.value === 'rack' && racks[0]) this.set({ type: 'rack', rackId: racks[0].id, ...keep })
+      if (source.value === 'fm1') {
+        const record = this.deps.fm1Installed?.()[0]
+        if (record) this.set(fm1InstrumentFor(record, keep))
+        else this.render()   // nothing installed: the Patch tab says so below
+      }
     }
     this.bodyEl.append(field('Source', source))
 
     if (instrument.type === 'pack') this.renderPack(instrument, packs)
     else if (instrument.type === 'rack') this.renderRack(instrument, racks)
     else if (instrument.type === 'kit') this.renderKit(instrument)
+    else if (instrument.type === 'fm1') this.renderFm1(track, instrument)
     else this.renderInternal(instrument)
+  }
+
+  renderFm1(track, instrument) {
+    const installed = this.deps.fm1Installed?.() || []
+    const descriptor = fm1Descriptor(instrument)
+    const firmware = document.createElement('select')
+    firmware.setAttribute('aria-label', 'Firmware')
+    if (!installed.some(record => record.id === descriptor.firmwareHash)) option(firmware, descriptor.firmwareHash || '', 'Missing firmware')
+    for (const record of installed) option(firmware, record.id, record.name)
+    firmware.value = descriptor.firmwareHash || ''
+    firmware.onchange = () => this.set({ ...instrument, firmwareHash: firmware.value })
+
+    const channel = document.createElement('select')
+    channel.setAttribute('aria-label', 'Device channel')
+    for (let value = 0; value < 16; value++) option(channel, String(value), `Channel ${value + 1}`)
+    channel.value = String(descriptor.deviceChannel)
+    channel.onchange = () => this.set({ ...instrument, deviceChannel: Number(channel.value) })
+
+    const mhz = document.createElement('select')
+    mhz.setAttribute('aria-label', 'Emulated clock')
+    const choices = FM1_MHZ_CHOICES.includes(descriptor.mhz) ? FM1_MHZ_CHOICES : [...FM1_MHZ_CHOICES, descriptor.mhz].sort((a, b) => a - b)
+    for (const value of choices) option(mhz, String(value), `${value} MHz`)
+    mhz.value = String(descriptor.mhz)
+    mhz.onchange = () => this.set({ ...instrument, mhz: Number(mhz.value) })
+
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'btn midi-btn'
+    open.textContent = 'Open device…'
+    open.onclick = () => this.deps.openFm1Device?.(track.id)
+
+    this.bodyEl.append(field('Firmware', firmware), field('Device channel', channel), field('Clock', mhz))
+    if (!installed.length) this.bodyEl.append(note('No firmware installed. Use FM-1 firmware… in the ⋯ menu.'))
+    const warning = slowWarning(descriptor.mhz, this.deps.fm1Compat?.(descriptor.firmwareHash))
+    if (warning) this.bodyEl.append(note(warning))
+    this.bodyEl.append(open, note('Saves on the device are not kept yet.'))
   }
 
   renderInternal(instrument) {

@@ -61,6 +61,11 @@ import { createPackStore } from './instruments/pack-store-idb.js'
 import { importPackFromFile } from './instruments/pack-import-web.js'
 import { canBrowseFolders, createFolderLibrary } from './instruments/soundfont-folder-web.js'
 import { createAuditioner } from './instruments/auditioner.js'
+import { createFm1Sessions } from './fm1/session-manager.js'
+import { createFirmwareStore } from './fm1/firmware-store.js'
+import { libraryRows } from './fm1/catalog.js'
+import { fm1Descriptor, failureText } from './fm1/descriptor.js'
+import { createFm1DeviceDialog } from './components/fm1-device-dialog.js'
 import { armPlan } from './instruments/arm-track.js'
 import { trackInstrumentLabel } from './instruments/instrument-label.js'
 import { PadGrid } from './components/pad-grid.js'
@@ -194,6 +199,83 @@ async function warmPack(pack, patch) {
   if (store && ids.length) await store.preload(ids)
 }
 
+// ─── FM-1 devices ──────────────────────────────────────────────────────────
+// One emulated device per track, owned by the session manager (created on first
+// use, once the AudioContext exists) so live play, the timeline and the device
+// panel share it. The firmware store is shared with the library dialog.
+const _fm1 = { store: null, sessions: null, module: null, dialog: null, installed: [], compat: new Map(), tracked: new Map(), loaded: false, seed: null }
+
+function fm1Store() { return _fm1.store ??= createFirmwareStore() }
+
+/** Fetch + compile the pinned wasm once: sessions get the compiled Module, and the bytes for the worklet path. A failure is not cached. */
+function fm1Wasm() {
+  return _fm1.module ??= (async () => {
+    const response = await fetch(new URL('fm1/fm1_web.wasm', document.baseURI))
+    if (!response.ok) throw new Error(`fm1 wasm ${response.status}`)
+    const bytes = await response.arrayBuffer()
+    return { bytes, module: await WebAssembly.compile(bytes) }
+  })().catch(error => { _fm1.module = null; throw error })
+}
+
+function fm1Sessions() {
+  const ctx = AudioEngine.getContext()
+  if (!ctx) return undefined
+  return _fm1.sessions ??= createFm1Sessions({
+    ctx,
+    getModule: async () => (await fm1Wasm()).module,
+    getWasmBytes: async () => (await fm1Wasm()).bytes,
+    readFirmware: async id => (await fm1Store().read(id))?.slice(0) ?? null,
+    preferWorklet: () => AudioEngine.hasWorklet(),
+    workletUrl: new URL('worklets/fm1-worklet.js', document.baseURI).href,
+    now: () => performance.now()
+  })
+}
+
+/** Reload the installed-firmware list and catalog compat. Resolves true when it changed. */
+async function refreshFm1Cache() {
+  _fm1.loaded = true
+  try {
+    const [installed, catalogs] = await Promise.all([fm1Store().list(), fm1Store().getCatalogs()])
+    _fm1.seed ??= (await import('./fm1/seed-catalog.json')).default
+    const rows = libraryRows({ catalogs: [...catalogs, _fm1.seed], installed })
+    const compat = new Map(rows.filter(row => row.installedId && row.compat).map(row => [row.installedId, row.compat]))
+    const changed = JSON.stringify([installed.map(record => [record.id, record.name]), [...compat]])
+      !== JSON.stringify([_fm1.installed.map(record => [record.id, record.name]), [..._fm1.compat]])
+    _fm1.installed = installed
+    _fm1.compat = compat
+    if (changed) { renderInstrumentSlot(); _instrumentBrowser?.refresh() }
+    return changed
+  } catch (error) {
+    console.warn('Could not read FM-1 firmware:', error)
+    return false
+  }
+}
+
+async function openFm1Device(trackId) {
+  await ensureAudio()
+  _fm1.dialog ??= createFm1DeviceDialog({
+    getSession: id => { const track = _hot.byId.get(id); if (track) liveEntryFor(track); return _fm1.sessions?.get(id) ?? null },
+    getTrack: id => _hot.byId.get(id) ?? null,
+    compatFor: hash => _fm1.compat.get(hash) ?? null
+  })
+  const opened = _fm1.dialog?.open(trackId)
+  refreshFm1Cache().then(changed => { if (changed && _fm1.dialog?.isOpen()) _fm1.dialog.open(trackId) })
+  return opened
+}
+
+/** Release the device of a track that was removed or whose descriptor changed. Runs before the live entry rebuilds. */
+function pruneFm1(state) {
+  const live = new Map(state.tracks.filter(track => track.instrument?.type === 'fm1').map(track => [track.id, JSON.stringify(fm1Descriptor(track.instrument))]))
+  for (const [id, sig] of _fm1.tracked) if (live.get(id) !== sig) _fm1.sessions?.release(id)
+  _fm1.tracked = live
+}
+
+/** A project switch ends every device of the old project. */
+function disposeFm1() {
+  _fm1.sessions?.disposeAll()
+  _fm1.tracked.clear()
+}
+
 /** Deps for instrumentFor/liveInstrumentFor — one shape, every call site, so
  *  an audition cannot be built differently from the thing it auditions. */
 function instrumentDeps({ output, trackId } = {}) {
@@ -210,6 +292,8 @@ function instrumentDeps({ output, trackId } = {}) {
     sampleStoreFor,
     userSampleStoreFor,
     onStatus: trackId ? status => sampleStatus(trackId, status) : undefined,
+    fm1Sessions: fm1Sessions(),
+    trackId,
     mountRack: rack => RackEngine.mount(ctx, rack, {
       output: out,
       getBuffer: fileKey => AudioStore.getBufferOrLoad?.(fileKey) ?? null,
@@ -310,7 +394,9 @@ function prewarmArmed() {
   if (!track || sig === _prewarmSig) return
   const entry = liveEntryFor(track)
   _prewarmSig = entry ? sig : null   // an unavailable pack may come back; try again
-  Promise.resolve(entry?.inst.prewarm?.()).catch(() => {})
+  Promise.resolve(entry?.inst.prewarm?.()).catch(error => {
+    if (track.instrument?.type === 'fm1' && error?.message !== 'disposed') showToast(`FM-1: ${failureText(error?.message)}`)
+  })
   const instrument = track.instrument
   if (instrument?.type === 'pack') {
     const pack = packFor(instrument.packId, instrument.packVersion)
@@ -350,7 +436,9 @@ function sequencerPlayNote(note, velocity, time) {
       rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
       packFor,
       sampleStoreFor,
-      packInstruments
+      packInstruments,
+      fm1Sessions: fm1Sessions(),
+      trackId: track?.id
     })
     if (!play) return
     _seqPlayer = { sig, play, packInstruments }
@@ -507,7 +595,8 @@ function renderCommands() {
     // Electron imports through IPC, the browser through a file input plus
     // IndexedDB. Dead only when neither backend exists.
     canImportPacks: canImportPacks(),
-    assistant: assistantAvailable()
+    assistant: assistantAvailable(),
+    fm1Armed: _hot.byId.get(_hot.armedId)?.instrument?.type === 'fm1'
   })
   for (const item of items) {
     document.querySelectorAll(`[data-cmd="${item.id}"]`).forEach(el => {
@@ -613,6 +702,7 @@ function syncInstrumentUi() {
   _slotSig = sig
   renderInstrumentSlot()
   renderKnobPanel()
+  renderCommands()   // 'FM-1 device…' follows the armed instrument
   _padGrid?.render()
   if (_currentMode === 'pads') _padsView?.refreshKit()
 }
@@ -624,7 +714,8 @@ function renderInstrumentSlot() {
   if (!nameEl) return
   const track = armedTrack()
   const instrument = armedInstrument()
-  nameEl.textContent = trackInstrumentLabel(instrument, _packCatalog)
+  nameEl.textContent = trackInstrumentLabel(instrument, _packCatalog, _fm1.installed)
+  if (instrument.type === 'fm1' && !_fm1.loaded) refreshFm1Cache()   // names come from the firmware store
   const channelEl = document.getElementById('slot-channel')
   if (channelEl) {
     channelEl.textContent = !track ? 'new track on first note'
@@ -633,8 +724,10 @@ function renderInstrumentSlot() {
   }
   const stateEl = document.getElementById('slot-state')
   if (stateEl) {
-    const state = instrument.type === 'pack' ? packState(instrument) : 'ready'
-    stateEl.textContent = instrument.type === 'pack' ? SLOT_STATE[state] : ''
+    const state = instrument.type === 'pack' ? packState(instrument)
+      : instrument.type === 'fm1' && _fm1.loaded && !_fm1.installed.some(record => record.id === instrument.firmwareHash) ? 'missing'
+      : 'ready'
+    stateEl.textContent = instrument.type === 'pack' || instrument.type === 'fm1' ? (SLOT_STATE[state] ?? '') : ''
     stateEl.classList.toggle('slot-warn', state !== 'ready')
   }
 }
@@ -805,16 +898,16 @@ let _fm1Library = null
 async function openFm1Library() {
   // Cache the promise: concurrent opens must share one controller (one set of listeners).
   _fm1Library ??= (async () => {
-    const [{ createFirmwareStore }, { createFm1LibraryDialog }, { pickFile }, seed] = await Promise.all([
-      import('./fm1/firmware-store.js'),
+    const [{ createFm1LibraryDialog }, { pickFile }, seed] = await Promise.all([
       import('./components/fm1-library-dialog.js'),
       import('./instruments/pack-import-web.js'),
       import('./fm1/seed-catalog.json')
     ])
     return createFm1LibraryDialog({
-      store: createFirmwareStore(),
+      store: fm1Store(),
       seedCatalog: seed.default,
-      toast: showToast,
+      // Every import/remove outcome toasts, so it is also the moment the shared list may have moved.
+      toast: message => { showToast(message); refreshFm1Cache() },
       pickFile: () => pickFile('.fwsc'),
       pickCatalogFile: () => pickFile('.json')
     })
@@ -1131,7 +1224,17 @@ function renderKnobPanel() {
   if (instrument.type === 'rack') return renderRackPanel(panel, instrument)
   if (instrument.type === 'pack') return renderPackKnobs(panel, instrument)
   if (instrument.type === 'kit') return
+  if (instrument.type === 'fm1') return renderFm1Panel(panel)
   renderPaletteKnobs(panel, instrument, armedTrack()?.id)
+}
+
+function renderFm1Panel(panel) {
+  const open = document.createElement('button')
+  open.type = 'button'
+  open.className = 'btn midi-btn'
+  open.textContent = 'Open device…'
+  open.addEventListener('click', () => runCommand('fm1-device'))
+  panel.append(open)
 }
 
 function renderPaletteKnobs(panel, instrument, trackId) {
@@ -1344,7 +1447,9 @@ function initCommandBar() {
         kits: ProjectStore.getState().kits,
         packFor,
         sampleStoreFor,
-        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean)
+        rackHandles: [_rackView?.getEngineHandle()].filter(Boolean),
+        fm1Sessions: fm1Sessions(),
+        notify: showToast
       })
     } else if (_currentMode === 'pads') {
       startPadsLoop()
@@ -1370,6 +1475,10 @@ function initCommandBar() {
   COMMANDS['controller-map'] = () => _controllerLearn?.open()
   COMMANDS['lessons'] = () => openLessons()
   COMMANDS['fm1-library'] = () => openFm1Library()
+  COMMANDS['fm1-device'] = () => {
+    const track = _hot.byId.get(_hot.armedId)
+    if (track?.instrument?.type === 'fm1') return openFm1Device(track.id)
+  }
   COMMANDS['mixer'] = () => toggleMixer()
   // No listener yet for these two — the instrument agent wires them.
   COMMANDS['library'] = () => document.dispatchEvent(new CustomEvent('open-library'))
@@ -1571,6 +1680,7 @@ function initProjectCommands() {
     if (handle) setLastDir(DIR_KEY_PROJECT, typeof handle === 'string' ? handle : null)
     if (!handle) return
     disposeLiveInstruments()
+    disposeFm1()
     resetPadsForNewProject()
     ProjectStore.reset()
     AudioStore.reset()
@@ -1598,6 +1708,7 @@ function initProjectCommands() {
       return
     }
     disposeLiveInstruments()
+    disposeFm1()
     resetPadsForNewProject()
     ProjectStore.load(state)
     AudioStore.reset()
@@ -1704,19 +1815,23 @@ function initProjectCommands() {
     state.tracks.forEach(t => t.clips.forEach(c => {
       durationBeats = Math.max(durationBeats, c.startBeat + c.duration)
     }))
-    const wav = await TimelinePlayer.bounce({
-      bpm: state.bpm,
-      tracks: state.tracks,
-      audioStore: AudioStore,
-      durationBeats,
-      racks: state.racks,
-      kits: state.kits,
-      packFor,
-      sampleStoreFor,
-      sampleRate: state.sampleRate,
-      palettes: Palettes
-    })
-    await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
+    try {
+      const wav = await TimelinePlayer.bounce({
+        bpm: state.bpm,
+        tracks: state.tracks,
+        audioStore: AudioStore,
+        durationBeats,
+        racks: state.racks,
+        kits: state.kits,
+        packFor,
+        sampleStoreFor,
+        sampleRate: state.sampleRate,
+        palettes: Palettes
+      })
+      await FileAdapter.exportWav(wav, `bounce-${Date.now()}.wav`)
+    } catch (error) {
+      showToast(error?.message || 'Bounce failed')
+    }
   })
 }
 
@@ -2083,8 +2198,9 @@ function initMidi() {
           // tab — and a drone the master limiter keeps ducking everything under.
           // Disposing is the panic; the next note-on rebuilds the instrument.
           else if (detail.controller === 120 || detail.controller === 123) {
-            entry.inst.dispose()
-            _liveInstruments.delete(trackId)
+            // An FM-1 device outlives its entry: silence it, never dispose it.
+            if (entry.inst.panic) entry.inst.panic()
+            else { entry.inst.dispose(); _liveInstruments.delete(trackId) }
           }
         }
         else entry.inst.send({ type: 'pitch-bend', value: detail.value })
@@ -2312,7 +2428,11 @@ function boot() {
   _instrumentSettings = new InstrumentSettings({
     store: ProjectStore,
     packCatalog: () => _packCatalog,
-    warmPack: (pack, patch) => warmPack(pack, patch).catch(() => {})
+    warmPack: (pack, patch) => warmPack(pack, patch).catch(() => {}),
+    fm1Installed: () => _fm1.installed,
+    fm1Compat: hash => _fm1.compat.get(hash) ?? null,
+    openFm1Device,
+    refreshFm1: refreshFm1Cache
   })
   _instrumentBrowser = new InstrumentBrowser({
     store: ProjectStore,
@@ -2321,6 +2441,7 @@ function boot() {
     palettes: () => Object.fromEntries(Object.entries(Palettes).filter(([key]) => key !== 'tr909')),
     racks: () => ProjectStore.getState().racks,
     presets: () => ProjectStore.getState().presets || [],
+    fm1Rows: () => _fm1.installed,
     auditioner: _auditioner,
     ensureTrack: ensureMidiTrack,
     addTrack: () => addMidiTrack(),
@@ -2358,7 +2479,7 @@ function boot() {
     _assistantDialog = new AssistantDialog({ store: ProjectStore, packs: () => _packCatalog })
     document.addEventListener('open-assistant', () => _assistantDialog.open())
   }
-  document.addEventListener('open-instrument-browser', () => _instrumentBrowser.open())
+  document.addEventListener('open-instrument-browser', () => { _instrumentBrowser.open(); refreshFm1Cache() })
   document.addEventListener('open-library', () => _libraryDialog.open())
   document.addEventListener('open-instrument-settings', e => _instrumentSettings.open(e.detail?.trackId ?? ensureMidiTrack()?.id))
 
@@ -2371,6 +2492,7 @@ function boot() {
 
   // Subscribe store to keep mixer in sync
   ProjectStore.subscribe(state => {
+    pruneFm1(state)   // before refreshHot/prewarm, which may acquire the replacement device
     const prevPads = _hot.pads
     refreshHot(state)
     if (_lessons?.active() && prevPads !== _hot.pads) _lessons.padsChanged(prevPads, _hot.pads, _loopPlayer?.isPlaying() ? _loopPlayer.currentBeat() : -1)
