@@ -260,3 +260,29 @@ export function createTake({ rate, startTime, maxFrames }) {
     },
   }
 }
+
+// Worker-side flash snapshot timing. A snapshot is taken only while no SPI flash command is in
+// flight and the revision has not moved for quietMs, so a half-written firmware save is never
+// stored; a request still waiting after timeoutMs is answered as a timeout (keep the last save).
+// observe() every pump; request() on a snapshot message; take() -> requests to answer now.
+export function createFlashGate({ revision, quietMs = 250, timeoutMs = 1500 }) {
+  let rev = revision, changedAt = -Infinity
+  let waiting = []
+  return {
+    get revision() { return rev },
+    observe(revision, ms) { if (revision !== rev) { rev = revision; changedAt = ms } },
+    request(req, ms) { waiting.push({ ...req, at: ms }) },
+    // -> [{ ...req, ok: true } | { ...req, ok: false }]
+    take(busy, ms) {
+      if (!waiting.length) return []
+      if (!busy && ms - changedAt >= quietMs) {
+        const out = waiting.map(({ at, ...req }) => ({ ...req, ok: true }))
+        waiting = []
+        return out
+      }
+      const out = waiting.filter(w => ms - w.at >= timeoutMs).map(({ at, ...req }) => ({ ...req, ok: false }))
+      waiting = waiting.filter(w => ms - w.at < timeoutMs)
+      return out
+    },
+  }
+}

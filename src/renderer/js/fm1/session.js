@@ -6,21 +6,32 @@
 //    (anchor frame + block frame, so no drift); timed events carry an output frame mapped from
 //    AudioContext time through the same anchor.
 // Note and panel methods never throw; before ready they are dropped (no replay on ready).
+//
+// Flash: a descriptor with flashAssetId boots from readFlash(descriptor) (an asset file, see
+// flash-asset.js); a missing / corrupt / other-firmware asset fails the session rather than
+// booting clean. Only the Worker path keeps flash (snapshot / restore); the worklet does not.
 import { framesAt, noteOnBytes, noteOffBytes, allNotesOffBytes, rgb565ToRgba, FM1_RATE, createTake } from './host-core.js'
+import { decodeFlashAsset, packRestore, unpackRestore } from './flash-asset.js'
 
 const START_PAD = 0.02           // first block (and after an underrun) starts this far ahead
 const REPORT_MS = 20             // how often the Worker hears how far playback has got
 const CAP_FLUSH_MS = 1000        // finish() stops waiting for the worklet's last capture batch
+const SNAPSHOT_MS = 3000         // snapshotFlash gives up on a silent Worker (it answers by 1.5 s)
 export const BLOCK_FRAMES = 1024 // Worker path block, in output (context-rate) frames
 
 export function createFm1Session({
-  ctx, key, descriptor, output, getModule, getWasmBytes, readFirmware,
+  ctx, key, descriptor, output, getModule, getWasmBytes, readFirmware, readFlash = async () => null,
   useWorklet = false, loadWorklet, createWorker, createWorkletNode, leadMs = 80,
   now = () => performance.now(),
 }) {
   let path = useWorklet ? 'worklet' : 'worker'
   let state = 'booting', reason
   let port = null, worker = null, node = null, pkg = null
+  let sectors = null                 // packed restore records for the next boot (Worker path)
+  const flash = { revision: null, savedRevision: null }
+  let importing = false              // the boot in progress restores imported records: dirty once ready
+  const snaps = new Map()            // request id -> resolve
+  let snapSeq = 0, bootGen = 0      // bootGen: a re-boot (importFlash) orphans an older boot still loading
   let anchor = null, lastReport = -Infinity, lcdOn = false
   const counters = { rtf: null, underruns: 0, late: 0, starved: 0, dropped: 0 }
   const held = new Set()
@@ -32,16 +43,20 @@ export function createFm1Session({
   const gain = ctx.createGain()
   gain.connect(output)
 
-  let resolveReady, rejectReady
-  const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej })
-  ready.catch(() => {})
+  let resolveReady, rejectReady, ready
+  const newReady = () => {
+    ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej })
+    ready.catch(() => {})
+  }
+  newReady()
 
   // Worker path: the Worker renders leadMs plus one block ahead (a partly filled block is
   // already rendered but not yet posted), and events need 30 ms of slack on top of that.
   const horizonSec = () => leadMs / 1000 + BLOCK_FRAMES / ctx.sampleRate
   const leadSec = () => (path === 'worklet' ? 0.02 : horizonSec() + 0.03)
   let bootTimeout = false
-  const status = () => ({ state, reason, path, ...counters, bootTimeout, leadMs: Math.round(leadSec() * 1000) })
+  const flashStatus = () => ({ ...flash, dirty: flash.revision !== flash.savedRevision })
+  const status = () => ({ state, reason, path, ...counters, bootTimeout, leadMs: Math.round(leadSec() * 1000), flash: flashStatus() })
   const emit = () => { const s = status(); for (const cb of statusCbs) cb(s) }
   const post = (m, t) => { try { port?.postMessage(m, t) } catch {} }
 
@@ -53,6 +68,8 @@ export function createFm1Session({
     sources.clear()
     anchor = null
     capture?.done?.()
+    for (const res of snaps.values()) res({ ok: false, reason: 'not-ready' })
+    snaps.clear()
   }
 
   function fail(why) {
@@ -66,7 +83,7 @@ export function createFm1Session({
     teardownHost()
     state = 'failed'
     reason = why
-    pkg = null
+    pkg = sectors = null
     rejectReady(new Error(why))
     emit()
   }
@@ -111,11 +128,24 @@ export function createFm1Session({
     } else if (m.type === 'ready') {
       state = 'ready'
       bootTimeout = !!m.timedOut
-      pkg = null
+      pkg = sectors = null
+      flash.revision = m.flashRevision ?? null
+      // booted from the project's asset (or clean): nothing to save yet; imported records are
+      // not in the project, so they are dirty until saved
+      flash.savedRevision = importing ? null : flash.revision
+      importing = false
       resolveReady()
       emit()
     } else if (m.type === 'error') fail(m.reason || 'boot-failed')
-    else if (m.type === 'status') {
+    else if (m.type === 'snapshot') {
+      const res = snaps.get(m.request)
+      snaps.delete(m.request)
+      if (m.revision !== undefined) flash.revision = m.revision
+      if (!res) return
+      if (m.reason) res({ ok: false, reason: m.reason })
+      else res({ ok: true, changed: !!m.changed, records: m.sectors ? unpackRestore(m.sectors) : [], revision: m.revision })
+    } else if (m.type === 'status') {
+      if (m.flashRevision !== undefined) flash.revision = m.flashRevision
       counters.rtf = m.rtf ?? counters.rtf
       counters.starved = m.starved ?? counters.starved
       counters.late = m.late ?? counters.late
@@ -130,28 +160,30 @@ export function createFm1Session({
 
   // Both starters catch everything (fetch, compile, constructing the host, connecting, posting):
   // they run un-awaited, so a throw must become a failure or `ready` would never settle.
-  async function startWorker() {
+  async function startWorker(gen = bootGen) {
     try {
       const module = await getModule()
-      if (state !== 'booting') return
+      if (state !== 'booting' || gen !== bootGen) return
       worker = createWorker()
       port = worker
       worker.onmessage = (e) => onMessage(e.data)
       worker.onerror = () => fail('wasm-failed')
       const copy = pkg.slice(0)
+      const restore = sectors?.length ? sectors.slice() : undefined
       port.postMessage({ type: 'boot', module, package: copy, mhz: descriptor.mhz, sampleRate: ctx.sampleRate,
-        blockFrames: BLOCK_FRAMES, leadFrames: Math.round(horizonSec() * FM1_RATE) }, [copy])
+        blockFrames: BLOCK_FRAMES, leadFrames: Math.round(horizonSec() * FM1_RATE), sectors: restore },
+      restore ? [copy, restore.buffer] : [copy])
       if (lcdOn) port.postMessage({ type: 'lcd', on: true })
     } catch { fail('wasm-failed') }
   }
 
-  async function startWorklet() {
+  async function startWorklet(gen = bootGen) {
     try {
       let wasm = null, module = null
       await loadWorklet()
       if (getWasmBytes) wasm = await getWasmBytes()
       else module = await getModule()
-      if (state !== 'booting') return
+      if (state !== 'booting' || gen !== bootGen) return
       node = createWorkletNode(ctx)
       node.connect(gain)
       port = node.port
@@ -163,13 +195,40 @@ export function createFm1Session({
     } catch { fail('wasm-failed') }
   }
 
-  ;(async () => {
-    try { pkg = await readFirmware(descriptor.firmwareHash) } catch { pkg = null }
-    if (state !== 'booting') return
-    if (!pkg) return fail('missing-firmware')
-    if (path === 'worklet') startWorklet()
-    else startWorker()
-  })()
+  // -> packed restore records, or a failure reason. Never boots clean over a referenced asset.
+  async function loadFlash() {
+    if (!descriptor.flashAssetId) return { sectors: null }
+    // readFlash throws Error('flash-…') to name its reason (missing file, no project folder)
+    let bytes = null
+    try { bytes = await readFlash(descriptor) } catch (err) {
+      return { reason: /^flash-[\w-]+$/.test(err?.message) ? err.message : 'flash-missing' }
+    }
+    if (!bytes) return { reason: 'flash-missing' }
+    const got = decodeFlashAsset(bytes, { firmwareHash: descriptor.firmwareHash })
+    if (!got.ok) return { reason: got.reason === 'wrong-firmware' ? 'flash-wrong-firmware' : 'flash-corrupt' }
+    return { sectors: packRestore(got.records) }
+  }
+
+  // records: imported flash (importFlash) instead of the descriptor's asset
+  async function boot(records) {
+    const gen = ++bootGen
+    let fw, restore
+    try {
+      ;[fw, restore] = await Promise.all([
+        Promise.resolve().then(() => readFirmware(descriptor.firmwareHash)).catch(() => null),
+        records ? { sectors: packRestore(records) } : loadFlash(),
+      ])
+    } catch { fw = null; restore = { reason: 'flash-corrupt' } }
+    if (state !== 'booting' || gen !== bootGen) return
+    if (!fw) return fail('missing-firmware')
+    if (restore.reason) return fail(restore.reason)
+    pkg = fw
+    sectors = restore.sectors
+    // the worklet keeps no flash: a device with saves always runs on the Worker
+    if (path === 'worklet' && !sectors?.length) startWorklet()
+    else { path = 'worker'; startWorker() }
+  }
+  boot()
 
   const ch = () => descriptor.deviceChannel & 15
   // src tags the sender ('live' | 'timeline'): the host drops a note-off only while the other
@@ -190,8 +249,42 @@ export function createFm1Session({
     get path() { return path },
     get output() { return output },
     get leadSec() { return leadSec() },
-    ready,
+    get ready() { return ready },
     status,
+    // Every flash sector that differs from the booted package (always the full set, for Export),
+    // once the device is quiet. changed is false while the revision has not moved since the last
+    // markFlashSaved (or boot).
+    // -> { ok:true, changed, records, revision } | { ok:false, reason:'busy-timeout'|'not-ready'|'unsupported' }
+    snapshotFlash({ timeoutMs = SNAPSHOT_MS } = {}) {
+      if (path === 'worklet') return Promise.resolve({ ok: false, reason: 'unsupported' })
+      if (state !== 'ready') return Promise.resolve({ ok: false, reason: 'not-ready' })
+      const request = ++snapSeq
+      return new Promise((res) => {
+        const t = setTimeout(() => { snaps.delete(request); res({ ok: false, reason: 'busy-timeout' }) }, timeoutMs)
+        snaps.set(request, (r) => { clearTimeout(t); res(r) })
+        post({ type: 'snapshot', request, since: flash.savedRevision })
+      })
+    },
+    markFlashSaved(revision) {
+      flash.savedRevision = revision
+      emit()
+    },
+    // Re-boots this device from imported records (Import device state). Resolves when ready.
+    importFlash(records) {
+      if (state === 'disposed') return Promise.reject(new Error('disposed'))
+      packRestore(records)          // throws on invalid records, before tearing anything down
+      teardownHost()
+      if (state !== 'failed') rejectReady(new Error('re-booting'))
+      newReady()
+      state = 'booting'
+      reason = undefined
+      bootTimeout = false
+      importing = true
+      flash.revision = flash.savedRevision = null
+      emit()
+      boot(records)
+      return ready
+    },
     noteOn(pitch, vel, time, src = 'live') {
       if (state !== 'ready') return
       held.add(pitch)
@@ -275,7 +368,7 @@ export function createFm1Session({
       teardownHost()
       gain.disconnect()
       state = 'disposed'
-      pkg = null
+      pkg = sectors = null
       held.clear()
       if (!wasFailed) rejectReady(new Error('disposed'))
       emit()

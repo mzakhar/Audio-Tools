@@ -5,7 +5,9 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { bootEmulator, bootToReady, createRunner, CHUNK } from '../src/renderer/js/fm1/emulator.js'
-import { noteOnBytes, createBlockWriter, createTake, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
+import { noteOnBytes, createBlockWriter, createTake, createFlashGate, FM1_RATE } from '../src/renderer/js/fm1/host-core.js'
+import { encodeFlashAsset, decodeFlashAsset, packRestore, FLASH_SIZE, SECTOR } from '../src/renderer/js/fm1/flash-asset.js'
+import { sha256Hex } from '../src/renderer/js/fm1/sha256.js'
 import { createFm1Session } from '../src/renderer/js/fm1/session.js'
 
 const fw = process.env.FM1_FW_DIR && join(process.env.FM1_FW_DIR, 'felucca-1.8.4.fwsc')
@@ -242,5 +244,50 @@ run('FM-1 real firmware: capture lands at audible time (latency 0)', () => {
     expect(Math.abs(got - heard)).toBeLessThanOrEqual(1)
     console.log(`fm1-real capture (worker): take onset ${got} vs audible ${heard}; ${L.length} frames incl. underrun gap`)
     s.dispose()
+  }, 120000)
+})
+
+// A real firmware save through the panel (Felucca: SAVE opens the slot list, OCT+ opens naming,
+// OCT+ again writes the patch), then snapshot -> asset -> a NEW machine restored from it.
+run('FM-1 real firmware: a panel save survives snapshot, asset and restore', () => {
+  it('saves a patch to flash and a fresh boot restores those sectors', async () => {
+    const wasm = readFileSync(resolve(process.cwd(), 'src/renderer/public/fm1/fm1_web.wasm'))
+    const module = await WebAssembly.compile(wasm)
+    const buf = readFileSync(fw)
+    const pkg = () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+    const firmwareHash = 'sha256:' + sha256Hex(new Uint8Array(pkg()))
+    const { x } = await bootEmulator({ module, pkg: pkg(), mhz: 120 })
+    const r = createRunner(x, { mhz: 120 })
+    expect(bootToReady(r, x)).toBe('up')
+    const secs = (s) => { for (let i = 0; i < Math.round(s * FM1_RATE / CHUNK); i++) r.render() }
+    secs(1)
+    const rev0 = r.flashRevision()
+    expect(r.changedSectors()).toEqual([])
+    const click = (id) => { r.key(id, true); secs(0.08); r.key(id, false); secs(1) }
+    click(9); click(1); click(1)                          // SAVE, OCT+ (name), OCT+ (save)
+    // the worker's rule: wait until not busy and quiet 250 ms
+    const gate = createFlashGate({ revision: rev0 })
+    let t = 0, answer = []
+    gate.request({ request: 1 }, 0)
+    while (!answer.length) { secs(0.01); t += 10; gate.observe(r.flashRevision(), t); answer = gate.take(r.flashBusy(), t) }
+    expect(answer[0].ok).toBe(true)
+    expect(gate.revision).not.toBe(rev0)
+    const records = r.changedSectors()
+    expect(records.length).toBeGreaterThan(0)
+    const asset = encodeFlashAsset({ firmwareHash, records })
+    console.log(`fm1-real flash: panel save -> ${records.length} sector(s) at ${records.map(s => '0x' + s.offset.toString(16)).join(', ')}, ` +
+      `revision ${rev0} -> ${gate.revision}, asset ${asset.length} B`)
+    const got = decodeFlashAsset(asset, { firmwareHash })
+    expect(got.ok).toBe(true)
+
+    const { x: y } = await bootEmulator({ module, pkg: pkg(), mhz: 120, sectors: packRestore(got.records) })
+    const live = (z) => new Uint8Array(z.memory.buffer, z.fm1_flash(), FLASH_SIZE)
+    for (const { offset } of records) expect(live(y).slice(offset, offset + SECTOR)).toEqual(live(x).slice(offset, offset + SECTOR))
+    const r2 = createRunner(y, { mhz: 120 })
+    expect(bootToReady(r2, y)).toBe('up')
+    expect(r2.changedSectors().map(s => s.offset)).toEqual(records.map(s => s.offset))
+    // a late restore (after the first render) is refused by the emulator
+    const p = y.fm1_alloc(4100)
+    expect(y.fm1_flash_restore(p, 4100)).not.toBe(0)
   }, 120000)
 })

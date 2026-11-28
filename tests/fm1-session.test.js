@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createFm1Sessions } from '../src/renderer/js/fm1/session-manager.js'
 import { allNotesOffBytes } from '../src/renderer/js/fm1/host-core.js'
+import { encodeFlashAsset, unpackRestore } from '../src/renderer/js/fm1/flash-asset.js'
 
 const flush = () => new Promise(r => setTimeout(r, 0))
 const R = 44100
@@ -35,7 +36,7 @@ function fakeWorker() {
   }
 }
 
-function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () => worklet, getWasmBytes, createWorker, createWorkletNode } = {}) {
+function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () => worklet, getWasmBytes, createWorker, createWorkletNode, readFlash } = {}) {
   const ctx = fakeCtx({ worklet })
   const workers = []
   const nodes = []
@@ -45,6 +46,7 @@ function setup({ firmware = new ArrayBuffer(32), worklet = false, prefer = () =>
     getModule: vi.fn(async () => module),
     getWasmBytes,
     readFirmware: vi.fn(async () => firmware),
+    readFlash,
     ...(prefer ? { preferWorklet: prefer } : {}),
     workletUrl: 'worklets/fm1-worklet.js',
     createWorker: createWorker || (() => { const w = fakeWorker(); workers.push(w); return w }),
@@ -526,5 +528,159 @@ describe('fm1 session capture started after play()', () => {
     expect(take.L[0]).toBeCloseTo(0.2)
     expect(take.L[2048 - 1500]).toBeCloseTo(0.3)
     expect(take.R[3072 - 1500]).toBeCloseTo(-0.4)
+  })
+})
+
+describe('fm1 session flash', () => {
+  const HASH = 'sha256:' + 'aa'.repeat(32)
+  const fdesc = { ...desc, firmwareHash: HASH }
+  const rec = { offset: 0xdc000, bytes: new Uint8Array(4096).fill(9) }
+  const asset = () => encodeFlashAsset({ firmwareHash: HASH, records: [rec] })
+
+  async function boot(readFlash, d = { ...fdesc, flashAssetId: 'a1' }) {
+    const env = setup({ readFlash })
+    const s = env.sessions.acquire('t1', d, out)
+    await flush()
+    return { ...env, s, w: env.workers[0] }
+  }
+
+  it('boots with the asset records restored', async () => {
+    const readFlash = vi.fn(async () => asset())
+    const { s, w } = await boot(readFlash)
+    expect(readFlash).toHaveBeenCalledWith(expect.objectContaining({ flashAssetId: 'a1' }))
+    expect(unpackRestore(w.sent[0].sectors)).toEqual([rec])
+    w.emit({ type: 'ready', flashRevision: 3 })
+    expect(s.status().flash).toEqual({ revision: 3, savedRevision: 3, dirty: false })
+  })
+
+  it('no flashAssetId: never reads flash, boots clean', async () => {
+    const readFlash = vi.fn()
+    const { w } = await boot(readFlash, fdesc)
+    expect(readFlash).not.toHaveBeenCalled()
+    expect(w.sent[0].sectors).toBeUndefined()
+  })
+
+  it('missing / corrupt / other-firmware assets fail the session instead of booting clean', async () => {
+    const bad = asset(); bad[50] ^= 1
+    const other = encodeFlashAsset({ firmwareHash: 'sha256:' + 'bb'.repeat(32), records: [rec] })
+    for (const [read, reason] of [
+      [async () => null, 'flash-missing'],
+      [async () => { throw new Error('gone') }, 'flash-missing'],
+      [async () => { throw new Error('flash-missing') }, 'flash-missing'],
+      [async () => { throw new Error('flash-no-folder') }, 'flash-no-folder'],
+      [async () => bad, 'flash-corrupt'],
+      [async () => other, 'flash-wrong-firmware'],
+    ]) {
+      const { s, workers } = await boot(read)
+      expect(s.status()).toMatchObject({ state: 'failed', reason })
+      expect(workers).toHaveLength(0)
+    }
+  })
+
+  it('a worker restore rejection surfaces as flash-corrupt', async () => {
+    const { s, w } = await boot(async () => asset())
+    w.emit({ type: 'error', reason: 'flash-corrupt' })
+    expect(s.status().reason).toBe('flash-corrupt')
+  })
+
+  it('status revision -> dirty; snapshot sends the saved revision; markFlashSaved clears dirty', async () => {
+    const { s, w } = await boot(async () => asset())
+    w.emit({ type: 'ready', flashRevision: 3 })
+    const seen = []
+    s.onStatus(st => seen.push(st.flash.dirty))
+    w.emit({ type: 'status', flashRevision: 5 })
+    expect(seen.at(-1)).toBe(true)
+    const p = s.snapshotFlash()
+    const req = w.sent.at(-1)
+    expect(req).toMatchObject({ type: 'snapshot', since: 3 })
+    const packed = new Uint8Array(4100)
+    packed.set(rec.bytes, 4)
+    new DataView(packed.buffer).setUint32(0, rec.offset, true)
+    w.emit({ type: 'snapshot', request: req.request, revision: 5, changed: true, sectors: packed })
+    expect(await p).toEqual({ ok: true, changed: true, records: [rec], revision: 5 })
+    s.markFlashSaved(5)
+    expect(s.status().flash).toEqual({ revision: 5, savedRevision: 5, dirty: false })
+    const p2 = s.snapshotFlash()
+    expect(w.sent.at(-1).since).toBe(5)
+    w.emit({ type: 'snapshot', request: w.sent.at(-1).request, revision: 5, changed: false, sectors: packed.slice() })
+    expect(await p2).toEqual({ ok: true, changed: false, records: [rec], revision: 5 })   // full set even unchanged
+  })
+
+  it('snapshot: busy-timeout from the worker or a silent worker, not-ready, unsupported on the worklet, settles on dispose', async () => {
+    const { s, w } = await boot(async () => asset())
+    expect(await s.snapshotFlash()).toEqual({ ok: false, reason: 'not-ready' })
+    w.emit({ type: 'ready', flashRevision: 0 })
+    const p = s.snapshotFlash()
+    w.emit({ type: 'snapshot', request: w.sent.at(-1).request, reason: 'busy-timeout' })
+    expect(await p).toEqual({ ok: false, reason: 'busy-timeout' })
+    expect(await s.snapshotFlash({ timeoutMs: 5 })).toEqual({ ok: false, reason: 'busy-timeout' })
+    const p3 = s.snapshotFlash()
+    s.dispose()
+    expect(await p3).toEqual({ ok: false, reason: 'not-ready' })
+
+    const env = setup({ worklet: true })
+    const ws = env.sessions.acquire('t2', fdesc, out)
+    await flush(); await flush()
+    expect(ws.path).toBe('worklet')
+    expect(await ws.snapshotFlash()).toEqual({ ok: false, reason: 'unsupported' })
+  })
+
+  it('a device with saved flash never boots on the worklet', async () => {
+    const env = setup({ worklet: true, readFlash: async () => asset() })
+    const s = env.sessions.acquire('t1', { ...fdesc, flashAssetId: 'a1' }, out)
+    await flush(); await flush()
+    expect(s.path).toBe('worker')
+    expect(env.nodes).toHaveLength(0)
+    expect(env.workers[0].sent[0].sectors).toBeDefined()
+  })
+
+  it('importFlash re-boots from the imported records, dirty until saved', async () => {
+    const { s, workers } = await boot(async () => null)            // flash-missing first
+    expect(s.status().reason).toBe('flash-missing')
+    const done = s.importFlash([rec])
+    expect(s.status().state).toBe('booting')
+    await flush()
+    expect(workers).toHaveLength(1)
+    expect(unpackRestore(workers[0].sent[0].sectors)).toEqual([rec])
+    workers[0].emit({ type: 'ready', flashRevision: 1 })
+    await done
+    expect(s.status()).toMatchObject({ state: 'ready', flash: { revision: 1, savedRevision: null, dirty: true } })
+    // a second import tears the running worker down
+    s.importFlash([])
+    expect(workers[0].terminated).toBe(true)
+    await flush()
+    expect(workers[1].sent[0].sectors).toBeUndefined()
+    expect(() => s.importFlash([{ offset: 1, bytes: new Uint8Array(4096) }])).toThrow()
+  })
+})
+
+describe('fm1 session manager flash', () => {
+  it('descriptor equality ignores flashAssetId: a save does not reboot', async () => {
+    const { sessions } = setup({ readFlash: async () => null })
+    const a = sessions.acquire('t1', desc, out)
+    await flush()
+    expect(sessions.acquire('t1', { ...desc, flashAssetId: 'new' }, out)).toBe(a)
+    expect(a.descriptor.flashAssetId).toBeUndefined()
+    const b = sessions.acquire('t2', { ...desc, flashAssetId: 'x' }, out)
+    expect(b.descriptor.flashAssetId).toBe('x')
+    await flush()
+    expect(sessions.use('t2', desc, out)).toBe(b)
+  })
+
+  it('snapshotAll: ready track devices only, audition excluded', async () => {
+    const { sessions, workers } = setup()
+    sessions.acquire('t1', desc, out)
+    sessions.acquire('audition:1', desc, out)
+    sessions.acquire('t3', desc, out)          // stays booting
+    await flush()
+    workers[0].emit({ type: 'ready', flashRevision: 2 })
+    workers[1].emit({ type: 'ready', flashRevision: 2 })
+    const p = sessions.snapshotAll()
+    expect(workers[1].sent.some(m => m.type === 'snapshot')).toBe(false)
+    const req = workers[0].sent.at(-1)
+    workers[0].emit({ type: 'snapshot', request: req.request, revision: 2, changed: false })
+    const got = await p
+    expect([...got.keys()]).toEqual(['t1'])
+    expect(got.get('t1')).toEqual({ ok: true, changed: false, records: [], revision: 2 })
   })
 })

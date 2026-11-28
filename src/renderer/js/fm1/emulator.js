@@ -4,6 +4,7 @@
 // of this logic (public/worklets/fm1-worklet.js).
 import { jitImports, newJitStats } from './jit.js'
 import { createEventQueue, createKeyHold, createBootWatch, createNoteCounts, FM1_RATE } from './host-core.js'
+import { changedSectors, FLASH_SIZE } from './flash-asset.js'
 
 export const CHUNK = 128
 const LCD_PIXELS = 240 * 240
@@ -11,8 +12,10 @@ const now = globalThis.performance?.now ? () => performance.now() : () => Date.n
 
 const fail = (reason, message) => Object.assign(new Error(message || reason), { reason })
 
-// -> exports of a booted machine. Throws an Error with .reason 'wasm-failed' | 'boot-failed'.
-export async function bootEmulator({ module, pkg, mhz, jit = true }) {
+// -> exports of a booted machine. Throws an Error with .reason 'wasm-failed' | 'boot-failed' |
+// 'flash-corrupt'. sectors: saved flash in the fm1_flash_restore format (flash-asset.js
+// packRestore), applied after boot and before the first render — the only time it is accepted.
+export async function bootEmulator({ module, pkg, mhz, jit = true, sectors = null }) {
   const stats = newJitStats()
   let x
   try {
@@ -25,6 +28,12 @@ export async function bootEmulator({ module, pkg, mhz, jit = true }) {
   const p = x.fm1_alloc(pkg.byteLength)
   new Uint8Array(x.memory.buffer, p, pkg.byteLength).set(new Uint8Array(pkg))
   if (x.fm1_boot_fwsc(p, pkg.byteLength, 0, 0, mhz) !== 0) throw fail('boot-failed', 'not an FM-1 update package')
+  const n = sectors?.byteLength ?? 0
+  if (n) {
+    const s = x.fm1_alloc(n)
+    new Uint8Array(x.memory.buffer, s, n).set(ArrayBuffer.isView(sectors) ? new Uint8Array(sectors.buffer, sectors.byteOffset, n) : new Uint8Array(sectors))
+    if (x.fm1_flash_restore(s, n) !== 0) throw fail('flash-corrupt', 'the saved flash does not fit this firmware')
+  }
   return { x, jitStats: stats }
 }
 
@@ -88,6 +97,14 @@ export function createRunner(x, { mhz, keyHoldFrames = 4410 } = {}) {
       const lcd = force || rev !== lcdRev ? new Uint16Array(x.memory.buffer, x.fm1_lcd(), LCD_PIXELS).slice() : null
       lcdRev = rev
       return { lcd, leds: new Float32Array(x.memory.buffer, x.fm1_leds(), 41).slice() }
+    },
+    // Flash: revision (++ per erase/program/restore), whether a SPI command is mid-flight, and
+    // the sectors that differ from the booted package image (copies).
+    flashRevision: () => x.fm1_flash_revision() >>> 0,
+    flashBusy: () => !!x.fm1_flash_busy(),
+    changedSectors() {
+      const buf = x.memory.buffer
+      return changedSectors(new Uint8Array(buf, x.fm1_flash_base(), FLASH_SIZE), new Uint8Array(buf, x.fm1_flash(), FLASH_SIZE))
     },
     // rtf over the frames rendered since the last call (null when none).
     stats() {

@@ -13,10 +13,12 @@
 // emulated time, flagged timedOut — the same rule as the Worker path.
 //
 // in:  boot { wasm (bytes) | module, package, mhz }   midi { bytes, frame?, src? }   panic { bytes }   drop { frame }
-//      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   capture { on, id }   dispose
+//      key { id, down }   enc { id, clicks }   pot { value }   lcd { on }   capture { on, id }   snapshot { request }   dispose
 // out: ready { timedOut }   error { reason, message }   lcd { lcd|null, leds }   status { rtf, starved, late, dropped }
 //      cap { id, L, R, frame, last? } — copies of the output from context frame `frame`, contiguous
 //      within a batch; `last` answers capture off (flushes what is left, possibly empty)
+//      snapshot { request, reason: 'unsupported' } — this host keeps no flash: no restore at boot, no
+//      snapshots. The session runs any device with saved flash on the Worker path instead.
 
 const FM1_RATE = 44100
 const CAP_FRAMES = 4096   // capture batch, a multiple of the 128-frame quantum
@@ -221,6 +223,7 @@ class Fm1Processor extends AudioWorkletProcessor {
 
   onMessage(m) {
     if (m.type === 'boot') { this.boot(m); return }
+    if (m.type === 'snapshot') { this.port.postMessage({ type: 'snapshot', request: m.request, reason: 'unsupported' }); return }
     if (m.type === 'dispose') { this.done = true; this.x = null; this.queue.clear(); return }
     if (m.type === 'lcd') { this.lcdOn = !!m.on; this.lcdForce = this.lcdOn; return }
     if (m.type === 'capture') {
